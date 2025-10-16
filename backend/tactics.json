@@ -1,0 +1,57 @@
+[
+  {
+    "id": "t001",
+    "rating": 1200,
+    "fen": "r1bqkb1r/pppp1ppp/2n2n2/4p2Q/2B1P3/8/PPPP1PPP/RNB1K1NR w KQkq - 4 4",
+    "side_to_move": "w",
+    "prompt": "White to move and win material.",
+    "solution_pv_san": "Qxf7+ Ke7 Qxe8+ Kxe8",
+    "themes": ["fork", "royal fork"]
+  },
+  {
+    "id": "t002",
+    "rating": 1400,
+    "fen": "r1bqk2r/ppp2ppp/2n5/2bpp3/4P3/2N2N2/PPPP1PPP/R1BQKB1R w KQkq - 0 6",
+    "side_to_move": "w",
+    "prompt": "Find the winning tactic for White.",
+    "solution_pv_san": "Nxe5 Nxe5 d4 Bxd4 Qxd4",
+    "themes": ["deflection", "discovered attack"]
+  },
+  {
+    "id": "t003",
+    "rating": 1600,
+    "fen": "r2qkb1r/ppp2ppp/2n1bn2/3pp3/4P3/2NP1N2/PPP2PPP/R1BQKB1R w KQkq - 0 6",
+    "side_to_move": "w",
+    "prompt": "White has a strong continuation.",
+    "solution_pv_san": "Nxe5 Nxe5 d4 Ng6 e5 Ng4 Bf4",
+    "themes": ["central break", "piece activity"]
+  },
+  {
+    "id": "t004",
+    "rating": 1800,
+    "fen": "2rq1rk1/pb2bppp/1p2pn2/n1ppP3/3P4/1BP2N1P/PP1N1PP1/R1BQR1K1 b - - 0 12",
+    "side_to_move": "b",
+    "prompt": "Black to move. Find the tactical blow.",
+    "solution_pv_san": "Nxd4 Nxd4 cxd4 Bxd4 Qxd4",
+    "themes": ["sacrifice", "clearance"]
+  },
+  {
+    "id": "t005",
+    "rating": 2000,
+    "fen": "r1b2rk1/2qnbppp/p2ppn2/1p4B1/3NPP2/2N2Q2/PPPB2PP/2KR3R w - - 0 12",
+    "side_to_move": "w",
+    "prompt": "White to move and gain a decisive advantage.",
+    "solution_pv_san": "Nxe6 fxe6 Qxh7+ Kf7 Qh5+ g6 Qh7+",
+    "themes": ["knight sacrifice", "exposed king", "perpetual check"]
+  },
+  {
+    "id": "t006",
+    "rating": 2200,
+    "fen": "r4rk1/1bqnbppp/p2p1n2/1p2p3/3NPP2/1BN1B3/PPPQ2PP/2KR3R w - - 0 14",
+    "side_to_move": "w",
+    "prompt": "Find the winning combination for White.",
+    "solution_pv_san": "Nxf7 Rxf7 Bxf7+ Kxf7 Qh6 Kg8 Qh7+ Kf8 Qh8+ Ke7 Qxg7+",
+    "themes": ["sacrifice", "mating attack", "exposed king"]
+  }
+]
+
