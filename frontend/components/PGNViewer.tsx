@@ -156,7 +156,7 @@ export default function PGNViewer({
           </span>
           {node.comment && (
             <span className="comment-text" title="Click move to edit">
-              {`{${node.comment}}`}
+              {node.comment}
             </span>
           )}
         </span>
@@ -203,20 +203,20 @@ export default function PGNViewer({
           }}
         >
           <div className="context-menu-item" onClick={handleDeleteMove}>
-            🗑️ Delete move from here
+            Delete move from here
           </div>
           {contextMenu.node.parent && contextMenu.node.parent.children.indexOf(contextMenu.node) > 0 && (
             <div className="context-menu-item" onClick={handleDeleteVariation}>
-              ❌ Delete variation
+              Delete variation
             </div>
           )}
           {contextMenu.node.parent && contextMenu.node.parent.children.indexOf(contextMenu.node) > 0 && (
             <div className="context-menu-item" onClick={handlePromoteVariation}>
-              ⬆️ Promote to main line
+              Promote to main line
             </div>
           )}
           <div className="context-menu-item" onClick={handleAddComment}>
-            💬 Add/Edit comment
+            Add/Edit comment
           </div>
         </div>
       )}

@@ -28,13 +28,52 @@ export interface PieceQuality {
 }
 
 export interface AnalyzePositionResponse {
+  fen: string;
   eval_cp: number;
-  win_prob: number;
+  pv: string[];
   phase: string;
-  candidate_moves: CandidateMove[];
-  threats: Threat[];
-  piece_quality: PieceQuality;
-  themes: string[];
+  
+  // Theme-based analysis (new structure)
+  white_analysis: {
+    chunk_1_immediate: {
+      description: string;
+      material_balance_cp: number;
+      positional_cp_significance: number;
+      theme_scores: { [key: string]: number };
+      tags: any[];
+    };
+    chunk_2_plan_delta: {
+      description: string;
+      plan_type: string;
+      plan_explanation: string;
+      material_delta_cp: number;
+      positional_delta_cp: number;
+      theme_changes: { [key: string]: number };
+    };
+  };
+  black_analysis: {
+    chunk_1_immediate: {
+      description: string;
+      material_balance_cp: number;
+      positional_cp_significance: number;
+      theme_scores: { [key: string]: number };
+      tags: any[];
+    };
+    chunk_2_plan_delta: {
+      description: string;
+      plan_type: string;
+      plan_explanation: string;
+      material_delta_cp: number;
+      positional_delta_cp: number;
+      theme_changes: { [key: string]: number };
+    };
+  };
+  
+  // Legacy fields (optional, for backward compatibility)
+  candidate_moves?: CandidateMove[];
+  threats?: Threat[];
+  piece_quality?: PieceQuality;
+  themes?: string[];
 }
 
 export interface PlayMoveResponse {
@@ -99,12 +138,17 @@ export interface Annotation {
 export type Mode = "PLAY" | "ANALYZE" | "TACTICS" | "DISCUSS";
 
 export interface ChatMessage {
-  role: "user" | "assistant" | "system" | "graph" | "button";
+  id?: string;
+  role: "user" | "assistant" | "system" | "graph" | "button" | "expandable_table";
   content: string;
   meta?: any;
   graphData?: any[];
   buttonAction?: string;
   buttonLabel?: string;
+  tableTitle?: string;
+  tableContent?: string;
+  timestamp?: Date;
+  fen?: string;  // Track which position this message was sent from
 }
 
 export interface AppState {

@@ -1,14 +1,16 @@
 import os
 import asyncio
 import math
-from typing import Optional, List, Dict, Any
+import uuid
+from typing import Optional, List, Dict, Any, Literal
 from contextlib import asynccontextmanager
 from io import StringIO
 import urllib.parse
 import urllib.request
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 import chess
 import chess.engine
@@ -16,14 +18,115 @@ import chess.pgn
 from dotenv import load_dotenv
 import json
 from openai import OpenAI
+from position_cache import PositionCache
+from position_generator import generate_fen_for_topic
+from opening_explorer import LichessExplorerClient
+from opening_builder import build_opening_lesson
+from opening_lesson_service import create_opening_lesson_payload
+from material_calculator import calculate_material_balance
+from fen_analyzer import analyze_fen
+from delta_analyzer import calculate_delta, compare_tags_for_move_analysis
+from game_fetcher import GameFetcher
+from profile_indexer import ProfileIndexingManager
+from supabase_client import SupabaseClient
+from personal_review_aggregator import PersonalReviewAggregator
+from personal_stats_manager import PersonalStatsManager
+from game_archive_manager import GameArchiveManager
+from llm_planner import LLMPlanner
+from llm_reporter import LLMReporter
+from confidence_engine import compute_move_confidence, compute_position_confidence, neutral_confidence
+from position_miner import PositionMiner
+from piece_profiler import build_piece_profiles, get_profile_summary
+from pv_profile_tracker import track_pv_profiles, detect_captures_in_pv, compute_pv_fens
+from piece_interactions import compute_coordination_score
+from square_control import compute_square_control, get_control_summary
+from nnue_bridge import get_nnue_dump
+from drill_generator import DrillGenerator
+from training_planner import TrainingPlanner
+from srs_scheduler import SRSScheduler
+from drill_card import CardDatabase
+from chat_tools import ALL_TOOLS, get_tools_for_context
+from tool_executor import ToolExecutor
+from enhanced_system_prompt import TOOL_AWARE_SYSTEM_PROMPT
+from request_interpreter import RequestInterpreter, execute_analysis_requests
+from prompt_builder import validate_interpreter_selections, build_interpreter_driven_prompt
+from orchestration_plan import OrchestrationPlan, Mode, ResponseStyle
+from engine_pool import EnginePool, get_engine_pool
+from response_annotator import parse_response_for_annotations, generate_candidate_move_annotations
+from engine_queue import StockfishQueue
+from board_vision import analyze_board_image, BoardVisionError
+from concurrent.futures import ProcessPoolExecutor
+from parallel_analyzer import compute_themes_and_tags, compute_theme_scores
 
 load_dotenv()
 
 # Initialize OpenAI client
-openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+openai_api_key = os.getenv("OPENAI_API_KEY")
+if not openai_api_key:
+    print("⚠️  WARNING: OPENAI_API_KEY not set in environment variables")
+    openai_client = None
+else:
+    try:
+        openai_client = OpenAI(api_key=openai_api_key)
+        print("✅ OpenAI client initialized")
+    except Exception as e:
+        print(f"⚠️  WARNING: Failed to initialize OpenAI client: {e}")
+        openai_client = None
 
 # Global engine instance
 engine: Optional[chess.engine.SimpleEngine] = None
+engine_queue: Optional[StockfishQueue] = None
+queue_processor_task: Optional[asyncio.Task] = None
+
+# Engine pool for parallel analysis (4 instances)
+engine_pool_instance: Optional[EnginePool] = None
+
+# Global position cache for dynamic generation
+position_cache = PositionCache(ttl_seconds=3600)
+
+# Global Lichess explorer client
+explorer_client: Optional[LichessExplorerClient] = None
+
+# Personal Review components
+game_fetcher: Optional[GameFetcher] = None
+review_aggregator: Optional[PersonalReviewAggregator] = None
+stats_manager: Optional[PersonalStatsManager] = None
+archive_manager: Optional[GameArchiveManager] = None
+llm_planner: Optional[LLMPlanner] = None
+llm_reporter: Optional[LLMReporter] = None
+
+# Training & Drill components
+position_miner: Optional[PositionMiner] = None
+drill_generator: Optional[DrillGenerator] = None
+training_planner: Optional[TrainingPlanner] = None
+srs_scheduler: Optional[SRSScheduler] = None
+card_databases: Dict[str, CardDatabase] = {}  # username -> CardDatabase
+
+# Tool executor for chat
+tool_executor: Optional[ToolExecutor] = None
+
+# Request interpreter for chat preprocessing
+request_interpreter: Optional[RequestInterpreter] = None
+
+# Profile indexing manager
+profile_indexer: Optional[ProfileIndexingManager] = None
+
+# Supabase client
+supabase_client: Optional[SupabaseClient] = None
+
+# Upload constraints
+MAX_PHOTO_SIZE_BYTES = 8 * 1024 * 1024
+ALLOWED_IMAGE_TYPES = {
+    "image/png",
+    "image/jpeg",
+    "image/jpg",
+    "image/heic",
+    "image/heif",
+    "image/webp",
+}
+
+# Pre-generated positions database (loaded at startup)
+PRE_GENERATED_POSITIONS: Dict[str, List[Dict]] = {}
 
 STOCKFISH_PATH = os.getenv("STOCKFISH_PATH", "./stockfish")
 
@@ -49,8 +152,19 @@ Keep it clear, rating-aware, and practical."""
 
 async def initialize_engine():
     """Initialize or reinitialize the Stockfish engine."""
-    global engine
+    global engine, engine_queue, queue_processor_task
     try:
+        # Stop and cancel existing queue processor if any
+        if queue_processor_task and not queue_processor_task.done():
+            if engine_queue:
+                engine_queue.stop()
+                await engine_queue.cancel_all_pending()
+            queue_processor_task.cancel()
+            try:
+                await queue_processor_task
+            except asyncio.CancelledError:
+                pass
+        
         # Close existing engine if any
         if engine:
             try:
@@ -61,29 +175,162 @@ async def initialize_engine():
         if os.path.exists(STOCKFISH_PATH):
             transport, engine = await chess.engine.popen_uci(STOCKFISH_PATH)
             await engine.configure({"Threads": 2, "Hash": 128})
-            print(f"✓ Stockfish engine initialized at {STOCKFISH_PATH}")
+            
+            # Initialize queue system
+            engine_queue = StockfishQueue(engine)
+            queue_processor_task = asyncio.create_task(engine_queue.start_processing())
+            
+            print(f"✓ Stockfish engine initialized with request queue at {STOCKFISH_PATH}")
             return True
         else:
             print(f"⚠ Stockfish not found at {STOCKFISH_PATH}")
             engine = None
+            engine_queue = None
+            queue_processor_task = None
             return False
     except Exception as e:
         print(f"⚠ Failed to initialize Stockfish: {e}")
         engine = None
+        engine_queue = None
+        queue_processor_task = None
         return False
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Initialize and cleanup the Stockfish engine."""
-    global engine
+    """Initialize and cleanup the Stockfish engine and explorer client."""
+    global engine, engine_queue, PRE_GENERATED_POSITIONS, explorer_client, game_fetcher, review_aggregator, stats_manager, archive_manager, llm_planner, llm_reporter, position_miner, drill_generator, training_planner, srs_scheduler, card_databases, tool_executor, profile_indexer, supabase_client, engine_pool_instance
+    
     await initialize_engine()
     
+    # Initialize engine pool for parallel analysis (4 instances)
+    if os.path.exists(STOCKFISH_PATH):
+        try:
+            engine_pool_instance = EnginePool(pool_size=4, stockfish_path=STOCKFISH_PATH)
+            await engine_pool_instance.initialize()
+        except Exception as e:
+            print(f"⚠️  Failed to initialize engine pool: {e}")
+            engine_pool_instance = None
+    else:
+        engine_pool_instance = None
+    
+    # Initialize Lichess explorer client
+    explorer_client = LichessExplorerClient()
+    
+    # Initialize Supabase
+    supabase_url = os.getenv("SUPABASE_URL")
+    supabase_service_role_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+    if supabase_url and supabase_service_role_key:
+        try:
+            supabase_client = SupabaseClient(supabase_url, supabase_service_role_key)
+        except Exception as exc:
+            print(f"⚠️  Failed to initialize Supabase client: {exc}")
+            supabase_client = None
+    else:
+        supabase_client = None
+
+    # Initialize Personal Review components
+    game_fetcher = GameFetcher()
+    profile_indexer = ProfileIndexingManager(
+        game_fetcher,
+        supabase_client=supabase_client,
+        review_fn=_review_game_internal,
+        engine_queue=engine_queue,
+        engine_instance=engine,
+    )
+    review_aggregator = PersonalReviewAggregator()
+    
+    # Initialize Personal Review System managers (if Supabase available)
+    if supabase_client:
+        stats_manager = PersonalStatsManager(supabase_client)
+        archive_manager = GameArchiveManager(supabase_client, stats_manager)
+        print("✅ Personal Review System managers initialized")
+    else:
+        stats_manager = None
+        archive_manager = None
+        print("⚠️ Personal Review System managers not initialized (Supabase unavailable)")
+    
+    llm_planner = LLMPlanner(openai_client)
+    llm_reporter = LLMReporter(openai_client)
+    print("✅ Personal Review system initialized")
+    
+    # Initialize Training & Drill components
+    position_miner = PositionMiner(openai_client)
+    drill_generator = DrillGenerator()
+    training_planner = TrainingPlanner(openai_client)
+    srs_scheduler = SRSScheduler()
+    print("✅ Training & Drill system initialized")
+    
+    # Initialize Tool Executor for chat
+    tool_executor = ToolExecutor(
+        engine_queue=engine_queue,
+        game_fetcher=game_fetcher,
+        position_miner=position_miner,
+        drill_generator=drill_generator,
+        training_planner=training_planner,
+        srs_scheduler=srs_scheduler,
+        supabase_client=supabase_client,
+        openai_client=openai_client
+    )
+    print("✅ Tool executor initialized for chat")
+    
+    # Initialize Request Interpreter for chat preprocessing
+    # Multi-pass mode is available but disabled by default for performance
+    # Set enable_multi_pass=True for complex requests requiring external data
+    global request_interpreter
+    if openai_client:
+        request_interpreter = RequestInterpreter(
+            openai_client, 
+            use_compact_prompt=True,
+            enable_multi_pass=False,  # Enable for multi-pass interpreter loop
+            game_fetcher=game_fetcher,
+            engine_queue=engine_queue
+        )
+        print("✅ Request interpreter initialized")
+    
+    # Load pre-generated positions if available
+    try:
+        positions_file = "backend/generated_positions.json"
+        if os.path.exists(positions_file):
+            with open(positions_file, "r") as f:
+                PRE_GENERATED_POSITIONS = json.load(f)
+            print(f"✅ Loaded {sum(len(v) for v in PRE_GENERATED_POSITIONS.values())} pre-generated positions")
+        else:
+            print("⚠️  No pre-generated positions file found (run generate_lesson_positions.py)")
+    except Exception as e:
+        print(f"⚠️  Could not load pre-generated positions: {e}")
+    
     yield
+    
+    # Shutdown: Stop queue processor and cancel pending requests
+    global queue_processor_task
+    if engine_queue:
+        engine_queue.stop()
+        await engine_queue.cancel_all_pending()
+    
+    if queue_processor_task and not queue_processor_task.done():
+        queue_processor_task.cancel()
+        try:
+            await queue_processor_task
+        except asyncio.CancelledError:
+            pass
     
     if engine:
         try:
             await engine.quit()
+        except:
+            pass
+    
+    # Shutdown engine pool
+    if engine_pool_instance:
+        try:
+            await engine_pool_instance.shutdown()
+        except:
+            pass
+    
+    if explorer_client:
+        try:
+            await explorer_client.close()
         except:
             pass
 
@@ -93,7 +340,7 @@ app = FastAPI(title="Chess GPT Backend", version="1.0.0", lifespan=lifespan)
 # CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=["http://localhost:3000", "http://localhost:3001"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -107,6 +354,29 @@ app.add_middleware(
 def win_prob_from_cp(cp: int) -> float:
     """Convert centipawn eval to win probability using logistic function."""
     return 1.0 / (1.0 + math.exp(-cp / 400.0))
+
+
+def format_eval(cp: int, mate_score: int = 10000) -> str:
+    """
+    Format evaluation for display.
+    Converts mate scores (9999, 10000, -9999, -10000) to mate notation (M8, M-5, etc.)
+    
+    Args:
+        cp: Centipawn evaluation
+        mate_score: Threshold for mate detection (default 10000)
+    
+    Returns:
+        Formatted string: either "M#" for mate or cp value
+    """
+    if abs(cp) >= mate_score - 100:  # Within 100cp of mate score
+        # Calculate moves to mate
+        if cp > 0:
+            moves_to_mate = (mate_score - cp) // 100 + 1
+            return f"M{moves_to_mate}"
+        else:
+            moves_to_mate = (mate_score + cp) // 100 + 1
+            return f"M-{moves_to_mate}"
+    return str(cp)
 
 
 def game_phase(board: chess.Board) -> str:
@@ -156,7 +426,8 @@ async def probe_candidates(board: chess.Board, multipv: int = 3, depth: int = 16
         return []
     
     try:
-        info = await engine.analyse(
+        info = await engine_queue.enqueue(
+            engine_queue.engine.analyse,
             board,
             chess.engine.Limit(depth=depth),
             multipv=multipv
@@ -200,6 +471,7 @@ async def probe_candidates(board: chess.Board, multipv: int = 3, depth: int = 16
                 "move": board.san(move),
                 "uci": move.uci(),
                 "eval_cp": eval_cp,
+                "pv": pv,  # Include raw PV moves for internal use
                 "pv_san": pv_san,
                 "depth": depth
             })
@@ -221,7 +493,8 @@ async def find_threats(board: chess.Board) -> List[Dict[str, Any]]:
     threats = []
     try:
         # Analyze opponent's candidates at shallow depth
-        info = await engine.analyse(
+        info = await engine_queue.enqueue(
+            engine_queue.engine.analyse,
             board,
             chess.engine.Limit(depth=10),
             multipv=3
@@ -328,6 +601,32 @@ class AnnotateRequest(BaseModel):
     highlights: List[Dict[str, str]] = Field(default_factory=list)
 
 
+class RaiseMoveConfidenceRequest(BaseModel):
+    fen: str
+    move_san: str
+    target: int = 80  # Legacy: kept for backward compatibility
+    mode: str = "line"  # "line", "end", or "depth"
+    target_line_conf: Optional[int] = None  # Target for line confidence (excludes last PV node)
+    target_end_conf: Optional[int] = None  # Target for end confidence (last PV node only)
+    max_depth: Optional[int] = None  # Maximum tree depth in ply
+    existing_nodes: Optional[List[Dict[str, Any]]] = None  # For incremental updates
+
+
+class RaisePositionConfidenceRequest(BaseModel):
+    fen: str
+    target: int = 80
+
+
+class OpeningLessonRequest(BaseModel):
+    user_id: str
+    chat_id: Optional[str] = None
+    opening_query: Optional[str] = None
+    fen: Optional[str] = None
+    eco: Optional[str] = None
+    orientation: Optional[Literal["white", "black"]] = "white"
+    variation_hint: Optional[str] = None
+
+
 # ============================================================================
 # Endpoints
 # ============================================================================
@@ -348,14 +647,272 @@ async def get_meta():
     }
 
 
+# ============================================================================
+# ENGINE POOL ENDPOINTS
+# ============================================================================
+
+@app.get("/engine_pool/status")
+async def engine_pool_status():
+    """Get the current status of the engine pool."""
+    if engine_pool_instance is None:
+        return {
+            "available": False,
+            "error": "Engine pool not initialized"
+        }
+    
+    return {
+        "available": True,
+        **engine_pool_instance.get_status()
+    }
+
+
+@app.get("/engine_pool/health")
+async def engine_pool_health():
+    """Perform a quick health check on the engine pool."""
+    if engine_pool_instance is None:
+        return {
+            "healthy": False,
+            "error": "Engine pool not initialized"
+        }
+    
+    return await engine_pool_instance.health_check()
+
+
+# Sample PGN for testing
+TEST_PGN = """[Event "Test Game"]
+[Site "Test"]
+[Date "2024.01.01"]
+[White "Player1"]
+[Black "Player2"]
+[Result "1-0"]
+
+1. e4 e5 2. Nf3 Nc6 3. Bb5 a6 4. Ba4 Nf6 5. O-O Be7 6. Re1 b5 7. Bb3 d6 
+8. c3 O-O 9. h3 Nb8 10. d4 Nbd7 11. Nbd2 Bb7 12. Bc2 Re8 13. Nf1 Bf8 
+14. Ng3 g6 15. Bg5 h6 16. Bd2 Bg7 17. a4 c5 18. d5 c4 19. b4 Nh5 20. Nxh5 gxh5 1-0"""
+
+
+@app.post("/engine_pool/test")
+async def engine_pool_test():
+    """
+    Run a full test game review using the engine pool.
+    Returns timing and success information.
+    """
+    import time as _time
+    
+    if engine_pool_instance is None:
+        return {
+            "success": False,
+            "error": "Engine pool not initialized"
+        }
+    
+    # Parse test PGN
+    pgn_io = chess.pgn.read_game(StringIO(TEST_PGN))
+    if not pgn_io:
+        return {
+            "success": False,
+            "error": "Failed to parse test PGN"
+        }
+    
+    # Collect positions
+    positions = []
+    board = chess.Board()
+    for move in pgn_io.mainline_moves():
+        positions.append((board.fen(), move))
+        board.push(move)
+    
+    n_positions = len(positions)
+    print(f"🧪 Engine pool test: Analyzing {n_positions} positions...")
+    
+    start_time = _time.time()
+    
+    try:
+        # Analyze in parallel
+        results = await engine_pool_instance.analyze_game_parallel(
+            positions,
+            depth=10,  # Lower depth for test speed
+            multipv=1
+        )
+        
+        elapsed = _time.time() - start_time
+        
+        # Count successes
+        successes = sum(1 for r in results if r.get("success", False))
+        
+        print(f"✅ Engine pool test complete: {successes}/{n_positions} in {elapsed:.2f}s")
+        
+        return {
+            "success": True,
+            "positions_analyzed": n_positions,
+            "successful_analyses": successes,
+            "failed_analyses": n_positions - successes,
+            "elapsed_seconds": round(elapsed, 2),
+            "positions_per_second": round(n_positions / elapsed, 2) if elapsed > 0 else 0,
+            "pool_size": engine_pool_instance.pool_size,
+            "message": f"Engine pool OK: {n_positions} moves analyzed in {elapsed:.1f}s ({engine_pool_instance.pool_size} engines)"
+        }
+        
+    except Exception as e:
+        import traceback
+        return {
+            "success": False,
+            "error": str(e),
+            "traceback": traceback.format_exc()
+        }
+
+
+@app.post("/vision/board")
+async def vision_board_endpoint(
+    photo: UploadFile = File(...),
+    preset: str = Form("digital"),
+    orientation_hint: str = Form("white"),
+):
+    """Transcribe a chessboard photo into a FEN using the configured vision model."""
+    if photo.content_type not in ALLOWED_IMAGE_TYPES:
+        raise HTTPException(status_code=415, detail="Unsupported image format")
+
+    payload = await photo.read()
+    if len(payload) > MAX_PHOTO_SIZE_BYTES:
+        raise HTTPException(status_code=413, detail="Image exceeds 8 MB limit")
+
+    try:
+        result = analyze_board_image(
+            image_bytes=payload,
+            preset=preset,
+            orientation_hint=orientation_hint,
+            openai_client=openai_client,
+        )
+    except BoardVisionError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+    return {
+        "fen": result.fen,
+        "confidence": result.confidence,
+        "orientation": result.orientation,
+        "uncertain_squares": [
+            {"square": sq.square, "piece": sq.piece, "confidence": sq.confidence}
+            for sq in result.uncertain_squares
+        ],
+        "notes": result.notes,
+    }
+
+
+def _extract_game_summary_from_pgn(pgn_text: str) -> Optional[Dict[str, Any]]:
+    """Parse PGN and return headers + final FEN for quick summaries."""
+    try:
+        game = chess.pgn.read_game(StringIO(pgn_text))
+        if not game:
+            return None
+
+        board = game.board()
+        move_count = 0
+        for move in game.mainline_moves():
+            board.push(move)
+            move_count += 1
+
+        return {
+            "headers": dict(game.headers),
+            "final_fen": board.fen(),
+            "move_count": move_count,
+        }
+    except Exception as exc:
+        print(f"⚠️  Failed to parse PGN summary: {exc}")
+        return None
+
+
+@app.get("/game_lookup")
+async def lookup_games(
+    username: str = Query(..., min_length=2, description="Username to lookup"),
+    opponent: Optional[str] = Query(None, description="Optional opponent substring filter"),
+    platform: str = Query("lichess", description="Source platform: lichess, chess.com, combined"),
+    max_games: int = Query(10, ge=1, le=50)
+):
+    """Lookup recent games for a player and return PGNs for the load panel."""
+    if not game_fetcher:
+        raise HTTPException(status_code=503, detail="Game fetcher not initialized")
+
+    try:
+        print(f"[game_lookup] Fetching games for {username} on {platform} (max {max_games})")
+        fetched_games = await game_fetcher.fetch_games(
+            username=username,
+            platform=platform,
+            max_games=max_games,
+            months_back=6
+        )
+        print(f"[game_lookup] Raw games fetched: {len(fetched_games)}")
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch games: {exc}") from exc
+
+    opponent_lower = opponent.lower() if opponent else None
+    results: List[Dict[str, Any]] = []
+
+    for raw_game in fetched_games:
+        pgn_text = raw_game.get("pgn")
+        if not pgn_text:
+            continue
+
+        summary = _extract_game_summary_from_pgn(pgn_text)
+        if not summary:
+            continue
+
+        headers = summary["headers"]
+        white_name = headers.get("White", "White")
+        black_name = headers.get("Black", "Black")
+        result = headers.get("Result", "*")
+        date_str = headers.get("UTCDate") or headers.get("Date") or raw_game.get("date") or ""
+
+        if opponent_lower:
+            if opponent_lower not in white_name.lower() and opponent_lower not in black_name.lower():
+                continue
+
+        results.append({
+            "id": raw_game.get("game_id") or headers.get("Site") or f"{white_name}_vs_{black_name}_{len(results)}",
+            "platform": raw_game.get("platform", platform),
+            "white": white_name,
+            "black": black_name,
+            "result": result,
+            "date": date_str,
+            "fen": summary["final_fen"],
+            "pgn": pgn_text,
+            "move_count": summary["move_count"],
+            "opponent_name": raw_game.get("opponent_name"),
+        })
+
+        if len(results) >= max_games:
+            break
+
+    return {"games": results}
+
+
+@app.get("/engine/metrics")
+async def engine_metrics():
+    """Return Stockfish engine queue metrics."""
+    if not engine_queue:
+        raise HTTPException(status_code=503, detail="Engine not initialized")
+    return engine_queue.get_metrics()
+
+
 @app.get("/analyze_position")
 async def analyze_position(
     fen: str = Query(..., description="FEN string of the position"),
     lines: int = Query(3, ge=1, le=5, description="Number of candidate lines"),
-    depth: int = Query(16, ge=10, le=20, description="Search depth")
+    depth: int = Query(18, ge=10, le=22, description="Search depth"),
+    light_mode: bool = Query(False, description="Skip piece profiling (Step 7) for faster analysis")
 ):
-    """Analyze a chess position and return evaluation, candidates, threats, and themes."""
+    """
+    Complete position analysis with theme-based evaluation.
+    
+    NEW PIPELINE:
+    1. Stockfish analysis of starting position
+    2. Material balance calculation
+    3. Theme + tag analysis of starting position
+    4. Build PV final position
+    5. Stockfish analysis of final position
+    6. Theme + tag analysis of final position
+    7. Delta computation and plan classification
+    """
+    print(f"🔍 [ANALYZE_POSITION] Request received for FEN: {fen[:50]}... (depth={depth}, lines={lines})")
     if not engine:
+        print("❌ [ANALYZE_POSITION] Engine not available")
         raise HTTPException(status_code=503, detail="Stockfish engine not available")
     
     try:
@@ -364,82 +921,328 @@ async def analyze_position(
         raise HTTPException(status_code=400, detail=f"Invalid FEN: {str(e)}")
     
     try:
-        # Get main evaluation
-        try:
-            main_info = await engine.analyse(board, chess.engine.Limit(depth=depth))
-            score = main_info.get("score")
-            
-            if score and score.is_mate():
-                mate_in = score.relative.mate()
-                eval_cp = 10000 if mate_in > 0 else -10000
-            elif score:
-                eval_cp = score.relative.score(mate_score=10000)
-            else:
-                eval_cp = 0
-        except chess.engine.EngineTerminatedError as e:
-            # Engine crashed - try to reinitialize and retry once
-            print(f"⚠ Engine crashed, reinitializing...")
-            if await initialize_engine():
-                print("✓ Engine reinitialized, retrying analysis...")
-                main_info = await engine.analyse(board, chess.engine.Limit(depth=depth))
-                score = main_info.get("score")
-                
-                if score and score.is_mate():
-                    mate_in = score.relative.mate()
-                    eval_cp = 10000 if mate_in > 0 else -10000
-                elif score:
-                    eval_cp = score.relative.score(mate_score=10000)
-                else:
-                    eval_cp = 0
-            else:
-                raise HTTPException(status_code=503, detail="Engine crashed and could not be reinitialized")
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Engine analysis failed: {str(e)}")
+        # STEP 1: Extract candidate moves (single Stockfish call for eval + candidates)
+        print("🎯 Step 1/6: Extracting candidate moves with Stockfish...")
+        candidates = await probe_candidates(board, multipv=lines, depth=depth)
+        print(f"   Found {len(candidates)} candidate lines")
         
-        # Calculate win probability
-        win_prob = win_prob_from_cp(eval_cp)
+        # Extract eval and PV from first candidate
+        if candidates:
+            eval_cp = candidates[0]["eval_cp"]
+            pv = candidates[0].get("pv", [])
+            print(f"   Eval: {eval_cp}cp, PV: {len(pv)} moves")
+        else:
+            eval_cp = 0
+            pv = []
+            print("   ⚠️ No candidates found, using default eval")
+        
+        # STEP 2: Calculate material balance and positional CP
+        print("🧮 Step 2/6: Calculating material balance...")
+        material_balance_start = calculate_material_balance(board)
+        positional_cp_start = eval_cp - material_balance_start
+        
+        print(f"   Material: {material_balance_start}cp, Positional: {positional_cp_start}cp")
+        
+        # STEP 3: Build final FEN from PV (do this early so we can parallelize theme calculations)
+        print("♟️  Step 3/6: Playing out principal variation...")
+        final_board = board.copy()
+        for move in pv:
+            final_board.push(move)
+        final_fen = final_board.fen()
+        
+        print(f"   PV final position: {final_fen[:50]}...")
+        
+        # STEP 4: Analyze both positions in parallel (themes + tags)
+        print("🏷️  Step 4/6: Analyzing positions (parallel theme/tag calculations)...")
+        loop = asyncio.get_event_loop()
+        
+        with ProcessPoolExecutor(max_workers=4) as pool:
+            # Start both theme/tag calculations in parallel
+            themes_start_future = loop.run_in_executor(pool, compute_themes_and_tags, fen)
+            themes_final_future = loop.run_in_executor(pool, compute_themes_and_tags, final_fen)
+            
+            # While themes calculate, do Stockfish analysis of final position
+        print("🔍 Step 5/6: Analyzing PV final position with Stockfish...")
+            final_info = await engine_queue.enqueue(
+                engine_queue.engine.analyse,
+                final_board,
+                chess.engine.Limit(depth=depth)
+            )
+        final_score = final_info.get("score")
+        
+        if final_score and final_score.is_mate():
+            final_mate = final_score.relative.mate()
+            eval_cp_final = 10000 if final_mate > 0 else -10000
+        elif final_score:
+            eval_cp_final = final_score.relative.score(mate_score=10000)
+        else:
+            eval_cp_final = 0
+        
+        material_balance_final = calculate_material_balance(final_board)
+        positional_cp_final = eval_cp_final - material_balance_final
+        
+        print(f"   Final eval: {eval_cp_final}cp, Material: {material_balance_final}cp")
+        
+            # Wait for theme/tag results
+            raw_start = await themes_start_future
+            raw_final = await themes_final_future
+
+            # Calculate theme scores
+            raw_start["theme_scores"] = compute_theme_scores(raw_start["themes"])
+            raw_final["theme_scores"] = compute_theme_scores(raw_final["themes"])
+
+            # Add engine-based threats (for both start and final positions)
+            print("🔍 Detecting threats...")
+            from threat_analyzer import detect_engine_threats
+            threats_start = await detect_engine_threats(fen, engine_queue, depth)
+            threats_final = await detect_engine_threats(final_fen, engine_queue, depth)
+
+            # Build analysis_start and analysis_final in the same format as analyze_fen
+            analysis_start = {
+                "fen": fen,
+                "themes": raw_start["themes"],
+                "tags": raw_start["tags"],
+                "material_balance_cp": raw_start["material_balance_cp"],
+                "theme_scores": raw_start["theme_scores"],
+                "engine_threats": threats_start
+            }
+            analysis_final = {
+                "fen": final_fen,
+                "themes": raw_final["themes"],
+                "tags": raw_final["tags"],
+                "material_balance_cp": raw_final["material_balance_cp"],
+                "theme_scores": raw_final["theme_scores"],
+                "engine_threats": threats_final
+            }
+        
+        print(f"   Detected {len(analysis_start['tags'])} tags in start, {len(analysis_final['tags'])} tags in final")
+        
+        # Calculate delta and classify plans
+        print("📊 Computing delta and classifying plans...")
+        delta = calculate_delta(
+            analysis_start["themes"],
+            analysis_final["themes"],
+            material_balance_start,
+            material_balance_final,
+            positional_cp_start,
+            positional_cp_final,
+            analysis_start["tags"],
+            analysis_final["tags"]
+        )
+        
+        print(f"   Plan types - White: {delta['white']['plan_type']}, Black: {delta['black']['plan_type']}")
         
         # Get game phase
         phase = game_phase(board)
         
-        # Get candidate moves
-        candidates = await probe_candidates(board, multipv=lines, depth=depth)
+        # STEP 7: Build piece profiles (NNUE + tags + interactions) - SKIP IN LIGHT MODE
+        piece_profiles_start = {}
+        piece_profiles_final = {}
+        piece_trajectories = {}
+        captures_in_pv = []
+        profile_summary = {}
+        square_control_start = {}
+        square_control_final = {}
+        piece_interactions_start = []
+        piece_interactions_final = []
+        pv_fen_profiles = []
         
-        # Find threats
-        threats = await find_threats(board)
+        if not light_mode:
+            print("🧩 Step 7: Building piece profiles...")
+        try:
+            # Get NNUE dumps for start and final positions
+            nnue_dump_start = get_nnue_dump(fen)
+            nnue_dump_final = get_nnue_dump(final_fen) if final_fen != fen else nnue_dump_start
+            
+            # Build piece profiles
+            piece_profiles_start = build_piece_profiles(
+                fen=fen,
+                nnue_dump=nnue_dump_start,
+                tags=analysis_start.get("tags", []),
+                themes=analysis_start.get("themes", {}),
+                phase=phase
+            )
+            
+            piece_profiles_final = build_piece_profiles(
+                fen=final_fen,
+                nnue_dump=nnue_dump_final,
+                tags=analysis_final.get("tags", []),
+                themes=analysis_final.get("themes", {}),
+                phase=phase
+            )
+            
+            # Compute square control
+            square_control_start = compute_square_control(board)
+            square_control_final = compute_square_control(final_board)
+            
+            # Get profile summary
+            profile_summary = get_profile_summary(piece_profiles_start)
+            
+            # Add coordination scores
+            profile_summary["white"]["coordination_score"] = round(
+                compute_coordination_score(board, chess.WHITE), 2
+            )
+            profile_summary["black"]["coordination_score"] = round(
+                compute_coordination_score(board, chess.BLACK), 2
+            )
+            
+            # Track piece trajectories across PV
+            if pv:
+                pv_fens = compute_pv_fens(fen, pv)
+                
+                # Build profiles for each PV position (sample up to 5 positions)
+                sample_indices = [0, len(pv_fens) - 1]  # Start and end
+                if len(pv_fens) > 2:
+                    mid = len(pv_fens) // 2
+                    sample_indices.insert(1, mid)
+                
+                profiles_by_fen = {fen: piece_profiles_start, final_fen: piece_profiles_final}
+                
+                for idx in sample_indices:
+                    if idx < len(pv_fens):
+                        sample_fen = pv_fens[idx]
+                        if sample_fen not in profiles_by_fen:
+                            sample_board = chess.Board(sample_fen)
+                            sample_dump = get_nnue_dump(sample_fen)
+                            from tag_detector import aggregate_all_tags
+                            sample_tags = await aggregate_all_tags(sample_board, engine_queue)
+                            profiles_by_fen[sample_fen] = build_piece_profiles(
+                                fen=sample_fen,
+                                nnue_dump=sample_dump,
+                                tags=sample_tags,
+                                phase=phase
+                            )
+                
+                # Track trajectories
+                piece_trajectories = track_pv_profiles(pv_fens, profiles_by_fen)
+                
+                # Detect captures
+                captures_in_pv = detect_captures_in_pv(fen, pv)
+                
+                # Build PV FEN profiles for response
+                for idx, pv_fen in enumerate(pv_fens):
+                    if pv_fen in profiles_by_fen:
+                        pv_fen_profiles.append({
+                            "fen_idx": idx,
+                            "fen": pv_fen,
+                            "profiles": profiles_by_fen[pv_fen]
+                        })
+            
+            print(f"   Built profiles for {len(piece_profiles_start)} pieces")
+            
+        except Exception as pe:
+            print(f"⚠️ Piece profiling error (non-fatal): {pe}")
+            import traceback
+            traceback.print_exc()
+        else:
+            print("⏭️  Step 7: Skipped (light mode enabled)")
         
-        # Piece quality analysis
-        piece_quality_map = {"W": {}, "B": {}}
-        for square in chess.SQUARES:
-            piece = board.piece_at(square)
-            if piece:
-                quality = piece_quality(board, square)
-                side = "W" if piece.color == chess.WHITE else "B"
-                square_name = chess.square_name(square)
-                piece_name = piece.symbol().upper() + square_name
-                piece_quality_map[side][piece_name] = quality
+        # Convert PV to SAN
+        pv_san = []
+        temp_board = board.copy()
+        for move in pv:
+            try:
+                pv_san.append(temp_board.san(move))
+                temp_board.push(move)
+            except:
+                break
         
-        # Extract themes
-        themes = extract_themes(board, eval_cp)
+        # Filter out null/zero themes and tags
+        def filter_themes(theme_scores: Dict) -> Dict:
+            """Remove themes with zero or near-zero scores."""
+            return {k: v for k, v in theme_scores.items() if k == "total" or abs(v) > 0.01}
         
-        return {
+        def filter_tags(tags: List[Dict]) -> List[Dict]:
+            """Return only non-empty tags."""
+            return [t for t in tags if t.get("tag_name")]
+        
+        # Build response with two clear chunks per side
+        white_mat_start = material_balance_start if board.turn == chess.WHITE else -material_balance_start
+        white_pos_start = positional_cp_start if board.turn == chess.WHITE else -positional_cp_start
+        black_mat_start = -material_balance_start if board.turn == chess.WHITE else material_balance_start
+        black_pos_start = -positional_cp_start if board.turn == chess.WHITE else positional_cp_start
+        
+        response = {
+            "fen": fen,
             "eval_cp": eval_cp,
-            "win_prob": round(win_prob, 2),
-            "phase": phase,
+            "pv": pv_san,
+            "best_move": candidates[0]["move"] if candidates else (pv_san[0] if pv_san else ""),
             "candidate_moves": candidates,
-            "threats": threats,
-            "piece_quality": piece_quality_map,
-            "themes": themes
+            "phase": phase,
+            "light_mode": light_mode,  # Flag to indicate if light mode was used
+            "threats": {
+                "white": threats_start["threats_by_side"]["white"] + threats_final["threats_by_side"]["white"],
+                "black": threats_start["threats_by_side"]["black"] + threats_final["threats_by_side"]["black"]
+            },
+            
+            "white_analysis": {
+                "chunk_1_immediate": {
+                    "description": "What the position IS right now for White",
+                    "material_balance_cp": white_mat_start,
+                    "positional_cp_significance": white_pos_start,
+                    "theme_scores": filter_themes(analysis_start["theme_scores"]["white"]),
+                    "tags": filter_tags([t for t in analysis_start["tags"] if t.get("side") == "white" or t.get("side") == "both"])
+                },
+                "chunk_2_plan_delta": {
+                    "description": "How it SHOULD unfold for White (after PV)",
+                    "plan_type": delta["white"]["plan_type"],
+                    "plan_explanation": delta["white"]["plan_explanation"],
+                    "material_delta_cp": delta["white"]["material_delta_cp"],
+                    "positional_delta_cp": delta["white"]["positional_delta_cp"],
+                    "theme_changes": {k: v for k, v in delta["white"]["theme_deltas"].items() if abs(v) > 0.5}
+                }
+            },
+            
+            "black_analysis": {
+                "chunk_1_immediate": {
+                    "description": "What the position IS right now for Black",
+                    "material_balance_cp": black_mat_start,
+                    "positional_cp_significance": black_pos_start,
+                    "theme_scores": filter_themes(analysis_start["theme_scores"]["black"]),
+                    "tags": filter_tags([t for t in analysis_start["tags"] if t.get("side") == "black" or t.get("side") == "both"])
+                },
+                "chunk_2_plan_delta": {
+                    "description": "How it SHOULD unfold for Black (after PV)",
+                    "plan_type": delta["black"]["plan_type"],
+                    "plan_explanation": delta["black"]["plan_explanation"],
+                    "material_delta_cp": delta["black"]["material_delta_cp"],
+                    "positional_delta_cp": delta["black"]["positional_delta_cp"],
+                    "theme_changes": {k: v for k, v in delta["black"]["theme_deltas"].items() if abs(v) > 0.5}
+                }
+            },
+            
+            # Piece profiling data
+            "piece_profiles_start": piece_profiles_start,
+            "piece_profiles_final": piece_profiles_final,
+            "piece_trajectories": piece_trajectories,
+            "captures_in_pv": captures_in_pv,
+            "square_control_start": get_control_summary(square_control_start) if square_control_start else {},
+            "square_control_final": get_control_summary(square_control_final) if square_control_final else {},
+            "profile_summary": profile_summary,
+            "pv_fen_profiles": pv_fen_profiles[:5],  # Limit to 5 positions
         }
+        # Attach position-level confidence (best move from side-to-move)
+        print("📊 [ANALYZE_POSITION] Computing position confidence...")
+        try:
+            position_conf = await compute_position_confidence(engine_queue, fen, target_conf=80)
+            response["position_confidence"] = position_conf
+            print("✅ [ANALYZE_POSITION] Position confidence computed successfully")
+        except Exception as ce:
+            print(f"⚠️ [ANALYZE_POSITION] Confidence computation failed (position): {ce}")
+            import traceback
+            traceback.print_exc()
+            response["position_confidence"] = neutral_confidence()
+        
+        print("✅ [ANALYZE_POSITION] Analysis complete, returning response")
+        return response
+        
     except HTTPException:
-        # Re-raise HTTP exceptions
         raise
     except Exception as e:
-        # Catch any other unexpected errors
+        print(f"❌ Analysis error: {str(e)}")
         import traceback
-        error_detail = f"Position analysis error: {str(e)}\n{traceback.format_exc()}"
-        print(error_detail)
-        raise HTTPException(status_code=500, detail=f"Analysis failed: {str(e)}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/play_move")
@@ -470,36 +1273,38 @@ async def play_move(request: PlayMoveRequest):
             "error": str(e)
         }
     
-    # Configure engine strength if requested
+    # Configure engine strength if requested (through queue)
     if request.engine_elo:
         try:
-            await engine.configure({
+            config_dict = {
                 "UCI_LimitStrength": True,
                 "UCI_Elo": request.engine_elo
-            })
+            }
+            await engine_queue.enqueue(engine.configure, config_dict)
         except:
             pass  # Some engines don't support strength limiting
     
-    # Get engine move
+    # Get engine move (through queue)
     try:
         time_limit = chess.engine.Limit(time=request.time_ms / 1000.0) if request.time_ms else chess.engine.Limit(depth=12)
-        result = await engine.play(board, time_limit)
+        result = await engine_queue.enqueue(engine.play, board, time_limit)
         engine_move = result.move
         engine_move_san = board.san(engine_move)
         board.push(engine_move)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Engine move failed: {str(e)}")
     
-    # Reset engine to full strength
+    # Reset engine to full strength (through queue)
     if request.engine_elo:
         try:
-            await engine.configure({"UCI_LimitStrength": False})
+            reset_dict = {"UCI_LimitStrength": False}
+            await engine_queue.enqueue(engine.configure, reset_dict)
         except:
             pass
     
     # Get eval after both moves
     try:
-        eval_info = await engine.analyse(board, chess.engine.Limit(depth=12))
+        eval_info = await engine_queue.enqueue(engine_queue.engine.analyse, board, chess.engine.Limit(depth=12))
         score = eval_info.get("score")
         if score and score.is_mate():
             mate_in = score.relative.mate()
@@ -532,6 +1337,65 @@ async def opening_lookup(fen: str = Query(..., description="FEN string")):
         "book_moves": [],
         "novelty_ply": None
     }
+
+
+@app.post("/confidence/raise_move")
+async def confidence_raise_move(req: RaiseMoveConfidenceRequest):
+    if not engine:
+        raise HTTPException(status_code=503, detail="Stockfish engine not available")
+    try:
+        # Determine target based on mode
+        target_conf = req.target
+        if req.mode == "line" and req.target_line_conf is not None:
+            target_conf = req.target_line_conf
+        elif req.mode == "end" and req.target_end_conf is not None:
+            target_conf = req.target_end_conf
+        
+        conf = await compute_move_confidence(
+            engine_queue, 
+            req.fen, 
+            req.move_san, 
+            target_conf=target_conf,
+            branch=True,
+            existing_nodes=req.existing_nodes,
+            mode=req.mode,
+            target_line_conf=req.target_line_conf,
+            target_end_conf=req.target_end_conf,
+            max_depth=req.max_depth
+        )
+        
+        # DEBUG: Log what's being returned from the endpoint
+        print("\n" + "="*80)
+        print("🌐 API ENDPOINT: /confidence/raise_move RETURNING")
+        print("="*80)
+        print(f"Confidence data keys: {list(conf.keys())}")
+        print(f"Nodes in response: {len(conf.get('nodes', []))}")
+        print(f"Overall confidence: {conf.get('overall_confidence')}")
+        print(f"Line confidence: {conf.get('line_confidence')}")
+        print(f"End confidence: {conf.get('end_confidence')}")
+        if conf.get('nodes'):
+            print(f"First node ID: {conf['nodes'][0].get('id')}")
+            print(f"First node confidence: {conf['nodes'][0].get('ConfidencePercent')}")
+        print("="*80 + "\n")
+        
+        return {"confidence": conf}
+    except Exception as e:
+        print(f"⚠️ confidence/raise_move error: {e}")
+        import traceback
+        print(traceback.format_exc())
+        return {"confidence": neutral_confidence()}
+
+
+@app.post("/confidence/raise_position")
+async def confidence_raise_position(req: RaisePositionConfidenceRequest):
+    if not engine:
+        raise HTTPException(status_code=503, detail="Stockfish engine not available")
+    try:
+        conf = await compute_position_confidence(engine_queue, req.fen, target_conf=req.target, branch=True)
+        return {"position_confidence": conf}
+    except Exception as e:
+        print(f"⚠️ confidence/raise_position error: {e}")
+        return {"position_confidence": neutral_confidence()}
 
 
 @app.get("/tactics_next")
@@ -589,12 +1453,15 @@ async def analyze_move(
     depth: int = Query(18, ge=10, le=20, description="Analysis depth")
 ):
     """
-    Analyze a specific move by comparing:
-    1. Position before the move (full analysis)
-    2. Position after the played move (full analysis)
-    3. Position after the best move (full analysis, if different)
+    Theme-based move analysis using 3-5 analyze_fen calls.
     
-    Returns detailed comparison of themes, strengths, weaknesses, threats.
+    CASE 1 (Best Move): 3 AF calls
+      - AF_starting, AF_best, AF_pv_best
+    
+    CASE 2 (Not Best): 5 AF calls  
+      - AF_starting, AF_best, AF_pv_best, AF_played, AF_pv_played
+    
+    Compares tags/themes to show what the move accomplished.
     """
     if not engine:
         raise HTTPException(status_code=503, detail="Stockfish engine not available")
@@ -605,17 +1472,29 @@ async def analyze_move(
         raise HTTPException(status_code=400, detail=f"Invalid FEN: {str(e)}")
     
     try:
-        # Get FULL analysis of position BEFORE the move
-        analysis_before = await analyze_position(fen, lines=3, depth=depth)
+        # Determine which side is making the move (side to move in the FEN)
+        side_to_move = "white" if board.turn == chess.WHITE else "black"
+        print(f"🔍 Analyzing move: {move_san} (by {side_to_move})")
         
-        # Get the best move
-        candidates = analysis_before.get("candidate_moves", [])
-        if not candidates:
-            raise HTTPException(status_code=500, detail="Could not find best move")
+        # Check if position is in opening theory (Lichess masters DB)
+        print("📚 Checking Lichess masters database for theory...")
+        theory_check_before = check_lichess_masters(fen)
+        is_theory_before = theory_check_before['isTheory']
+        opening_name = theory_check_before.get('opening', '')
+        print(f"   Theory before: {is_theory_before}, Opening: {opening_name or 'N/A'}")
         
-        best_move_san = candidates[0]["move"]
+        # Get best move from Stockfish
+        info = await engine_queue.enqueue(engine_queue.engine.analyse, board, chess.engine.Limit(depth=depth), multipv=2)
+        best_move_uci = str(info[0]["pv"][0])
+        best_move_san = board.san(chess.Move.from_uci(best_move_uci))
+        best_eval = info[0]["score"].relative.score(mate_score=10000)
+        best_pv = info[0]["pv"]
         
-        # Parse and play the user's move
+        # Get second best for gap calculation
+        second_best_eval = info[1]["score"].relative.score(mate_score=10000) if len(info) > 1 else best_eval
+        second_best_gap_cp = abs(best_eval - second_best_eval)
+        
+        # Parse played move
         try:
             played_move = board.parse_san(move_san)
             if played_move not in board.legal_moves:
@@ -623,117 +1502,301 @@ async def analyze_move(
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"Invalid move notation: {str(e)}")
         
-        # Analyze position AFTER played move (FULL analysis)
+        # Calculate CP loss
         board_after_played = board.copy()
         board_after_played.push(played_move)
-        fen_after_played = board_after_played.fen()
-        analysis_after_played = await analyze_position(fen_after_played, lines=3, depth=depth)
+        played_info = await engine_queue.enqueue(engine_queue.engine.analyse, board_after_played, chess.engine.Limit(depth=depth))
+        played_eval = -played_info["score"].relative.score(mate_score=10000)  # Flip for opponent
+        cp_loss = best_eval - played_eval
         
-        # Check if played move is the best move
+        # Check if still in theory after the move
+        fen_after = board_after_played.fen()
+        theory_check_after = check_lichess_masters(fen_after)
+        is_theory_after = theory_check_after['isTheory']
+        opening_name_after = theory_check_after.get('opening', opening_name)  # Use more specific name if available
+        print(f"   Theory after: {is_theory_after}, Opening: {opening_name_after or 'N/A'}")
+        
+        # Check if the specific move is a theory move (from position before)
+        played_move_uci = played_move.uci()
+        theory_moves_before = theory_check_before.get('theoryMoves', [])
+        is_theory_move = played_move_uci in theory_moves_before
+        print(f"   Theory moves available: {len(theory_moves_before)}, Played move {played_move_uci} is theory: {is_theory_move}")
+        
         is_best_move = (move_san == best_move_san)
         
-        # If not best move, analyze position after best move (FULL analysis)
-        analysis_after_best = None
-        if not is_best_move:
-            board_after_best = board.copy()
-            best_move_obj = board_after_best.parse_san(best_move_san)
-            board_after_best.push(best_move_obj)
-            fen_after_best = board_after_best.fen()
-            analysis_after_best = await analyze_position(fen_after_best, lines=3, depth=depth)
+        # Categorize moves with threat categories (before determining move category)
+        from threat_analyzer import categorize_threat
         
-        # Helper function to get active/inactive pieces
-        def get_piece_activity(piece_quality: dict, side: str) -> dict:
-            pieces = piece_quality.get(side, {})
-            active = [p for p, q in pieces.items() if q >= 0.6]
-            inactive = [p for p, q in pieces.items() if q <= 0.3]
-            return {"active": active, "inactive": inactive}
+        # Categorize played move
+        board_after_played = board.copy()
+        board_after_played.push(played_move)
+        played_move_category = categorize_threat(board, played_move, played_eval)
+        played_move_threat_type = played_move_category["type"]
+        played_move_threat_description = played_move_category["description"]
         
-        # Helper function to compare two full analyses
-        def compare_full_analyses(before: dict, after: dict) -> dict:
-            """Compare two full position analyses and track what changed."""
-            eval_before = before.get("eval_cp", 0)
-            eval_after = after.get("eval_cp", 0)
-            eval_change = eval_after - eval_before
+        # Categorize best move
+        best_move_obj = chess.Move.from_uci(best_move_uci)
+        best_move_category = categorize_threat(board, best_move_obj, best_eval)
+        best_move_threat_type = best_move_category["type"]
+        best_move_threat_description = best_move_category["description"]
+        
+        # Determine move category
+        # PRIORITY 1: Check if the move itself is a theory move (from Lichess API)
+        if is_theory_move:
+            move_category = "📚 THEORY"
+        elif cp_loss == 0 and second_best_gap_cp >= 50:
+            move_category = "⚡ CRITICAL BEST"
+        elif cp_loss == 0:
+            move_category = "✓ BEST"
+        elif cp_loss < 20:
+            move_category = "✓ Excellent"
+        elif cp_loss < 50:
+            move_category = "✓ Good"
+        elif cp_loss < 80:
+            move_category = "!? Inaccuracy"
+        elif cp_loss < 200:
+            move_category = "? Mistake"
+        else:
+            move_category = "?? Blunder"
+        
+        # Add threat category context to move category
+        if played_move_threat_type and played_move_threat_type != "attack":  # Don't add generic "attack"
+            move_category += f" ({played_move_threat_type})"
+        
+        # AF_starting - before move
+        print("📍 AF_starting: Analyzing position before move...")
+        af_starting = await analyze_fen(fen, engine_queue, depth)
+        
+        if is_best_move:
+            # CASE 1: Best move (3 analyze_fen calls)
+            print(f"✓ Move {move_san} IS the best move (CP loss: 0)")
             
-            # Themes comparison
-            themes_before = set(before.get("themes", []))
-            themes_after = set(after.get("themes", []))
-            themes_gained = list(themes_after - themes_before)
-            themes_lost = list(themes_before - themes_after)
-            themes_kept = list(themes_before & themes_after)
+            # AF_best - after best move
+            print("📍 AF_best: Analyzing position after best move...")
+            board_best = board.copy()
+            board_best.push(chess.Move.from_uci(best_move_uci))
+            fen_best = board_best.fen()
+            af_best = await analyze_fen(fen_best, engine_queue, depth)
             
-            # Threats comparison
-            threats_before = before.get("threats", [])
-            threats_after = after.get("threats", [])
+            # AF_pv_best - final position after PV
+            print("📍 AF_pv_best: Analyzing PV final position...")
+            board_pv_best = board.copy()
+            for move in best_pv:
+                board_pv_best.push(move)
+            fen_pv_best = board_pv_best.fen()
+            af_pv_best = await analyze_fen(fen_pv_best, engine_queue, depth)
             
-            # Piece activity (strengths/weaknesses)
-            activity_before = get_piece_activity(before.get("piece_quality", {}), "W")
-            activity_after = get_piece_activity(after.get("piece_quality", {}), "W")
+            # Get PV eval
+            pv_info = await engine_queue.enqueue(engine_queue.engine.analyse, board_pv_best, chess.engine.Limit(depth=depth))
+            pv_eval = pv_info["score"].relative.score(mate_score=10000)
             
-            pieces_activated = [p for p in activity_after["active"] if p not in activity_before["active"]]
-            pieces_deactivated = [p for p in activity_before["active"] if p not in activity_after["active"]]
+            print(f"✅ Move analysis complete (best move case, 3 AF calls)")
             
+            # Confidence (played == best)
+            try:
+                print(f"🔍 Computing confidence for best move: {best_move_san}")
+                conf_best = await compute_move_confidence(engine_queue, fen, best_move_san, target_conf=80, branch=False)
+                print(f"✅ Best move confidence: {len(conf_best.get('nodes', []))} nodes, line_conf={conf_best.get('line_confidence')}")
+                print(f"🔍 Computing confidence for played move: {move_san}")
+                conf_played = await compute_move_confidence(engine_queue, fen, move_san, target_conf=80, branch=False)
+                print(f"✅ Played move confidence: {len(conf_played.get('nodes', []))} nodes, line_conf={conf_played.get('line_confidence')}")
+            except Exception as ce:
+                import traceback
+                print(f"⚠️ Confidence computation failed (best case): {ce}")
+                print(traceback.format_exc())
+                conf_best = conf_played = neutral_confidence()
+
             return {
-                "evalBefore": eval_before,
-                "evalAfter": eval_after,
-                "evalChange": eval_change,
-                "evalChangeMagnitude": abs(eval_change),
-                "improvedPosition": eval_change > 0,
-                "worsenedPosition": eval_change < 0,
-                
-                # Themes changes
-                "themesBefore": list(themes_before),
-                "themesAfter": list(themes_after),
-                "themesGained": themes_gained,
-                "themesLost": themes_lost,
-                "themesKept": themes_kept,
-                
-                # Threats changes
-                "threatsCountBefore": len(threats_before),
-                "threatsCountAfter": len(threats_after),
-                "threatsBefore": threats_before,
-                "threatsAfter": threats_after,
-                "threatsGained": len(threats_after) - len(threats_before),
-                
-                # Piece activity (strengths/weaknesses)
-                "activePiecesBefore": activity_before["active"],
-                "activePiecesAfter": activity_after["active"],
-                "inactivePiecesBefore": activity_before["inactive"],
-                "inactivePiecesAfter": activity_after["inactive"],
-                "piecesActivated": pieces_activated,
-                "piecesDeactivated": pieces_deactivated,
-                
-                # Top moves
-                "topMovesBefore": [c["move"] for c in before.get("candidate_moves", [])[:3]],
-                "topMovesAfter": [c["move"] for c in after.get("candidate_moves", [])[:3]],
-                "bestMoveAfter": after.get("candidate_moves", [{}])[0].get("move"),
-                "bestEvalAfter": after.get("candidate_moves", [{}])[0].get("eval_cp")
+                "fen_before": fen,
+                "move_played": move_san,
+                "move_san": move_san,
+                "side_to_move": side_to_move,
+                "is_best_move": True,
+                "is_theory": is_theory_after,
+                "opening_name": opening_name_after,
+                "move_category": move_category,
+                "cp_loss": 0,
+                "second_best_gap_cp": second_best_gap_cp,
+                "eval_before_cp": best_eval,
+                "eval_after_cp": played_eval,
+                "eval_after_pv": pv_eval,
+                "best_move_san": best_move_san,
+                "played_move_threat_category": played_move_threat_type,
+                "played_move_threat_description": played_move_threat_description,
+                "best_move_threat_category": best_move_threat_type,
+                "best_move_threat_description": best_move_threat_description,
+                "case": "best_move",
+                "analysis": {
+                    "af_starting": af_starting,
+                    "af_best": af_best,
+                    "af_pv_best": af_pv_best
+                },
+                "confidence": {"played_move": conf_played, "best_move": conf_best}
             }
+            
+            # DEBUG: Log confidence data being returned
+            print("\n" + "="*80)
+            print("🌐 API ENDPOINT: /analyze_move RETURNING (best_move case)")
+            print("="*80)
+            print(f"Played move confidence nodes: {len(conf_played.get('nodes', []))}")
+            print(f"Best move confidence nodes: {len(conf_best.get('nodes', []))}")
+            if conf_played.get('nodes'):
+                print(f"Played move first node: {conf_played['nodes'][0].get('id')}")
+            if conf_best.get('nodes'):
+                print(f"Best move first node: {conf_best['nodes'][0].get('id')}")
+            print("="*80 + "\n")
         
-        # Generate report for played move
-        played_report = compare_full_analyses(analysis_before, analysis_after_played)
-        played_report["movePlayed"] = move_san
-        played_report["wasTheBestMove"] = is_best_move
-        played_report["analysisAfter"] = analysis_after_played  # Include full analysis
-        
-        # Generate report for best move (if different)
-        best_report = None
-        if not is_best_move and analysis_after_best:
-            best_report = compare_full_analyses(analysis_before, analysis_after_best)
-            best_report["movePlayed"] = best_move_san
-            best_report["wasTheBestMove"] = True
-            best_report["evalDifference"] = best_report["evalAfter"] - played_report["evalAfter"]
-            best_report["analysisAfter"] = analysis_after_best  # Include full analysis
+        else:
+            # CASE 2: Not best move (5 analyze_fen calls)
+            print(f"⚠️  Move {move_san} is NOT best (best: {best_move_san}, CP loss: {cp_loss})")
+            
+            # AF_best
+            print("📍 AF_best: Analyzing position after best move...")
+            board_best = board.copy()
+            board_best.push(chess.Move.from_uci(best_move_uci))
+            fen_best = board_best.fen()
+            af_best = await analyze_fen(fen_best, engine_queue, depth)
+            
+            # Get PV from best move
+            best_pv_info = await engine_queue.enqueue(engine_queue.engine.analyse, board_best, chess.engine.Limit(depth=depth))
+            best_pv_moves = best_pv_info["pv"]
+            
+            # AF_pv_best
+            print("📍 AF_pv_best: Analyzing PV final from best move...")
+            board_pv_best = board_best.copy()
+            for move in best_pv_moves:
+                board_pv_best.push(move)
+            fen_pv_best = board_pv_best.fen()
+            af_pv_best = await analyze_fen(fen_pv_best, engine_queue, depth)
+            
+            # AF_played
+            print("📍 AF_played: Analyzing position after played move...")
+            fen_played = board_after_played.fen()
+            af_played = await analyze_fen(fen_played, engine_queue, depth)
+            
+            # Get PV from played position
+            played_pv_info = await engine_queue.enqueue(engine_queue.engine.analyse, board_after_played, chess.engine.Limit(depth=depth))
+            played_pv_moves = played_pv_info["pv"]
+            
+            # AF_pv_played
+            print("📍 AF_pv_played: Analyzing PV final from played move...")
+            board_pv_played = board_after_played.copy()
+            for move in played_pv_moves:
+                board_pv_played.push(move)
+            fen_pv_played = board_pv_played.fen()
+            af_pv_played = await analyze_fen(fen_pv_played, engine_queue, depth)
+            
+            # Get PV evals
+            pv_best_eval = await engine_queue.enqueue(engine_queue.engine.analyse, board_pv_best, chess.engine.Limit(depth=depth))
+            pv_best_eval_cp = pv_best_eval["score"].relative.score(mate_score=10000)
+            pv_played_eval = await engine_queue.enqueue(engine_queue.engine.analyse, board_pv_played, chess.engine.Limit(depth=depth))
+            pv_played_eval_cp = pv_played_eval["score"].relative.score(mate_score=10000)
+            
+            # Calculate eval after best move (from White's perspective if White to move)
+            best_move_eval = -best_pv_info["score"].relative.score(mate_score=10000)
+            
+            # Calculate what the played move did and what the best move does uniquely
+            from delta_analyzer import compare_tags_for_move_analysis
+            played_move_description = compare_tags_for_move_analysis(af_starting, af_played, side_to_move)
+            best_move_description = compare_tags_for_move_analysis(af_starting, af_best, side_to_move)
+            
+            # Find tags unique to best move (not in played move)
+            played_tags = {t.get("tag_name") for t in af_played.get("tags", [])}
+            best_tags = {t.get("tag_name") for t in af_best.get("tags", [])}
+            starting_tags = {t.get("tag_name") for t in af_starting.get("tags", [])}
+            
+            # Find tags that best move created (appeared AFTER best move, not before)
+            # These describe what the best move accomplished
+            best_created_tags = [t for t in af_best.get("tags", []) 
+                                if t.get("tag_name") not in starting_tags]
+            
+            # Find what the played move neglected:
+            # 1. Tags available in starting position that best move used but played move didn't
+            best_used_available_tags = [t for t in af_best.get("tags", []) 
+                                        if t.get("tag_name") in starting_tags and t.get("tag_name") not in played_tags]
+            
+            # 2. Tags that best move created that played move didn't create
+            best_created_neglected = [t for t in best_created_tags 
+                                     if t.get("tag_name") not in played_tags]
+            
+            # Combine to get what the played move neglected
+            neglected_tags = best_used_available_tags + best_created_neglected[:2]  # Limit to avoid too much info
+            
+            # Get natural descriptions
+            from tool_executor import translate_tag_to_natural_english
+            # Use tags that appeared AFTER best move to describe what it accomplished
+            unique_best_tag_descriptions = [translate_tag_to_natural_english(t.get("tag_name", "")) 
+                                           for t in best_created_tags[:3]]
+            unique_best_tag_descriptions = [d for d in unique_best_tag_descriptions if d and d != "Unknown Pattern"]
+            
+            neglected_tag_descriptions = [translate_tag_to_natural_english(t.get("tag_name", "")) 
+                                         for t in neglected_tags[:2]]
+            neglected_tag_descriptions = [d for d in neglected_tag_descriptions if d and d != "Unknown Pattern"]
+            
+            print(f"✅ Move analysis complete (not best, 5 AF calls, CP loss: {cp_loss})")
     
+        # Confidence (played vs best)
+        try:
+            print(f"🔍 Computing confidence for best move: {best_move_san}")
+            conf_best = await compute_move_confidence(engine, fen, best_move_san, target_conf=80, branch=False)
+            print(f"✅ Best move confidence: {len(conf_best.get('nodes', []))} nodes, line_conf={conf_best.get('line_confidence')}")
+            print(f"🔍 Computing confidence for played move: {move_san}")
+            conf_played = await compute_move_confidence(engine, fen, move_san, target_conf=80, branch=False)
+            print(f"✅ Played move confidence: {len(conf_played.get('nodes', []))} nodes, line_conf={conf_played.get('line_confidence')}")
+        except Exception as ce:
+            import traceback
+            print(f"⚠️ Confidence computation failed (not-best case): {ce}")
+            print(traceback.format_exc())
+            conf_best = conf_played = neutral_confidence()
+
         return {
-            "fenBefore": fen,
-            "movePlayed": move_san,
-            "bestMove": best_move_san,
-            "isPlayedMoveBest": is_best_move,
-            "analysisBefore": analysis_before,
-            "playedMoveReport": played_report,
-            "bestMoveReport": best_report
+                "fen_before": fen,
+                "move_played": move_san,
+                "move_san": move_san,
+                "best_move": best_move_san,
+                "best_move_san": best_move_san,
+                "side_to_move": side_to_move,
+                "is_best_move": False,
+                "is_theory": is_theory_after,
+                "opening_name": opening_name_after,
+                "move_category": move_category,
+                "cp_loss": cp_loss,
+                "second_best_gap_cp": second_best_gap_cp,
+                "eval_before_cp": best_eval,
+                "eval_after_cp": played_eval,
+                "eval_after_best": best_move_eval,
+                "eval_pv_played": pv_played_eval_cp,
+                "eval_pv_best": pv_best_eval_cp,
+                "case": "not_best_move",
+                "analysis": {
+                    "af_starting": af_starting,
+                    "af_best": af_best,
+                    "af_pv_best": af_pv_best,
+                    "af_played": af_played,
+                    "af_pv_played": af_pv_played
+                },
+                "played_move_description": played_move_description,
+                "unique_best_tag_descriptions": unique_best_tag_descriptions,
+                "neglected_tag_descriptions": neglected_tag_descriptions,
+                "played_move_threat_category": played_move_threat_type,
+                "played_move_threat_description": played_move_threat_description,
+                "best_move_threat_category": best_move_threat_type,
+                "best_move_threat_description": best_move_threat_description,
+                "confidence": {"played_move": conf_played, "best_move": conf_best}
         }
+        
+        # DEBUG: Log confidence data being returned
+        print("\n" + "="*80)
+        print("🌐 API ENDPOINT: /analyze_move RETURNING (not_best_move case)")
+        print("="*80)
+        print(f"Played move confidence nodes: {len(conf_played.get('nodes', []))}")
+        print(f"Best move confidence nodes: {len(conf_best.get('nodes', []))}")
+        if conf_played.get('nodes'):
+            print(f"Played move first node: {conf_played['nodes'][0].get('id')}")
+        if conf_best.get('nodes'):
+            print(f"Best move first node: {conf_best['nodes'][0].get('id')}")
+        print("="*80 + "\n")
+        
     except Exception as e:
         import traceback
         error_detail = f"Move analysis error: {str(e)}\n{traceback.format_exc()}"
@@ -741,395 +1804,697 @@ async def analyze_move(
         raise HTTPException(status_code=500, detail=f"Analysis failed: {str(e)}")
 
 
-@app.post("/review_game")
-async def review_game(pgn_string: str = Query(..., description="PGN string of the game")):
+def calculate_phase(board: chess.Board, piece_count: int, queens: int, is_theory: bool, ply: int) -> str:
     """
-    Comprehensive game review: analyze every move with Stockfish.
-    Returns move-by-move analysis with quality, critical moves, missed wins, etc.
+    Determine game phase using criteria-based system.
+    
+    Opening → Middlegame: 3+ criteria
+    Middlegame → Endgame: 2-3 criteria
     """
-    if not engine:
-        raise HTTPException(status_code=503, detail="Stockfish engine not available")
+    # Opening→Middlegame criteria
+    o_to_m = 0
+    
+    # 1. Both castled
+    white_king = board.king(chess.WHITE)
+    black_king = board.king(chess.BLACK)
+    if white_king in [chess.G1, chess.C1] and black_king in [chess.G8, chess.C8]:
+        o_to_m += 1
+    
+    # 2. Development (simplified check: few minors on start squares)
+    start_squares = [chess.B1, chess.C1, chess.F1, chess.G1, chess.B8, chess.C8, chess.F8, chess.G8]
+    minors_home = sum(1 for sq in start_squares if board.piece_at(sq) and board.piece_at(sq).piece_type in [chess.KNIGHT, chess.BISHOP])
+    if minors_home <= 2:
+        o_to_m += 1
+    
+    # 3. Out of theory and ply > 16
+    if not is_theory and ply > 16:
+        o_to_m += 1
+    
+    # Middlegame→Endgame criteria
+    m_to_e = 0
+    
+    # 1. Queens off
+    if queens == 0:
+        m_to_e += 1
+    
+    # 2. Low material (≤12 pieces)
+    if piece_count <= 12:
+        m_to_e += 1
+    
+    # Determine phase
+    if o_to_m >= 3:
+        return "middlegame" if m_to_e < 2 else "endgame"
+    else:
+        return "opening"
+
+
+async def _review_game_internal(
+    pgn_string: str,
+    side_focus: str = "both",
+    include_timestamps: bool = True,
+    depth: int = 14,  # Lowered for speed - deep analysis done on-demand via raw data
+    engine_instance = None,
+    status_callback = None  # Optional callback for progress updates
+) -> Dict:
+    """
+    Internal function for game review logic (called by endpoint and aggregator).
+    Comprehensive game review with theme-based analysis per move.
+    Returns move-by-move analysis with full position themes, key points, and statistics.
+    """
+    # Use provided engine or fall back to global
+    eng = engine_instance if engine_instance is not None else engine
+    if not eng:
+        print(f"⚠️  _review_game_internal: Stockfish engine not available")
+        return {"error": "Stockfish engine not available", "ply_records": []}
     
     try:
-        # Clean PGN: remove comments {like this} and extra whitespace
+        # Clean PGN
         import re
-        cleaned_pgn = re.sub(r'\{[^}]*\}', '', pgn_string)  # Remove comments
-        cleaned_pgn = ' '.join(cleaned_pgn.split())  # Normalize whitespace
         
-        print(f"Original PGN: {pgn_string}")
-        print(f"Cleaned PGN: {cleaned_pgn}")
+        print(f"🎮 Starting game review (side_focus={side_focus}, depth={depth})")
+        print(f"   PGN length: {len(pgn_string)} chars")
+        
+        # PGN needs newlines preserved - don't join everything into one line!
+        # Just use the PGN as-is
+        cleaned_pgn = pgn_string
         
         # Parse PGN
         pgn_io = chess.pgn.read_game(StringIO(cleaned_pgn))
         if not pgn_io:
-            raise HTTPException(status_code=400, detail="Invalid PGN")
+            print(f"   ⚠️ Failed to parse PGN")
+            return {"error": "Invalid PGN", "ply_records": []}
         
+        # Extract timestamps if present
+        timestamps = {}
+        if include_timestamps:
+            node = pgn_io
+            ply = 0
+            while node.variations:
+                node = node.variation(0)
+                ply += 1
+                if node.comment:
+                    # Extract [%clk 0:05:23] or [%clk 0:05:23.5] format (handles decimals)
+                    clk_match = re.search(r'\[%clk (\d+):(\d+):(\d+(?:\.\d+)?)\]', node.comment)
+                    if clk_match:
+                        h, m, s_str = clk_match.groups()
+                        h, m = int(h), int(m)
+                        s = float(s_str)  # Handle decimal seconds
+                        timestamps[ply] = h * 3600 + m * 60 + s
+        
+        print(f"   Extracted {len(timestamps)} timestamps from PGN")
+        if len(timestamps) > 0:
+            first_few = list(timestamps.items())[:3]
+            print(f"   First timestamps: {first_few}")
+        else:
+            print(f"   ⚠️ WARNING: No timestamps extracted (time management will be 0)")
+        
+        # Initialize game state
         board = chess.Board()
-        move_analyses = []
-        move_number = 1
-        last_theory_move = -1
+        ply_records = []
         last_phase = "opening"
-        last_eval = 0
+        phase_hysteresis_counter = 0
+        opening_name_final = ""
+        eco_final = ""
+        left_theory_ply = None
+        advantage_history = []
         
-        # Iterate through all moves
+        # Count moves first for debugging
+        move_count = sum(1 for _ in pgn_io.mainline_moves())
+        
+        # Reset to start (mainline_moves() consumes the iterator)
+        pgn_io = chess.pgn.read_game(StringIO(cleaned_pgn))
+        
+        # ====== PARALLEL ENGINE ANALYSIS (if pool available) ======
+        engine_analysis_cache = {}  # fen_before -> {info_before, info_after}
+        
+        # Debug: check pool availability
+        print(f"   🔍 Pool check: instance={engine_pool_instance is not None}, initialized={engine_pool_instance._initialized if engine_pool_instance else 'N/A'}")
+        
+        use_parallel = engine_pool_instance is not None and engine_pool_instance._initialized
+        
+        if use_parallel:
+            print(f"⚡ Analyzing {move_count} moves with {engine_pool_instance.pool_size} engines...")
+            
+            # Collect all positions
+            positions_for_pool = []
+            temp_board = chess.Board()
+            for move in pgn_io.mainline_moves():
+                positions_for_pool.append((temp_board.fen(), move))
+                temp_board.push(move)
+            
+            # Progress callback - unified "Analyzing moves n/N" format
+            async def parallel_progress(move_done: int, move_total: int, message: str = "Analyzing moves..."):
+            if status_callback:
+                    # Calculate progress: 10% to 95% (theory check is 0-5%, analysis is 5-95%)
+                    if "theory" in message.lower():
+                        # Theory check phase: 0% to 5%
+                        progress = 0.05 * (move_done / max(1, move_total))
+                    else:
+                        # Analysis phase: 5% to 95%
+                        progress = 0.05 + (0.90 * (move_done / max(1, move_total)))
+                    
+                    # Format message
+                    if move_done > 0 and move_total > 0:
+                        status_msg = f"{message} {move_done}/{move_total}"
+                    else:
+                        status_msg = message
+                    
+                    await status_callback("executing", status_msg, progress, replace=True)
+                    await asyncio.sleep(0)
+            
+            # Run parallel analysis - returns COMPLETE ply records
+            try:
+                pool_results = await engine_pool_instance.analyze_game_parallel(
+                    positions_for_pool,
+                    depth=depth,
+                    multipv=2,
+                    timestamps=timestamps,
+                    progress_callback=parallel_progress
+                )
+                
+                # Use complete ply records directly - just add phase detection
+                for result in pool_results:
+                    if result.get("success"):
+                        ply = result["ply"]
+                        fen_after = result["fen_after"]
+                        theory_check = result.get("theory_check", {})
+                        is_theory = theory_check.get("isTheory", False)
+                        opening_name = theory_check.get("opening", "")
+                        
+                        # Track opening name
+                        if is_theory and opening_name:
+                            if opening_name == opening_name_final or not opening_name_final:
+                                opening_name_final = opening_name
+                            eco = theory_check.get('eco', '')
+                            if eco:
+                                eco_final = eco
+                        
+                        if not is_theory and left_theory_ply is None and ply > 1:
+                            left_theory_ply = ply
+                        
+                        # Phase detection with hysteresis
+                        board_after = chess.Board(fen_after)
+                        piece_count = len(board_after.piece_map())
+                        queens = len([p for p in board_after.piece_map().values() if p.piece_type == chess.QUEEN])
+                        
+                        new_phase = calculate_phase(board_after, piece_count, queens, is_theory, ply)
+                        
+                        if new_phase != last_phase:
+                            phase_hysteresis_counter += 1
+                            if phase_hysteresis_counter >= 2:
+                                last_phase = new_phase
+                                phase_hysteresis_counter = 0
+                        else:
+                            phase_hysteresis_counter = 0
+                        
+                        if ply >= 24 and last_phase == "opening":
+                            last_phase = "middlegame"
+                        if ply >= 72 and last_phase == "middlegame":
+                            last_phase = "endgame"
+                        
+                        # Add phase to record
+                        result["phase"] = last_phase
+                        
+                        # Track advantage history
+                        played_eval = result["engine"]["played_eval_after_cp"]
+                        advantage_history.append(played_eval)
+                        
+                        ply_records.append(result)
+                
+                print(f"   ✅ Analysis complete: {len(ply_records)}/{move_count} moves")
+                
+            except Exception as e:
+                import traceback
+                print(f"   ⚠️ Parallel analysis failed, falling back to sequential: {e}")
+                traceback.print_exc()
+                use_parallel = False
+                ply_records = []
+        
+        # Sequential fallback - only if parallel failed or unavailable
+        if not use_parallel:
+            print(f"⏳ Analyzing {move_count} moves sequentially (depth={depth}, multipv=2)...")
+        
+        # Reset for sequential processing
+        pgn_io = chess.pgn.read_game(StringIO(cleaned_pgn))
+            ply_records = []
+            advantage_history = []
+            board = chess.Board()
+
+            def _score_to_white_cp(score_obj) -> int:
+                if not score_obj:
+                    return 0
+                try:
+                    pov = score_obj.pov(chess.WHITE)
+                    if pov.is_mate():
+                        m = pov.mate()
+                        return 10000 if (m is not None and m > 0) else -10000
+                    return int(pov.score(mate_score=10000) or 0)
+                except Exception:
+                    return 0
+
         for move in pgn_io.mainline_moves():
+            ply = len(ply_records) + 1
+            
+            if status_callback:
+                    progress = ply / move_count if move_count > 0 else 0
+                    await status_callback("executing", f"Analyzing move {ply}/{move_count}...", progress, replace=True)
+            
             fen_before = board.fen()
-            
-            # Convert move to SAN BEFORE pushing (need current board state)
+            side_moved = "white" if board.turn == chess.WHITE else "black"
             move_san = board.san(move)
+            move_uci = move.uci()
             
-            # Analyze position BEFORE the move
-            analysis_before = await analyze_with_depth(board, depth=18, multipv=3)
-            eval_before = analysis_before["eval_cp"]
-            
-            # Make the move
+                info_before = await engine_queue.enqueue(
+                    engine_queue.engine.analyse,
+                    board,
+                    chess.engine.Limit(depth=depth),
+                    multipv=2
+                )
+
+                best_move_uci = ""
+                best_move_san = ""
+                best_eval_cp = 0
+            second_best_gap_cp = 0
+
+                try:
+                    best_move_uci = str(info_before[0]["pv"][0]) if info_before and info_before[0].get("pv") else ""
+                    best_move_san = board.san(chess.Move.from_uci(best_move_uci)) if best_move_uci else ""
+                    best_eval_cp = _score_to_white_cp(info_before[0].get("score"))
+            if len(info_before) >= 2:
+                        second_best_gap_cp = abs(best_eval_cp - _score_to_white_cp(info_before[1].get("score")))
+                except Exception:
+                    pass
+
             board.push(move)
             fen_after = board.fen()
             
-            # Analyze position AFTER the move
-            analysis_after = await analyze_with_depth(board, depth=18, multipv=3)
-            eval_after = analysis_after["eval_cp"]
+                info_after = await engine_queue.enqueue(
+                    engine_queue.engine.analyse,
+                    board,
+                    chess.engine.Limit(depth=depth)
+                )
+                played_eval_cp = _score_to_white_cp(info_after.get("score"))
+
+                cp_loss = max(0, abs(best_eval_cp - played_eval_cp))
+            accuracy_pct = 100 / (1 + (cp_loss / 50) ** 0.7)
             
-            # Check Lichess masters database for theory FIRST
+                time_spent_s = None
+                if isinstance(timestamps, dict) and ply in timestamps and (ply - 1) in timestamps:
+                    try:
+                        time_spent_s = float(timestamps[ply - 1]) - float(timestamps[ply])
+                    except Exception:
+                        time_spent_s = None
+
+                # Opening DB check (best effort)
+                is_theory = False
+                opening_name = None
+                is_theory_move = False
+                try:
             theory_check = check_lichess_masters(fen_before)
-            is_theory = theory_check['isTheory']
-            opening_name = theory_check['opening']
-            
-            # Calculate move quality
-            eval_change = abs(eval_after - eval_before)
-            cp_loss = eval_change
-            
-            # Determine quality - THEORY moves override all other classifications
-            if is_theory:
-                quality = "theory"
-            elif cp_loss == 0:
-                quality = "best"
-            elif cp_loss < 30:
-                quality = "excellent"
-            elif cp_loss < 50:
-                quality = "good"
-            elif cp_loss < 80:
-                quality = "inaccuracy"
-            elif cp_loss < 200:
-                quality = "mistake"
-            else:
-                quality = "blunder"
-            
-            # Get best move and alternatives
-            candidates = analysis_before.get("candidate_moves", [])
-            best_move = candidates[0]["move"] if candidates else move_san
-            second_best = candidates[1]["move"] if len(candidates) > 1 else None
-            
-            # Check if the played move matches the best move
-            played_best_move = (move_san == best_move)
-            
-            # Critical move detection (gap > 50cp to 2nd best)
-            is_critical = False
-            gap_to_second = 0
-            if len(candidates) >= 2:
-                best_eval = candidates[0]["eval_cp"]
-                second_eval = candidates[1]["eval_cp"]
-                gap_to_second = abs(best_eval - second_eval)
-                # Only mark as critical if THIS move was played AND gap > 50cp
-                is_critical = played_best_move and gap_to_second > 50
-            
-            # Missed win detection - only if did NOT play the best move
-            is_missed_win = False
-            if not played_best_move and not is_theory and eval_before > 50 and gap_to_second > 50:
-                is_missed_win = True
-            
-            # Determine phase with sophisticated chess-specific rules
+                    is_theory = bool(theory_check.get("isTheory", False))
+                    opening_name = theory_check.get("opening") if is_theory else None
+                    is_theory_move = is_theory and ply <= 20
+                except Exception:
+                    pass
+
+                # Phase detection (best effort)
+                try:
             piece_count = len(board.piece_map())
             queens = len([p for p in board.piece_map().values() if p.piece_type == chess.QUEEN])
-            
-            # OPENING → MIDDLEGAME: Count criteria (need 3+ to be in middlegame)
-            opening_to_middle_criteria = 0
-            
-            # 1. Both kings have castled (or won't castle and king safety resolved)
-            white_king_moved = board.has_kingside_castling_rights(chess.WHITE) == False and board.has_queenside_castling_rights(chess.WHITE) == False
-            black_king_moved = board.has_kingside_castling_rights(chess.BLACK) == False and board.has_queenside_castling_rights(chess.BLACK) == False
-            
-            white_king_sq = board.king(chess.WHITE)
-            black_king_sq = board.king(chess.BLACK)
-            
-            # Check if castled (king on g1/c1 for white, g8/c8 for black) or clearly won't
-            white_castled = white_king_sq in [chess.G1, chess.C1] or (white_king_moved and move_number > 10)
-            black_castled = black_king_sq in [chess.G8, chess.C8] or (black_king_moved and move_number > 10)
-            
-            if white_castled and black_castled:
-                opening_to_middle_criteria += 1
-            
-            # 2. Development done: all minor pieces out, rooks connected
-            def development_complete():
-                # Count minor pieces (knights, bishops) on starting squares
-                starting_minors = 0
-                minor_starting_squares = [chess.B1, chess.C1, chess.F1, chess.G1,  # White
-                                         chess.B8, chess.C8, chess.F8, chess.G8]  # Black
-                for sq in minor_starting_squares:
-                    piece = board.piece_at(sq)
-                    if piece and piece.piece_type in [chess.KNIGHT, chess.BISHOP]:
-                        starting_minors += 1
-                
-                # Check if rooks are connected (no pieces between them)
-                def rooks_connected_for_color(color):
-                    rooks = list(board.pieces(chess.ROOK, color))
-                    if len(rooks) < 2:
-                        return False
-                    rank = 0 if color == chess.WHITE else 7
-                    rook_files = [chess.square_file(r) for r in rooks if chess.square_rank(r) == rank]
-                    if len(rook_files) < 2:
-                        return False
-                    min_file, max_file = min(rook_files), max(rook_files)
-                    for file in range(min_file + 1, max_file):
-                        if board.piece_at(chess.square(file, rank)) is not None:
-                            return False
-                    return True
-                
-                white_rooks_connected = rooks_connected_for_color(chess.WHITE)
-                black_rooks_connected = rooks_connected_for_color(chess.BLACK)
-                
-                return starting_minors <= 2 and (white_rooks_connected or black_rooks_connected)
-            
-            if development_complete():
-                opening_to_middle_criteria += 1
-            
-            # 3. Central pawn tension decided (d4/d5, e4/e5 played, exchanged, or blocked)
-            def central_tension_resolved():
-                # Check if central pawns have been played/exchanged
-                d4_pawn = board.piece_at(chess.D4)
-                d5_pawn = board.piece_at(chess.D5)
-                e4_pawn = board.piece_at(chess.E4)
-                e5_pawn = board.piece_at(chess.E5)
-                
-                # Count central pawn presence
-                central_pawns = sum([
-                    1 if d4_pawn and d4_pawn.piece_type == chess.PAWN else 0,
-                    1 if d5_pawn and d5_pawn.piece_type == chess.PAWN else 0,
-                    1 if e4_pawn and e4_pawn.piece_type == chess.PAWN else 0,
-                    1 if e5_pawn and e5_pawn.piece_type == chess.PAWN else 0
-                ])
-                
-                # Tension resolved if central pawns are fixed or exchanged
-                return central_pawns >= 1 or move_number > 8
-            
-            if central_tension_resolved():
-                opening_to_middle_criteria += 1
-            
-            # 4. Thematic pawn break played (structure is fixed)
-            # Detected by: pawn captures, pawn advances past 4th/5th rank
-            def pawn_break_played():
-                advanced_pawns = 0
-                for square in chess.SQUARES:
-                    piece = board.piece_at(square)
-                    if piece and piece.piece_type == chess.PAWN:
-                        rank = chess.square_rank(square)
-                        # White pawns on 5th+ rank, Black pawns on 4th- rank
-                        if (piece.color == chess.WHITE and rank >= 4) or \
-                           (piece.color == chess.BLACK and rank <= 3):
-                            advanced_pawns += 1
-                return advanced_pawns >= 2
-            
-            if pawn_break_played():
-                opening_to_middle_criteria += 1
-            
-            # 5. Out of theory (already tracked)
-            if not is_theory and move_number > 8:
-                opening_to_middle_criteria += 1
-            
-            # MIDDLEGAME → ENDGAME: Count criteria (need 2-3 to be in endgame)
-            middle_to_end_criteria = 0
-            
-            # 1. Queens off and material reduced
-            if queens == 0:
-                middle_to_end_criteria += 1
-                # Additional check: few pieces remain
-                if piece_count <= 14:
-                    middle_to_end_criteria += 1
-            
-            # 2. Kings can safely centralize
-            def kings_can_centralize():
-                if queens > 0:  # Not safe with queens on board
-                    return False
-                # Check if kings are moving toward center (d/e files)
-                white_king_file = chess.square_file(white_king_sq)
-                black_king_file = chess.square_file(black_king_sq)
-                # Kings on c-f files (approaching center)
-                return white_king_file in [2, 3, 4, 5] or black_king_file in [2, 3, 4, 5]
-            
-            if kings_can_centralize():
-                middle_to_end_criteria += 1
-            
-            # 3. Pawn structure/majorities are the main plan (few pieces, pawns matter)
-            if piece_count <= 12:
-                middle_to_end_criteria += 1
-            
-            # Determine phase based on criteria counts
-            if last_phase == "opening":
-                if opening_to_middle_criteria >= 3:
-                    phase = "middlegame"
-                else:
-                    phase = "opening"
-            elif last_phase == "middlegame":
-                if middle_to_end_criteria >= 2:
-                    phase = "endgame"
-                else:
-                    phase = "middlegame"
+            new_phase = calculate_phase(board, piece_count, queens, is_theory, ply)
+                    if isinstance(new_phase, str) and new_phase:
+                    last_phase = new_phase
+                except Exception:
+                    pass
+
+                # Category bucket
+            if is_theory_move:
+                category = "theory"
+            elif cp_loss == 0 and second_best_gap_cp >= 50:
+                category = "critical_best"
+            elif cp_loss < 20:
+                category = "excellent"
+            elif cp_loss < 50:
+                category = "good"
+            elif cp_loss < 80:
+                category = "inaccuracy"
+            elif cp_loss < 200:
+                category = "mistake"
             else:
-                # Already in endgame or starting position
-                if middle_to_end_criteria >= 2:
-                    phase = "endgame"
-                elif opening_to_middle_criteria >= 3:
-                    phase = "middlegame"
-                else:
-                    phase = "opening"
+                category = "blunder"
             
-            # Track theory end
-            left_theory = False
-            if is_theory:
-                last_theory_move = move_number
-            elif last_theory_move >= 0 and not is_theory:
-                left_theory = True  # First non-theory move
-            
-            # Track phase transitions
-            entered_middlegame = False
-            if last_phase == "opening" and phase == "middlegame":
-                entered_middlegame = True
-            last_phase = phase
-            
-            # Track advantage threshold crossings - only trigger HIGHEST threshold crossed
-            crossed_100 = False
-            crossed_200 = False
-            crossed_300 = False
-            
-            # Only mark if we actually crossed from below to above
-            if abs(last_eval) < 100 and abs(eval_after) >= 100:
-                # Determine which threshold was actually crossed
-                if abs(eval_after) >= 300:
-                    crossed_300 = True
-                elif abs(eval_after) >= 200:
-                    crossed_200 = True
-                else:
-                    crossed_100 = True
-            elif abs(last_eval) < 200 and abs(eval_after) >= 200:
-                # Already above 100, now crossing 200
-                if abs(eval_after) >= 300:
-                    crossed_300 = True
-                else:
-                    crossed_200 = True
-            elif abs(last_eval) < 300 and abs(eval_after) >= 300:
-                # Already above 200, now crossing 300
-                crossed_300 = True
-            
-            last_eval = eval_after
-            
-            # Advantage level
-            adv = getAdvantageLevel(eval_after)
-            
-            # Calculate accuracy for non-theory and non-best moves using exponential formula
-            accuracy = 100.0  # Default to 100% for theory and best moves
-            if not is_theory and quality != "best":
-                import math
-                
-                # Get best move eval (from candidates before the move)
-                best_eval = candidates[0]["eval_cp"] if candidates else eval_before
-                
-                # CPL = centipawn loss
-                CPL = cp_loss
-                
-                # E = best-move eval in pawns (clamp to ±24)
-                E = best_eval / 100.0  # Convert centipawns to pawns
-                E = max(-24, min(24, E))  # Clamp to ±24
-                
-                # Accuracy% = 100 * exp( - CPL / ( 89.6284023545 + 44.8142011772 * |E| ) )
-                denominator = 89.6284023545 + 44.8142011772 * abs(E)
-                
-                if CPL == 0:
-                    accuracy = 100.0
-                else:
-                    accuracy = 100.0 * math.exp(-CPL / denominator)
-                    # Clamp between 0 and 100
-                    accuracy = max(0, min(100, accuracy))
-            
-            move_analyses.append({
-                "moveNumber": move_number,
-                "move": move_san,
-                "fen": fen_after,
-                "fenBefore": fen_before,
-                "color": "w" if board.turn == chess.BLACK else "b",
-                "evalBefore": eval_before,
-                "evalAfter": eval_after,
-                "evalChange": eval_change,
-                "cpLoss": cp_loss,
-                "quality": quality,
-                "accuracy": round(accuracy, 1),  # NEW: accuracy percentage
-                "isCritical": is_critical,
-                "isMissedWin": is_missed_win,
-                "isTheoryMove": is_theory,
-                "openingName": opening_name,
-                "bestMove": best_move,
-                "secondBestMove": second_best,
-                "gapToSecondBest": gap_to_second,
-                "phase": phase,
-                "advantageLevel": adv["level"],
-                "advantageFor": adv["for"],
-                "leftTheory": left_theory,
-                "enteredMiddlegame": entered_middlegame,
-                "crossed100": crossed_100,
-                "crossed200": crossed_200,
-                "crossed300": crossed_300
-            })
-            
-            if board.turn == chess.BLACK:
-                move_number += 1
-        
-        # Calculate phase-based accuracy statistics
-        opening_moves = [m for m in move_analyses if m["phase"] == "opening"]
-        middlegame_moves = [m for m in move_analyses if m["phase"] == "middlegame"]
-        endgame_moves = [m for m in move_analyses if m["phase"] == "endgame"]
-        
-        def calc_avg_accuracy(moves_list, color=None):
-            """Calculate average accuracy for a list of moves, optionally filtered by color."""
-            if color:
-                moves_list = [m for m in moves_list if m["color"] == color]
-            if not moves_list:
-                return 100.0
-            accuracies = [m["accuracy"] for m in moves_list]
-            return round(sum(accuracies) / len(accuracies), 1)
-        
-        # Overall accuracy
-        white_moves = [m for m in move_analyses if m["color"] == "w"]
-        black_moves = [m for m in move_analyses if m["color"] == "b"]
-        
-        accuracy_stats = {
-            "overall": {
-                "white": calc_avg_accuracy(white_moves),
-                "black": calc_avg_accuracy(black_moves)
-            },
-            "opening": {
-                "white": calc_avg_accuracy(opening_moves, "w"),
-                "black": calc_avg_accuracy(opening_moves, "b")
-            },
-            "middlegame": {
-                "white": calc_avg_accuracy(middlegame_moves, "w"),
-                "black": calc_avg_accuracy(middlegame_moves, "b")
-            },
-            "endgame": {
-                "white": calc_avg_accuracy(endgame_moves, "w"),
-                "black": calc_avg_accuracy(endgame_moves, "b")
+            ply_record = {
+                "ply": ply,
+                "side_moved": side_moved,
+                "san": move_san,
+                "uci": move_uci,
+                "fen_before": fen_before,
+                "fen_after": fen_after,
+                "engine": {
+                    "eval_before_cp": best_eval_cp,
+                        "eval_before_str": format_eval(best_eval_cp),
+                    "best_move_uci": best_move_uci,
+                    "best_move_san": best_move_san,
+                    "played_eval_after_cp": played_eval_cp,
+                    "played_eval_after_str": format_eval(played_eval_cp),
+                        "mate_in": None,
+                        "second_best_gap_cp": second_best_gap_cp,
+                },
+                "cp_loss": cp_loss,
+                "accuracy_pct": accuracy_pct,
+                "category": category,
+                "time_spent_s": time_spent_s,
+                    "raw_before": {},
+                    "raw_after": {},
+                    "analyse": {},
+                "phase": last_phase,
+                "is_theory": is_theory_move,
+                    "opening_name": opening_name,
+                "key_point_labels": [],
+                    "notes": "",
             }
+            
+            ply_records.append(ply_record)
+            advantage_history.append(played_eval_cp)
+        
+            # Emit completion message
+        if status_callback:
+                await status_callback("executing", f"Analyzed {len(ply_records)} moves", 0.95, replace=True)
+        
+        print(f"✅ Analyzed {len(ply_records)} plies")
+        
+        # Detect key points and assign labels using enhanced detection
+        if status_callback:
+            await status_callback("executing", "Detecting key moments...", 0.96, replace=True)
+            await asyncio.sleep(0)  # Yield to event loop
+        print("🔍 Detecting key points (enhanced)...")
+        
+        # Use enhanced key moment detection for BOTH sides
+        from key_moment_selector import detect_all_key_moments
+        all_key_moments = detect_all_key_moments(ply_records, player_color=side_focus if side_focus != "both" else None)
+        
+        # Also update the legacy key_point_labels on each record for backwards compatibility
+        key_moments_by_ply = {km["ply"]: km for km in all_key_moments}
+        key_points = []
+        
+        for i, record in enumerate(ply_records):
+            ply = record["ply"]
+            
+            # Check if this ply has a key moment
+            km = key_moments_by_ply.get(ply)
+            if km:
+                record["key_point_labels"] = km.get("labels", [])
+            else:
+                record["key_point_labels"] = []
+            
+            # Apply side filtering for backwards compatibility
+            if side_focus == "white":
+                if record["side_moved"] == "black" and "blunder" not in record["key_point_labels"]:
+                    record["key_point_labels"] = []
+            elif side_focus == "black":
+                if record["side_moved"] == "white" and "blunder" not in record["key_point_labels"]:
+                    record["key_point_labels"] = []
+            
+            if record["key_point_labels"]:
+                key_points.append(record)
+            
+            # Progress update every 10 moves or at the end
+            if status_callback and (i % 10 == 0 or i == len(ply_records) - 1):
+                progress = 0.96 + (i / len(ply_records) * 0.02)  # 96% to 98%
+                await status_callback("executing", f"Scanning for key moments ({i+1}/{len(ply_records)})...", progress, replace=True)
+                await asyncio.sleep(0)  # Yield to event loop
+        
+        # Calculate aggregated statistics
+        if status_callback:
+            await status_callback("executing", "Calculating statistics...", 0.98, replace=True)
+            await asyncio.sleep(0)  # Yield to event loop
+        print("📊 Calculating statistics...")
+        def calculate_stats(records, side, total_moves=None):
+            """
+            Calculate statistics for one side with context-aware handling.
+            
+            Context-aware features:
+            - Phases with 0 moves get accuracy=None, not 0%
+            - Includes contextual notes for missing phases
+            """
+            side_records = [r for r in records if r["side_moved"] == side]
+            
+            if not side_records:
+                return {
+                    "overall_accuracy": None,
+                    "avg_cp_loss": None,
+                    "counts": {},
+                    "by_phase": {},
+                    "by_piece": {},
+                    "total_moves": 0,
+                    "note": f"No {side} moves in this game"
+                }
+            
+            overall_acc = sum(r["accuracy_pct"] for r in side_records) / len(side_records)
+            avg_cp = sum(r["cp_loss"] for r in side_records) / len(side_records)
+            
+            counts = {
+                "critical_best": len([r for r in side_records if r["category"] == "critical_best"]),
+                "excellent": len([r for r in side_records if r["category"] == "excellent"]),
+                "good": len([r for r in side_records if r["category"] == "good"]),
+                "inaccuracy": len([r for r in side_records if r["category"] == "inaccuracy"]),
+                "mistake": len([r for r in side_records if r["category"] == "mistake"]),
+                "blunder": len([r for r in side_records if r["category"] == "blunder"])
+            }
+            
+            # By phase - CONTEXT-AWARE: Don't report 0% for phases with no moves
+            by_phase = {}
+            for phase in ["opening", "middlegame", "endgame"]:
+                phase_records = [r for r in side_records if r["phase"] == phase]
+                if phase_records:
+                    by_phase[phase] = {
+                        "accuracy": sum(r["accuracy_pct"] for r in phase_records) / len(phase_records),
+                        "count": len(phase_records),
+                        "avg_cp_loss": sum(r["cp_loss"] for r in phase_records) / len(phase_records)
+                    }
+                else:
+                    # CONTEXT-AWARE: Use None instead of 0 for phases that didn't occur
+                    by_phase[phase] = {
+                        "accuracy": None,  # NOT 0! No moves = no accuracy to report
+                        "count": 0,
+                        "avg_cp_loss": None,
+                        "note": f"No {phase} moves played"
+                    }
+            
+            return {
+                "overall_accuracy": overall_acc,
+                "avg_cp_loss": avg_cp,
+                "counts": counts,
+                "by_phase": by_phase,
+                "by_piece": {},
+                "total_moves": len(side_records)
+            }
+        
+        white_stats = calculate_stats(ply_records, "white")
+        if status_callback:
+            await status_callback("executing", "Computing performance metrics...", 0.99, replace=True)
+            await asyncio.sleep(0)  # Yield to event loop
+        
+        black_stats = calculate_stats(ply_records, "black")
+        
+        # Phase boundaries
+        if status_callback:
+            await status_callback("executing", "Finalizing review...", 0.995, replace=True)
+            await asyncio.sleep(0)  # Yield to event loop
+        phase_transitions = []
+        for i in range(1, len(ply_records)):
+            if ply_records[i]["phase"] != ply_records[i-1]["phase"]:
+                phase_transitions.append({
+                    "ply": ply_records[i]["ply"],
+                    "from_phase": ply_records[i-1]["phase"],
+                    "to_phase": ply_records[i]["phase"]
+                })
+        
+        print(f"✅ Review complete: {len(key_points)} key points, {len(phase_transitions)} phase transitions")
+        
+        # Add general game info for training system
+        endgame_plies = [r for r in ply_records if r["phase"] == "endgame"]
+        has_endgame = len(endgame_plies) > 0
+        
+        # Classify endgame type
+        endgame_type = None
+        if has_endgame and endgame_plies:
+            last_endgame = endgame_plies[-1]
+            fen = last_endgame.get("fen_after", "")
+            if "Q" in fen or "q" in fen:
+                endgame_type = "queen_endgame"
+            elif "R" in fen or "r" in fen:
+                endgame_type = "rook_endgame"
+            elif "B" in fen or "b" in fen or "N" in fen or "n" in fen:
+                endgame_type = "minor_piece_endgame"
+            else:
+                endgame_type = "pawn_endgame"
+        
+        # Classify game character
+        evals = [r.get("engine", {}).get("played_eval_after_cp", 0) for r in ply_records]
+        eval_changes = [abs(evals[i] - evals[i-1]) for i in range(1, len(evals))] if len(evals) > 1 else []
+        avg_change = sum(eval_changes) / len(eval_changes) if eval_changes else 0
+        
+        if avg_change > 100:
+            game_character = "tactical_battle"
+        elif avg_change > 50:
+            game_character = "dynamic"
+        elif max(abs(e) for e in evals) < 100 if evals else False:
+            game_character = "balanced"
+        else:
+            game_character = "positional"
+        
+        game_metadata = {
+            "opening": opening_name_final,
+            "eco": eco_final,
+            "total_moves": len(ply_records) // 2,  # Full moves
+            "game_length_plies": len(ply_records),
+            "phases": {
+                "opening_plies": len([r for r in ply_records if r["phase"] == "opening"]),
+                "middlegame_plies": len([r for r in ply_records if r["phase"] == "middlegame"]),
+                "endgame_plies": len(endgame_plies)
+            },
+            "has_endgame": has_endgame,
+            "endgame_type": endgame_type,
+            "game_character": game_character,
+            "timestamps_available": len(timestamps) > 0
         }
         
-        # Detect game tags based on evaluation trajectory
-        game_tags = detect_game_tags(move_analyses)
+        # Mark all critical moves with tags and notes
+        for record in ply_records:
+            category = record["category"]
+            if category in ["inaccuracy", "mistake", "blunder"]:
+                # Add error note
+                symbol = "!?" if category == "inaccuracy" else "?" if category == "mistake" else "??"
+                record["error_note"] = f"In this position you played {record['san']}{symbol} (cp_loss: {record['cp_loss']:.0f})"
+                record["is_critical"] = True
+            elif category == "critical_best":
+                record["is_critical"] = True
+                record["critical_note"] = f"Critical decision: {record['san']} was the only good move"
         
         return {
-            "moves": move_analyses,
-            "accuracyStats": accuracy_stats,
-            "gameTags": game_tags
+            "ply_records": ply_records,
+            "opening": {
+                "name_final": opening_name_final,
+                "eco_final": eco_final,
+                "left_theory_ply": left_theory_ply
+            },
+            "phases": phase_transitions,
+            "side_focus": side_focus,
+            "stats": {
+                "white": white_stats,
+                "black": black_stats
+            },
+            "key_points": key_points,
+            "all_key_moments": all_key_moments,  # NEW: Enhanced key moments for both sides
+            "game_metadata": game_metadata
         }
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Review error: {str(e)}")
+        import traceback
+        error_detail = f"Review error: {str(e)}\n{traceback.format_exc()}"
+        print(error_detail)
+        return {"error": f"Review error: {str(e)}", "ply_records": []}
+
+
+async def _save_error_positions(
+    ply_records: List[Dict],
+    game_id: str,
+    user_id: str,
+    supabase_client,
+    focus_color: str = "white"
+) -> int:
+    """
+    Extract and save blunders/mistakes as training positions.
+    Deduplicates by FEN + side_to_move.
+    Returns count of positions saved.
+    """
+    if not supabase_client:
+        return 0
+    
+    positions_to_save = []
+    
+    for record in ply_records:
+        category = record.get("category", "")
+        cp_loss = record.get("cp_loss", 0)
+        side_moved = record.get("side_moved", "")
+        
+        # Only save blunders (200+) and mistakes (100+)
+        if category not in ["blunder", "mistake"] or cp_loss < 100:
+            continue
+        
+        # Determine error_side based on focus_color
+        error_side = "player" if side_moved == focus_color else "opponent"
+        
+        # Extract tags
+        raw_before = record.get("raw_before", {})
+        raw_after = record.get("raw_after", {})
+        tags_before = raw_before.get("tags", [])
+        tags_after_played = raw_after.get("tags", [])
+        
+        # Convert tags to string list
+        def extract_tag_names(tags):
+            names = []
+            for tag in tags:
+                if isinstance(tag, str):
+                    names.append(tag)
+                elif isinstance(tag, dict):
+                    name = tag.get("name", tag.get("tag", tag.get("tag_name", "")))
+                    if name:
+                        names.append(name)
+            return names
+        
+        tags_before_list = extract_tag_names(tags_before)
+        tags_after_played_list = extract_tag_names(tags_after_played)
+        
+        position_data = {
+            "fen": record.get("fen_before"),
+            "side_to_move": side_moved,
+            "from_game_id": game_id,  # Primary source game
+            "source_ply": record.get("ply"),
+            "move_san": record.get("san"),
+            "move_uci": record.get("uci"),
+            "best_move_san": record.get("engine", {}).get("best_move_san"),
+            "best_move_uci": record.get("engine", {}).get("best_move_uci"),
+            "tags": tags_before_list,
+            "tags_after_played": tags_after_played_list,
+            "tags_after_best": [],  # Computed lazily when needed
+            "eval_cp": record.get("engine", {}).get("eval_before_cp"),
+            "cp_loss": cp_loss,
+            "phase": record.get("phase"),
+            "error_side": error_side,
+            "is_critical": cp_loss >= 200,
+            "error_note": f"{category.capitalize()}: {record.get('san')} (cp_loss: {cp_loss})",
+            "source_game_ids": [game_id]  # Array for tracking multiple sources
+        }
+        positions_to_save.append(position_data)
+    
+    # Batch upsert with deduplication
+    if positions_to_save:
+        saved_count = supabase_client.batch_upsert_positions(user_id, positions_to_save, game_id)
+        return saved_count
+    
+    return 0
+
+
+@app.post("/review_game")
+async def review_game(
+    pgn_string: str = Query(..., description="PGN string of the game"),
+    side_focus: str = Query("both", pattern="^(white|black|both)$", description="Which side to focus analysis on"),
+    include_timestamps: bool = Query(True, description="Extract timestamps from PGN if available"),
+    depth: int = Query(18, ge=10, le=25, description="Stockfish analysis depth")
+):
+    """
+    Comprehensive game review with theme-based analysis per move.
+    Returns move-by-move analysis with full position themes, key points, and statistics.
+    """
+    global engine
+    result = await _review_game_internal(pgn_string, side_focus, include_timestamps, depth, engine)
+    
+    if "error" in result:
+        raise HTTPException(status_code=500, detail=result["error"])
+    
+    return result
 
 
 async def analyze_with_depth(board: chess.Board, depth: int = 18, multipv: int = 1):
@@ -1138,7 +2503,8 @@ async def analyze_with_depth(board: chess.Board, depth: int = 18, multipv: int =
         return {"eval_cp": 0, "candidate_moves": []}
     
     try:
-        info = await engine.analyse(
+        info = await engine_queue.enqueue(
+            engine_queue.engine.analyse,
             board,
             chess.engine.Limit(depth=depth),
             multipv=multipv
@@ -1170,22 +2536,23 @@ async def analyze_with_depth(board: chess.Board, depth: int = 18, multipv: int =
         return {"eval_cp": 0, "candidate_moves": []}
 
 
-def getAdvantageLevel(cp: int):
-    """Helper matching frontend logic."""
-    absCp = abs(cp)
-    if absCp < 50:
-        return {"level": "equal", "for": "equal"}
-    elif absCp < 100:
-        level = "slight"
-    elif absCp < 200:
-        level = "clear"
-    else:
-        level = "strong"
+def detect_game_tags(move_analyses: list) -> list:
+    """
+    Detect game characteristic tags based on evaluation trajectory.
+    Returns a list of detected tags with descriptions.
+    """
+    import math
     
-    advantageFor = "white" if cp > 0 else "black"
-    return {"level": level, "for": advantageFor}
-
-
+    tags = []
+    
+    if len(move_analyses) < 3:
+        return tags
+    
+    # Extract evaluation series
+    evals = [m["evalAfter"] for m in move_analyses]
+    move_numbers = [m["moveNumber"] for m in move_analyses]
+    total_moves = len(move_analyses)
+                
 def detect_game_tags(move_analyses: list) -> list:
     """
     Detect game characteristic tags based on evaluation trajectory.
@@ -1428,52 +2795,1542 @@ def detect_game_tags(move_analyses: list) -> list:
 
 
 def check_lichess_masters(fen: str) -> dict:
-    """Check if position exists in Lichess masters database."""
+    """Check if position exists in Lichess masters database.
+    Returns theory status, opening name, and list of theory moves (in UCI format)."""
     try:
         url = f"https://explorer.lichess.ovh/masters?fen={urllib.parse.quote(fen)}"
         with urllib.request.urlopen(url, timeout=3) as response:
             data = json.loads(response.read())
             # If there are games in the database with this position, it's theory
+            moves_list = data.get('moves', [])
             total_games = sum(move.get('white', 0) + move.get('draws', 0) + move.get('black', 0) 
-                            for move in data.get('moves', []))
+                            for move in moves_list)
+            # Extract move UCI strings from theory moves
+            theory_moves_uci = [move.get('uci', '') for move in moves_list if move.get('uci')]
             return {
                 'isTheory': total_games > 0,
                 'totalGames': total_games,
-                'opening': data.get('opening', {}).get('name', 'Unknown')
+                'opening': data.get('opening', {}).get('name', 'Unknown'),
+                'theoryMoves': theory_moves_uci  # List of theory moves in UCI format
             }
     except:
-        return {'isTheory': False, 'totalGames': 0, 'opening': None}
+        return {'isTheory': False, 'totalGames': 0, 'opening': None, 'theoryMoves': []}
 
 
 class LLMRequest(BaseModel):
     messages: List[Dict[str, str]]
     model: str = "gpt-4o-mini"
     temperature: float = 0.7
+    use_tools: bool = True  # Enable function calling
+    context: Optional[Dict[str, Any]] = None  # Board state, PGN, mode, etc.
+    max_tool_iterations: int = 5  # Prevent infinite loops
 
 
 @app.post("/llm_chat")
 async def llm_chat(request: LLMRequest):
     """
-    Proxy endpoint for OpenAI chat completions to avoid CORS issues.
+    Enhanced chat endpoint with OpenAI function calling support.
+    LLM can call tools to analyze positions, review games, generate training, query database, etc.
     """
+    if not openai_client:
+        raise HTTPException(
+            status_code=503,
+            detail="OpenAI client not initialized. Please check OPENAI_API_KEY environment variable."
+        )
+    
     try:
-        completion = openai_client.chat.completions.create(
-            model=request.model,
-            messages=request.messages,
-            temperature=request.temperature
+        print(f"\n💬 LLM CHAT REQUEST (use_tools={request.use_tools})")
+        
+        # Build context for tool selection
+        context = request.context or {}
+        context["authenticated"] = False  # TODO: Get from auth when integrated
+        
+        # Log context details
+        print(f"   📍 Context received:")
+        print(f"      FEN: {context.get('fen', 'none')}")
+        print(f"      Board state: {context.get('board_state', 'none')}")
+        print(f"      Mode: {context.get('mode', 'none')}")
+        print(f"      Has PGN: {context.get('has_pgn', False)}")
+        print(f"      PGN length: {len(context.get('pgn', ''))}")
+        print(f"      PGN preview: {context.get('pgn', '')[:100]}")
+        
+        # Log last user message
+        user_messages = [m for m in request.messages if m.get('role') == 'user']
+        last_user_message = ""
+        if user_messages:
+            last_user_message = user_messages[-1].get('content', '')
+            print(f"      Last user message: {last_user_message[:100]}")
+        
+        # ============================================================
+        # INTERPRETER: Analyze request and create orchestration plan
+        # ============================================================
+        orchestration_plan = None
+        frontend_commands = []
+        pre_computed_analysis = {}
+        status_messages = []  # Track what the system is doing
+        
+        if request_interpreter and last_user_message:
+            print(f"\n   🎯 Running request interpreter...")
+            try:
+                import time as _time
+                
+                # Status callback to collect status updates
+                def status_callback(phase: str, message: str, **kwargs):
+                    status_entry = {
+                        "phase": phase,
+                        "message": message,
+                        "timestamp": kwargs.get("timestamp", _time.time())
+                    }
+                    if kwargs.get("tool"):
+                        status_entry["tool"] = kwargs["tool"]
+                    if kwargs.get("progress") is not None:
+                        status_entry["progress"] = kwargs["progress"]
+                    status_messages.append(status_entry)
+                    print(f"         [{phase}] {message}")
+                
+                orchestration_plan = await request_interpreter.interpret(
+                    message=last_user_message,
+                    context=context,
+                    conversation_history=request.messages,
+                    status_callback=status_callback
+                )
+                print(f"      Mode: {orchestration_plan.mode.value} (confidence: {orchestration_plan.mode_confidence:.2f})")
+                print(f"      Intent: {orchestration_plan.user_intent_summary}")
+                print(f"      Tools planned: {[t.name for t in orchestration_plan.tool_sequence]}")
+                print(f"      Skip tools: {orchestration_plan.skip_tools}")
+                
+                # Extract frontend commands for response
+                frontend_commands = [cmd.to_dict() for cmd in orchestration_plan.frontend_commands]
+                
+                # EXTEND (not overwrite!) with status messages from plan
+                status_messages.extend([s.to_dict() for s in orchestration_plan.status_messages])
+                
+                # Log status messages (handle both old 'action'/'description' and new 'phase'/'message' formats)
+                if status_messages:
+                    print(f"      Status updates: ({len(status_messages)} messages)")
+                    try:
+                        for s in status_messages:
+                            phase = s.get('phase', s.get('action', 'unknown'))
+                            msg = s.get('message', s.get('description', ''))
+                            print(f"         [{phase}] {msg}")
+                    except Exception as log_err:
+                        print(f"      ⚠️ Error logging status messages: {log_err}")
+                
+                # Pre-execute analysis requests if any
+                if orchestration_plan.analysis_requests and engine_queue:
+                    print(f"      Pre-executing {len(orchestration_plan.analysis_requests)} analysis requests...")
+                    
+                    # Status callback to track progress
+                    def status_cb(action: str, description: str):
+                        status_messages.append({
+                            "phase": action,  # Use 'phase' for consistency
+                            "message": description,
+                            "timestamp": _time.time()
+                        })
+                        print(f"         [{action}] {description}")
+                    
+                    pre_computed_analysis = await execute_analysis_requests(
+                        orchestration_plan.analysis_requests,
+                        engine_queue,
+                        status_callback=status_cb
+                    )
+                    # Add to context for main LLM
+                    context["pre_computed_analysis"] = pre_computed_analysis
+                    
+                    # Add completion status
+                    status_messages.append({
+                        "action": "complete",
+                        "description": "Pre-analysis finished",
+                        "phase": "complete"
+                    })
+                
+                # Store extracted data in context
+                if orchestration_plan.extracted_data:
+                    for key, value in orchestration_plan.extracted_data.items():
+                        if value and key not in context:
+                            context[key] = value
+                
+            except Exception as e:
+                print(f"      ⚠️ Interpreter failed: {e}")
+                import traceback
+                traceback.print_exc()
+                orchestration_plan = None
+        
+        # Handle clarification requests - respond with question instead of processing
+        if orchestration_plan and orchestration_plan.needs_clarification:
+            print(f"   ❓ Interpreter needs clarification - responding with question")
+            clarification_response = orchestration_plan.clarification_question
+            
+            return {
+                "response": clarification_response,
+                "tool_calls": [],
+                "annotations": {},
+                "mode": "chat",
+                "status_messages": status_messages,
+                "frontend_commands": frontend_commands,
+                "detected_intent": orchestration_plan.user_intent_summary,
+                "tools_used": [],
+                "orchestration": {
+                    "mode": orchestration_plan.mode.value,
+                    "mode_confidence": orchestration_plan.mode_confidence,
+                    "intent": orchestration_plan.user_intent_summary,
+                    "needs_clarification": True
+                }
+            }
+        
+        # Get appropriate tools for this context
+        # Skip tools if interpreter says so
+        use_tools_for_call = request.use_tools
+        if orchestration_plan and orchestration_plan.skip_tools:
+            use_tools_for_call = False
+            print(f"   📋 Skipping tools (interpreter decision)")
+        
+        tools = get_tools_for_context(context) if use_tools_for_call else []
+        
+        if tools:
+            print(f"   📋 {len(tools)} tools available to LLM")
+        
+        # Prepare messages with enhanced system prompt if using tools
+        messages = request.messages.copy()
+        
+        # Log interpreter decisions for debugging
+        if orchestration_plan:
+            print(f"   📋 Interpreter decisions:")
+            print(f"      Include context: {list(orchestration_plan.include_context.keys())}")
+            print(f"      Relevant analyses: {orchestration_plan.relevant_analyses}")
+            if orchestration_plan.response_strategy:
+                print(f"      Response strategy: {orchestration_plan.response_strategy[:100]}...")
+            if orchestration_plan.exclude_from_response:
+                print(f"      Exclude: {orchestration_plan.exclude_from_response}")
+        
+        # Build interpreter-driven prompt (always use new system)
+        if orchestration_plan:
+            # Filter data based on interpreter's selections (no pre-executed results in non-streaming path)
+            filtered_context, filtered_analyses = validate_interpreter_selections(
+                orchestration_plan,
+                context,
+                {}  # No pre-executed results in this path
+            )
+            
+            # Build interpreter-driven prompt
+            system_prompt = build_interpreter_driven_prompt(
+                orchestration_plan,
+                filtered_context,
+                filtered_analyses,
+                TOOL_AWARE_SYSTEM_PROMPT
+            )
+            print(f"   📋 Using interpreter-driven prompt (filtered context: {len(filtered_context)} keys)")
+        else:
+            # Fallback if no orchestration plan (shouldn't happen, but safety)
+            system_prompt = TOOL_AWARE_SYSTEM_PROMPT
+        
+        if len(messages) > 0 and messages[0].get("role") == "system":
+            # Check if structured output is forced
+            force_structured = context.get('force_structured', False)
+            structured_override = ""
+            if force_structured:
+                structured_override = "\n\n**CRITICAL OVERRIDE: The user has explicitly requested STRUCTURED ANALYSIS. You MUST use section headers (### Key Themes:, ### Candidate Moves:, ### Critical Line:, ### Plan:) for this response, regardless of how the question is phrased. Provide a complete technical breakdown with all sections.**"
+            
+            # Context is already included in interpreter-driven prompt
+            messages[0] = {
+                "role": "system",
+                "content": system_prompt + structured_override
+            }
+        
+        # ============================================================
+        # DETAILED LOGGING: What's being sent to LLM
+        # ============================================================
+        print("\n" + "="*80)
+        print("📤 DETAILED LLM REQUEST LOG")
+        print("="*80)
+        print(f"Model: {request.model}")
+        print(f"Temperature: {request.temperature}")
+        print(f"Use tools: {request.use_tools}")
+        print(f"Max tool iterations: {request.max_tool_iterations}")
+        
+        # Log each message in detail
+        print(f"\n📝 MESSAGES ({len(messages)} total):")
+        total_message_chars = 0
+        for idx, msg in enumerate(messages):
+            role = msg.get("role", "unknown")
+            content = msg.get("content", "")
+            content_len = len(str(content))
+            total_message_chars += content_len
+            
+            print(f"\n  [{idx+1}] {role.upper()}:")
+            print(f"      Content length: {content_len:,} chars")
+            
+            # Show preview based on role
+            if role == "system":
+                # Show first 500 and last 200 chars
+                if content_len > 700:
+                    preview = content[:500] + "\n      ... [truncated] ...\n      " + content[-200:]
+                else:
+                    preview = content
+                print(f"      Preview:\n      {preview}")
+            elif role == "user":
+                preview = content[:300] + "..." if content_len > 300 else content
+                print(f"      Content: {preview}")
+            elif role == "assistant":
+                preview = content[:300] + "..." if content_len > 300 else content
+                print(f"      Content: {preview}")
+                if "tool_calls" in msg:
+                    tool_calls = msg.get("tool_calls", [])
+                    print(f"      Tool calls: {len(tool_calls)}")
+                    for tc in tool_calls:
+                        print(f"        - {tc.get('function', {}).get('name', 'unknown')}")
+            elif role == "tool":
+                print(f"      Tool: {msg.get('name', 'unknown')}")
+                preview = content[:200] + "..." if content_len > 200 else content
+                print(f"      Result preview: {preview}")
+        
+        # Log context breakdown
+        print(f"\n🌐 CONTEXT BREAKDOWN:")
+        context_str = json.dumps(context, indent=2)
+        context_len = len(context_str)
+        print(f"  Total context size: {context_len:,} chars")
+        
+        # Break down context by key
+        for key, value in context.items():
+            if value is None:
+                size = 0
+            elif isinstance(value, str):
+                size = len(value)
+            elif isinstance(value, (dict, list)):
+                size = len(json.dumps(value))
+            else:
+                size = len(str(value))
+            
+            print(f"    {key}: {size:,} chars", end="")
+            if key == "pgn" and isinstance(value, str):
+                print(f" (PGN length: {len(value)})")
+            elif key == "cached_analysis" and isinstance(value, dict):
+                # Show what's in cached_analysis
+                if "confidence" in value:
+                    conf_data = value["confidence"]
+                    if isinstance(conf_data, dict):
+                        nodes_count = len(conf_data.get("nodes", []))
+                        print(f" (has confidence data: {nodes_count} nodes)")
+                    else:
+                        print()
+                else:
+                    print(f" (keys: {list(value.keys())})")
+            else:
+                print()
+        
+        # Check if tool messages have JSON content that needs formatting
+        # This allows frontend to send raw tool results and have them auto-formatted
+        for msg in messages:
+            if msg.get("role") == "tool" and isinstance(msg.get("content"), str):
+                try:
+                    # Try to parse as JSON - if it's a tool result dict, format it
+                    content_json = json.loads(msg["content"])
+                    if isinstance(content_json, dict):
+                        tool_name = msg.get("name", "unknown")
+                        # Check if this looks like a tool result (has common fields)
+                        if any(key in content_json for key in ["move_played", "eval_cp", "tags", "themes", "ply_records"]):
+                            # This is a tool result - format it
+                            formatted = tool_executor.format_result_for_llm(content_json, tool_name)
+                            msg["content"] = formatted
+                            print(f"   🔧 Auto-formatted tool message for {tool_name}")
+                except (json.JSONDecodeError, TypeError):
+                    # Not JSON or not a dict, leave as is
+                    pass
+        
+        # Log tools
+        if tools:
+            print(f"\n🔧 TOOLS ({len(tools)} available):")
+            total_tool_chars = 0
+            for tool in tools:
+                tool_str = json.dumps(tool)
+                tool_len = len(tool_str)
+                total_tool_chars += tool_len
+                print(f"    {tool.get('function', {}).get('name', 'unknown')}: {tool_len:,} chars")
+            print(f"  Total tools size: {total_tool_chars:,} chars")
+        else:
+            total_tool_chars = 0
+        
+        # Calculate token estimates (rough: ~4 chars per token)
+        total_chars = total_message_chars + context_len + total_tool_chars
+        estimated_tokens = total_chars // 4
+        
+        print(f"\n📊 TOKEN ESTIMATES:")
+        print(f"  Messages: ~{total_message_chars // 4:,} tokens ({total_message_chars:,} chars)")
+        print(f"  Context: ~{context_len // 4:,} tokens ({context_len:,} chars)")
+        print(f"  Tools: ~{total_tool_chars // 4:,} tokens ({total_tool_chars:,} chars)")
+        print(f"  TOTAL ESTIMATE: ~{estimated_tokens:,} tokens ({total_chars:,} chars)")
+        
+        # Warn if approaching limits
+        if estimated_tokens > 100000:
+            print(f"\n⚠️  WARNING: Estimated tokens ({estimated_tokens:,}) exceeds 100k!")
+            print(f"   Model limit: 128,000 tokens")
+            print(f"   You may need to truncate context or messages")
+        
+        print("="*80 + "\n")
+        
+        # Determine if we should force tool calls
+        force_tool_call = (
+            orchestration_plan and 
+            orchestration_plan.tool_sequence and 
+            len(orchestration_plan.tool_sequence) > 0
         )
         
-        return {
-            "content": completion.choices[0].message.content,
+        # Initial LLM call
+        # If interpreter planned specific tools, force the EXACT tool to be called
+        if force_tool_call:
+            first_tool = orchestration_plan.tool_sequence[0]
+            tool_choice_value = {"type": "function", "function": {"name": first_tool.name}}
+            print(f"   🔧 Forcing specific tool: {first_tool.name}")
+        else:
+            tool_choice_value = "auto"
+        
+        completion = openai_client.chat.completions.create(
+            model=request.model,
+            messages=messages,
+            tools=tools if tools else None,
+            tool_choice=tool_choice_value if tools else None,
+            temperature=request.temperature,
+            timeout=120.0
+        )
+        
+        response_message = completion.choices[0].message
+        tool_calls_made = []
+        iterations = 0
+        
+        # Log LLM's initial response
+        if response_message.tool_calls:
+            print(f"   🔧 LLM requested {len(response_message.tool_calls)} tool calls:")
+            for tc in response_message.tool_calls:
+                print(f"      - {tc.function.name}")
+        else:
+            print(f"   💭 LLM responded with text (no tool calls)")
+            print(f"      Content preview: {response_message.content[:150]}...")
+        
+        # Handle tool calls (with iteration limit)
+        while response_message.tool_calls and iterations < request.max_tool_iterations:
+            iterations += 1
+            print(f"\n   🔧 Tool iteration {iterations}/{request.max_tool_iterations}")
+            
+            # Execute each tool call
+            tool_results = []
+            for tool_call in response_message.tool_calls:
+                tool_name = tool_call.function.name
+                try:
+                    tool_args = json.loads(tool_call.function.arguments)
+                except json.JSONDecodeError:
+                    tool_args = {}
+                
+                # Merge with planned arguments from orchestration_plan
+                final_tool_args = dict(tool_args)
+                if orchestration_plan and orchestration_plan.tool_sequence:
+                    for planned_tool in orchestration_plan.tool_sequence:
+                        if planned_tool.name == tool_name and planned_tool.arguments:
+                            for key, value in planned_tool.arguments.items():
+                                if key not in final_tool_args or not final_tool_args.get(key):
+                                    final_tool_args[key] = value
+                                    print(f"      📎 Injected missing arg: {key}={value}")
+                
+                # Inject interpreter's intent for game review
+                if tool_name == "fetch_and_review_games" and orchestration_plan and orchestration_plan.user_intent_summary:
+                    final_tool_args["interpreter_intent"] = orchestration_plan.user_intent_summary
+                    # Prefer sending the original user question to the tool (selector LLM uses it).
+                    if not final_tool_args.get("query"):
+                        last_user_msg = next(
+                            (m.content for m in reversed(request.messages or []) if getattr(m, "role", None) == "user" and getattr(m, "content", None)),
+                            ""
+                        )
+                        if last_user_msg:
+                            final_tool_args["query"] = last_user_msg
+                
+                print(f"      Executing: {tool_name} with args: {final_tool_args}")
+                
+                # Execute tool with merged arguments
+                result = await tool_executor.execute_tool(tool_name, final_tool_args, context)
+                
+                # Format for LLM
+                result_text = tool_executor.format_result_for_llm(result, tool_name)
+                
+                print(f"      Tool result preview: {result_text[:200]}...")
+                
+                tool_results.append({
+                    "tool_call_id": tool_call.id,
+                    "role": "tool",
+                    "name": tool_name,
+                    "content": result_text
+                })
+                
+                tool_calls_made.append({
+                    "tool": tool_name,
+                    "arguments": tool_args,
+                    "result": result,
+                    "result_text": result_text
+                })
+            
+            # Add assistant message with tool calls + tool results to conversation
+            messages.append({
+                "role": "assistant",
+                "content": response_message.content or "",
+                "tool_calls": [
+                    {
+                        "id": tc.id,
+                        "type": "function",
+                        "function": {
+                            "name": tc.function.name,
+                            "arguments": tc.function.arguments
+                        }
+                    } for tc in response_message.tool_calls
+                ]
+            })
+            
+            messages.extend(tool_results)
+            
+            # Continue conversation with tool results
+            completion = openai_client.chat.completions.create(
+                model=request.model,
+                messages=messages,
+                tools=tools if tools else None,
+                temperature=request.temperature,
+                timeout=120.0
+            )
+            
+            response_message = completion.choices[0].message
+        
+        # Final response
+        final_content = response_message.content or ""
+        
+        print(f"   ✅ Chat complete ({iterations} tool iterations, {len(tool_calls_made)} tools called)")
+        print(f"   Final response preview: {final_content[:150]}...")
+        
+        # ============================================================
+        # RESPONSE ANNOTATOR: Parse response for tag mentions
+        # ============================================================
+        response_annotations = {"arrows": [], "highlights": [], "tags_found": []}
+        try:
+            cached_analysis = context.get("cached_analysis", {})
+            current_fen = context.get("board_state") or context.get("fen")
+            
+            response_annotations = parse_response_for_annotations(
+                llm_response=final_content,
+                cached_analysis=cached_analysis,
+                fen=current_fen
+            )
+            
+            # Log what we found
+            print(f"\n   🎨 BACKEND ANNOTATION GENERATION:")
+            if response_annotations.get("tags_found"):
+                print(f"      Tags in LLM text: {response_annotations['tags_found']}")
+            
+            # Log cached analysis tags
+            if cached_analysis:
+                cached_tags = cached_analysis.get("tags", [])
+                if not cached_tags and "white_analysis" in cached_analysis:
+                    cached_tags = cached_analysis.get("white_analysis", {}).get("tags", [])
+                if cached_tags:
+                    tag_names = [t.get("name", str(t)) if isinstance(t, dict) else str(t) for t in cached_tags[:5]]
+                    print(f"      Cached analysis tags: {tag_names}")
+            
+            if response_annotations.get("arrows"):
+                print(f"      ➡️ Arrows: {len(response_annotations['arrows'])}")
+                for a in response_annotations["arrows"][:3]:
+                    print(f"         {a.get('from')} → {a.get('to')} ({a.get('type')})")
+            
+            if response_annotations.get("highlights"):
+                print(f"      🔲 Highlights: {len(response_annotations['highlights'])}")
+                for h in response_annotations["highlights"][:5]:
+                    print(f"         {h.get('square')}: {h.get('type')}")
+            
+            if not response_annotations.get("arrows") and not response_annotations.get("highlights"):
+                print(f"      ⚠️ No annotations generated")
+                
+        except Exception as e:
+            print(f"   ⚠️ Response annotation failed: {e}")
+            import traceback
+            traceback.print_exc()
+        
+        # Build response with orchestration metadata
+        response_data = {
+            "content": final_content,
             "model": completion.model,
             "usage": {
                 "prompt_tokens": completion.usage.prompt_tokens,
                 "completion_tokens": completion.usage.completion_tokens,
                 "total_tokens": completion.usage.total_tokens
-            }
+            },
+            "tool_calls": tool_calls_made,
+            "iterations": iterations,
+            # Orchestration additions
+            "frontend_commands": frontend_commands,
+            "status_messages": status_messages,
+            # Response-based annotations
+            "annotations": {
+                "arrows": response_annotations.get("arrows", []),
+                "highlights": response_annotations.get("highlights", []),
+                "tags_referenced": response_annotations.get("tags_found", []),
+            },
         }
+        
+        # Always add tools_used based on what was actually called
+        called_tools = [tc.get("tool") for tc in tool_calls_made] if tool_calls_made else []
+        
+        # Add orchestration metadata if available
+        if orchestration_plan:
+            response_data["orchestration"] = {
+                "mode": orchestration_plan.mode.value,
+                "mode_confidence": orchestration_plan.mode_confidence,
+                "intent": orchestration_plan.user_intent_summary,
+                "extracted_data": orchestration_plan.extracted_data
+            }
+            
+            # Add detected intent for frontend display
+            response_data["detected_intent"] = orchestration_plan.user_intent_summary
+            
+            # Add tools used (both planned and actually called)
+            planned_tools = [t.name for t in orchestration_plan.tool_sequence] if orchestration_plan.tool_sequence else []
+            response_data["tools_used"] = list(set(planned_tools + called_tools))
+            
+            # Add pre-computed analysis summary if available
+            if pre_computed_analysis:
+                response_data["pre_computed_analysis"] = pre_computed_analysis
+        else:
+            # Fallback: even without orchestration plan, report called tools
+            response_data["tools_used"] = called_tools
+            response_data["detected_intent"] = None
+        
+        # Log final response payload for debugging
+        print(f"\n   📦 FINAL RESPONSE:")
+        print(f"      Content length: {len(final_content)}")
+        print(f"      Status messages: {len(status_messages)}")
+        print(f"      Detected intent: {response_data.get('detected_intent', 'none')}")
+        print(f"      Tools used: {response_data.get('tools_used', [])}")
+        
+        return response_data
+    
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"LLM error: {str(e)}")
+        import traceback
+        from openai import APIConnectionError, APIError
+        
+        error_detail = f"LLM error: {str(e)}\n{traceback.format_exc()}"
+        print(error_detail)
+        
+        # Provide more helpful error messages for common issues
+        if isinstance(e, APIConnectionError):
+            error_msg = (
+                "Failed to connect to OpenAI API. This could be due to:\n"
+                "- Network connectivity issues\n"
+                "- Invalid or missing OPENAI_API_KEY\n"
+                "- DNS resolution problems\n"
+                f"Original error: {str(e)}"
+            )
+        elif isinstance(e, APIError):
+            error_msg = f"OpenAI API error: {str(e)}"
+        else:
+            error_msg = f"LLM error: {str(e)}"
+        
+        raise HTTPException(status_code=500, detail=error_msg)
+
+
+# ============================================================================
+# SSE STREAMING ENDPOINT FOR REAL-TIME STATUS UPDATES
+# ============================================================================
+
+@app.post("/llm_chat_stream")
+async def llm_chat_stream(request: LLMRequest):
+    """
+    SSE streaming version of /llm_chat.
+    Sends status updates in real-time as the system processes the request.
+    """
+    import time as _time
+    import asyncio
+    
+    async def event_generator():
+        """Generate SSE events with status updates and final response."""
+        try:
+            context = request.context or {}
+            context["authenticated"] = False
+            
+            user_messages = [m for m in request.messages if m.get('role') == 'user']
+            last_user_message = user_messages[-1].get('content', '') if user_messages else ""
+            
+            # Helper to send SSE event
+            def send_event(event_type: str, data: dict):
+                try:
+                    json_data = json.dumps(data, default=str)
+                    return f"event: {event_type}\ndata: {json_data}\n\n"
+                except Exception as e:
+                    print(f"   ❌ JSON serialization error for event {event_type}: {e}")
+                    return f"event: error\ndata: {{\"message\": \"JSON serialization failed for {event_type}\"}}\n\n"
+            
+            # Helper to strip massive raw analysis data from tool results
+            def _strip_raw_analysis_from_tool_result(result: dict) -> dict:
+                """Strip massive raw_before/raw_after from game reviews to reduce SSE event size"""
+                if not isinstance(result, dict):
+                    return result
+                
+                stripped = result.copy()
+                
+                # If this is a game review result, strip the massive data
+                if "first_game_review" in stripped:
+                    review = stripped["first_game_review"]
+                    if review and isinstance(review, dict) and "ply_records" in review:
+                        # Strip raw_before/raw_after from each ply record
+                        for ply in review.get("ply_records", []):
+                            if "raw_before" in ply:
+                                ply["raw_before"] = {"_stripped": True, "note": "Use /analyze_position endpoint for full analysis"}
+                            if "raw_after" in ply:
+                                ply["raw_after"] = {"_stripped": True, "note": "Use /analyze_position endpoint for full analysis"}
+                            if "analyse" in ply:
+                                ply["analyse"] = {"_stripped": True, "note": "Use /analyze_position endpoint for full analysis"}
+                
+                return stripped
+            
+            # Collect all status messages for final response
+            all_status_messages = []
+            
+            # ============================================================
+            # PHASE 1: INTERPRETATION
+            # ============================================================
+            yield send_event("status", {
+                "phase": "interpreting",
+                "message": "Understanding your request...",
+                "timestamp": _time.time()
+            })
+            all_status_messages.append({"phase": "interpreting", "message": "Understanding your request...", "timestamp": _time.time()})
+            await asyncio.sleep(0)  # Allow event to be sent
+            
+            orchestration_plan = None
+            pre_computed_analysis = {}
+            
+            if request_interpreter and last_user_message:
+                # Status callback that yields SSE events
+                async def stream_status(phase: str, message: str, **kwargs):
+                    nonlocal all_status_messages
+                    status_entry = {
+                        "phase": phase,
+                        "message": message,
+                        "timestamp": kwargs.get("timestamp", _time.time())
+                    }
+                    if kwargs.get("tool"):
+                        status_entry["tool"] = kwargs["tool"]
+                    if kwargs.get("progress") is not None:
+                        status_entry["progress"] = kwargs["progress"]
+                    all_status_messages.append(status_entry)
+                    return status_entry
+                
+                # Run interpreter
+                orchestration_plan = await request_interpreter.interpret(
+                    message=last_user_message,
+                    context=context,
+                    conversation_history=request.messages
+                )
+                
+                # Send interpreter results
+                yield send_event("status", {
+                    "phase": "interpreting",
+                    "message": f"Detected: {orchestration_plan.user_intent_summary}",
+                    "timestamp": _time.time()
+                })
+                all_status_messages.append({"phase": "interpreting", "message": f"Detected: {orchestration_plan.user_intent_summary}", "timestamp": _time.time()})
+                await asyncio.sleep(0)
+                
+                if orchestration_plan.tool_sequence:
+                    tools_str = ', '.join([t.name for t in orchestration_plan.tool_sequence])
+                    yield send_event("status", {
+                        "phase": "planning",
+                        "message": f"Planning to use: {tools_str}",
+                        "timestamp": _time.time()
+                    })
+                    all_status_messages.append({"phase": "planning", "message": f"Planning to use: {tools_str}", "timestamp": _time.time()})
+                    await asyncio.sleep(0)
+            
+            # ============================================================
+            # HANDLE CLARIFICATION REQUESTS
+            # ============================================================
+            if orchestration_plan and orchestration_plan.needs_clarification:
+                print(f"   ❓ Interpreter needs clarification - responding with question")
+                clarification_response = orchestration_plan.clarification_question
+                
+                yield send_event("status", {
+                    "phase": "clarifying",
+                    "message": "Asking for clarification...",
+                    "timestamp": _time.time()
+                })
+                await asyncio.sleep(0)
+                
+                response_data = {
+                    "response": clarification_response,
+                    "tool_calls": [],
+                    "annotations": {},
+                    "mode": "chat",
+                    "status_messages": all_status_messages,
+                    "frontend_commands": [],
+                    "detected_intent": orchestration_plan.user_intent_summary,
+                    "tools_used": [],
+                    "orchestration": {
+                        "mode": orchestration_plan.mode.value,
+                        "mode_confidence": orchestration_plan.mode_confidence,
+                        "intent": orchestration_plan.user_intent_summary,
+                        "needs_clarification": True
+                    }
+                }
+                yield send_event("complete", response_data)
+                return
+            
+            # ============================================================
+            # PHASE 1.5: PRE-EXECUTE REQUIRED TOOLS
+            # ============================================================
+            pre_executed_results = {}
+            pre_executed_tool_calls = []
+            
+            if orchestration_plan and orchestration_plan.tool_sequence and len(orchestration_plan.tool_sequence) > 0:
+                print(f"   🔧 Pre-executing {len(orchestration_plan.tool_sequence)} required tools")
+                
+                for tool_call in orchestration_plan.tool_sequence:
+                    tool_name = tool_call.name
+                    tool_args = tool_call.arguments or {}
+                    
+                    # Inject interpreter's intent for game review
+                    if tool_name == "fetch_and_review_games" and orchestration_plan.user_intent_summary:
+                        tool_args["interpreter_intent"] = orchestration_plan.user_intent_summary
+                        if not tool_args.get("query"):
+                            last_user_msg = next(
+                                (m.content for m in reversed(request.messages or []) if getattr(m, "role", None) == "user" and getattr(m, "content", None)),
+                                ""
+                            )
+                            if last_user_msg:
+                                tool_args["query"] = last_user_msg
+                    
+                    yield send_event("status", {
+                        "phase": "executing",
+                        "message": f"Running {tool_name}...",
+                        "timestamp": _time.time()
+                    })
+                    all_status_messages.append({"phase": "executing", "message": f"Running {tool_name}...", "timestamp": _time.time()})
+                    await asyncio.sleep(0)
+                    
+                    # Use async queue for real-time status streaming during tool execution
+                    status_queue = asyncio.Queue()
+                    
+                    async def pre_exec_status_callback(phase: str, message: str, progress: float = None, replace: bool = False):
+                        status_msg = {
+                            "phase": phase,
+                            "message": message,
+                            "tool": tool_name,
+                            "progress": progress,
+                            "timestamp": _time.time(),
+                            "replace": replace
+                        }
+                        await status_queue.put(status_msg)
+                        print(f"   📊 Pre-exec progress: {message} ({progress*100:.0f}%)" if progress is not None else f"   📊 Pre-exec status: {message}")
+                    
+                    # Run tool execution and status streaming concurrently
+                    async def run_pre_exec_tool():
+                        try:
+                            res = await tool_executor.execute_tool(tool_name, tool_args, context, pre_exec_status_callback)
+                            return {"success": True, "result": res}
+                        except Exception as e:
+                            import traceback
+                            traceback.print_exc()
+                            return {"success": False, "error": str(e)}
+                    
+                    # Start tool execution as a task
+                    tool_task = asyncio.create_task(run_pre_exec_tool())
+                    
+                    # Stream status events while tool is running
+                    while not tool_task.done():
+                        try:
+                            status_msg = await asyncio.wait_for(status_queue.get(), timeout=0.1)
+                            all_status_messages.append(status_msg)
+                            yield send_event("status", status_msg)
+                        except asyncio.TimeoutError:
+                            pass
+                    
+                    # Drain any remaining status messages
+                    while not status_queue.empty():
+                        try:
+                            status_msg = status_queue.get_nowait()
+                            all_status_messages.append(status_msg)
+                            yield send_event("status", status_msg)
+                        except asyncio.QueueEmpty:
+                            break
+                    
+                    # Get tool result
+                    tool_result = await tool_task
+                    
+                    if tool_result["success"]:
+                        pre_executed_results[tool_name] = tool_result["result"]
+                        pre_executed_tool_calls.append({
+                            "name": tool_name,
+                            "arguments": tool_args,
+                            "result": tool_result["result"]
+                        })
+                        print(f"   ✅ Pre-executed {tool_name} successfully")
+                    else:
+                        pre_executed_results[tool_name] = {"error": tool_result["error"]}
+                        pre_executed_tool_calls.append({
+                            "name": tool_name,
+                            "arguments": tool_args,
+                            "error": tool_result["error"]
+                        })
+                        print(f"   ❌ Pre-execution of {tool_name} failed: {tool_result['error']}")
+                
+                # Clear tool sequence so LLM doesn't try to call them again
+                orchestration_plan.tool_sequence = []
+            
+            # ============================================================
+            # PHASE 2: GET TOOLS AND BUILD MESSAGES
+            # ============================================================
+            use_tools_for_call = request.use_tools
+            if orchestration_plan and orchestration_plan.skip_tools:
+                use_tools_for_call = False
+            
+            # If we pre-executed tools, don't give LLM tool access (it just narrates)
+            if pre_executed_results:
+                use_tools_for_call = False
+            
+            tools = get_tools_for_context(context) if use_tools_for_call else []
+            
+            # Build messages
+            messages = []
+            
+            # Log interpreter decisions for debugging
+            if orchestration_plan:
+                print(f"   📋 Interpreter decisions:")
+                print(f"      Include context: {list(orchestration_plan.include_context.keys())}")
+                print(f"      Relevant analyses: {orchestration_plan.relevant_analyses}")
+                if orchestration_plan.response_strategy:
+                    print(f"      Response strategy: {orchestration_plan.response_strategy[:100]}...")
+                if orchestration_plan.exclude_from_response:
+                    print(f"      Exclude: {orchestration_plan.exclude_from_response}")
+            
+            # Build interpreter-driven prompt (always use new system)
+            if orchestration_plan:
+                # Filter data based on interpreter's selections
+                filtered_context, filtered_analyses = validate_interpreter_selections(
+                    orchestration_plan,
+                    context,
+                    pre_executed_results
+                )
+                
+                # Build interpreter-driven prompt
+                system_prompt = build_interpreter_driven_prompt(
+                    orchestration_plan,
+                    filtered_context,
+                    filtered_analyses,
+                    TOOL_AWARE_SYSTEM_PROMPT  # Base capabilities for reference
+                )
+                print(f"   📋 Using interpreter-driven prompt (filtered context: {len(filtered_context)} keys, analyses: {len(filtered_analyses)} keys)")
+            else:
+                # Fallback if no orchestration plan (shouldn't happen, but safety)
+                system_prompt = TOOL_AWARE_SYSTEM_PROMPT
+            
+            messages.append({"role": "system", "content": system_prompt})
+            messages.extend(request.messages)
+            
+            # Check if tool messages have JSON content that needs formatting
+            # This allows frontend to send raw tool results and have them auto-formatted
+            for msg in messages:
+                if msg.get("role") == "tool" and isinstance(msg.get("content"), str):
+                    try:
+                        # Try to parse as JSON - if it's a tool result dict, format it
+                        content_json = json.loads(msg["content"])
+                        if isinstance(content_json, dict):
+                            tool_name = msg.get("name", "unknown")
+                            # Check if this looks like a tool result (has common fields)
+                            if any(key in content_json for key in ["move_played", "eval_cp", "tags", "themes", "ply_records"]):
+                                # This is a tool result - format it
+                                formatted = tool_executor.format_result_for_llm(content_json, tool_name)
+                                msg["content"] = formatted
+                                print(f"   🔧 Auto-formatted tool message for {tool_name}")
+                    except (json.JSONDecodeError, TypeError):
+                        # Not JSON or not a dict, leave as is
+                        pass
+            
+            # Add pre-executed tool calls and results to messages so LLM knows what happened
+            if pre_executed_tool_calls:
+                # Add assistant message with tool calls
+                messages.append({
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": [
+                        {
+                            "id": f"pre_exec_{idx}",
+                            "type": "function",
+                            "function": {
+                                "name": tc["name"],
+                                "arguments": json.dumps(tc["arguments"])
+                            }
+                        }
+                        for idx, tc in enumerate(pre_executed_tool_calls)
+                    ]
+                })
+                
+                # Add tool results
+                for idx, tc in enumerate(pre_executed_tool_calls):
+                    tool_result = tc.get("result", {"error": tc.get("error", "Unknown error")})
+                    tool_result_text = tool_executor.format_result_for_llm(tool_result, tc["name"])
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": f"pre_exec_{idx}",
+                        "name": tc["name"],
+                        "content": tool_result_text
+                    })
+                    print(f"   📝 Added pre-executed tool result for {tc['name']} to messages")
+            
+            # ============================================================
+            # PHASE 3: LLM CALL (with tool execution)
+            # ============================================================
+            yield send_event("status", {
+                "phase": "executing",
+                "message": "Thinking...",
+                "timestamp": _time.time()
+            })
+            all_status_messages.append({"phase": "executing", "message": "Thinking...", "timestamp": _time.time()})
+            await asyncio.sleep(0)
+            
+            # Include pre-executed tool calls in the list (normalize structure)
+            tool_calls_made = []
+            for tc in pre_executed_tool_calls:
+                tool_name = tc.get("name", "unknown")
+                tool_args = tc.get("arguments", {})
+                tool_result = tc.get("result", {"error": tc.get("error", "Unknown error")})
+                
+                # Strip massive raw analysis data before adding to tool_calls_made
+                stripped_result = _strip_raw_analysis_from_tool_result(tool_result)
+                
+                # Format result text for consistency
+                tool_result_text = tool_executor.format_result_for_llm(stripped_result, tool_name)
+                tool_calls_made.append({
+                    "tool": tool_name,
+                    "arguments": tool_args,
+                    "result": stripped_result,
+                    "result_text": tool_result_text
+                })
+            iterations = 0
+            max_iterations = 5
+            final_content = ""
+            
+            # No need to force tool calls if we pre-executed them
+            # (orchestration_plan.tool_sequence was cleared after pre-execution)
+            force_tool_call = (
+                orchestration_plan and 
+                orchestration_plan.tool_sequence and 
+                len(orchestration_plan.tool_sequence) > 0
+            )
+            
+            # Diagnostic logging before LLM call
+            print(f"   🤖 About to call LLM (model={request.model}, tools={len(tools) if tools else 0}, pre_executed={len(pre_executed_tool_calls)})")
+            print(f"   📝 Messages count: {len(messages)}")
+            if messages:
+                last_msg = messages[-1]
+                last_msg_str = str(last_msg)[:300]
+                print(f"   📝 Last message preview: {last_msg_str}...")
+            
+            while iterations < max_iterations:
+                iterations += 1
+                print(f"   🔄 LLM iteration {iterations}/{max_iterations}...")
+                
+                try:
+                if tools:
+                    # Force the EXACT tool on first iteration if interpreter planned tools
+                    if force_tool_call and iterations == 1:
+                        first_tool = orchestration_plan.tool_sequence[0]
+                        tool_choice_value = {"type": "function", "function": {"name": first_tool.name}}
+                        print(f"   🔧 Forcing specific tool: {first_tool.name}")
+                    else:
+                        tool_choice_value = "auto"
+                    
+                        print(f"   📡 Calling OpenAI API with tools...")
+                    response = openai_client.chat.completions.create(
+                        model=request.model,
+                        messages=messages,
+                        temperature=request.temperature,
+                        tools=tools,
+                        tool_choice=tool_choice_value
+                    )
+                else:
+                        print(f"   📡 Calling OpenAI API without tools...")
+                    response = openai_client.chat.completions.create(
+                        model=request.model,
+                        messages=messages,
+                        temperature=request.temperature
+                    )
+                
+                    print(f"   ✅ LLM API call succeeded")
+                response_message = response.choices[0].message
+
+                    content_len = len(response_message.content) if response_message.content else 0
+                    print(
+                        f"   📨 LLM response: tool_calls={len(response_message.tool_calls) if response_message.tool_calls else 0}, "
+                        f"content_length={content_len}"
+                    )
+                
+                if not response_message.tool_calls:
+                    final_content = response_message.content or ""
+                        print(f"   ✅ Got final content: {len(final_content)} chars")
+                        if not final_content:
+                            print(f"   ⚠️ WARNING: final_content is empty! Response was: {response_message}")
+                    break
+                    else:
+                        print(f"   🔧 LLM requested {len(response_message.tool_calls)} tool calls, will execute...")
+                        
+                except Exception as llm_err:
+                    print(f"   ❌ LLM call failed at iteration {iterations}: {llm_err}")
+                    import traceback
+                    error_tb = traceback.format_exc()
+                    print(f"   Traceback: {error_tb}")
+                    # Re-raise to be caught by outer handler
+                    raise
+                
+                # Execute tools
+                tool_results = []
+                for tool_call in response_message.tool_calls:
+                    tool_name = tool_call.function.name
+                    tool_args = json.loads(tool_call.function.arguments)
+                    
+                    # Send initial "called" status (not loading - just info)
+                    tool_start_status = {
+                        "phase": "executing",
+                        "message": f"Called {tool_name.replace('_', ' ')}",
+                        "tool": tool_name,
+                        "timestamp": _time.time()
+                    }
+                    all_status_messages.append(tool_start_status)
+                    yield send_event("status", tool_start_status)
+                    await asyncio.sleep(0)
+                    
+                    # Merge with planned arguments from orchestration_plan
+                    final_tool_args = dict(tool_args)
+                    if orchestration_plan and orchestration_plan.tool_sequence:
+                        for planned_tool in orchestration_plan.tool_sequence:
+                            if planned_tool.name == tool_name and planned_tool.arguments:
+                                for key, value in planned_tool.arguments.items():
+                                    if key not in final_tool_args or not final_tool_args.get(key):
+                                        final_tool_args[key] = value
+                                        print(f"   📎 Injected missing arg: {key}={value}")
+
+                    # Ensure fetch_and_review_games receives interpreter intent + original question
+                    if tool_name == "fetch_and_review_games" and orchestration_plan and orchestration_plan.user_intent_summary:
+                        final_tool_args["interpreter_intent"] = orchestration_plan.user_intent_summary
+                        if not final_tool_args.get("query"):
+                            last_user_msg = next(
+                                (m.content for m in reversed(request.messages or []) if getattr(m, "role", None) == "user" and getattr(m, "content", None)),
+                                ""
+                            )
+                            if last_user_msg:
+                                final_tool_args["query"] = last_user_msg
+                    
+                    print(f"   🔧 SSE: Executing {tool_name} with args: {final_tool_args}")
+                    
+                    # Use async queue for real-time status streaming during tool execution
+                    status_queue = asyncio.Queue()
+                    
+                    async def tool_status_callback(phase: str, message: str, progress: float = None, replace: bool = False):
+                        status_msg = {
+                            "phase": phase,
+                            "message": message,
+                            "tool": tool_name,
+                            "progress": progress,
+                            "timestamp": _time.time(),
+                            "replace": replace  # Frontend should replace last message instead of adding
+                        }
+                        await status_queue.put(status_msg)
+                        print(f"   📊 Tool progress: {message} ({progress*100:.0f}%)" if progress is not None else f"   📊 Tool status: {message}")
+                    
+                    # Run tool execution and status streaming concurrently
+                    async def run_tool():
+                        try:
+                            res = await tool_executor.execute_tool(tool_name, final_tool_args, context, tool_status_callback)
+                            return {"success": True, "result": res}
+                        except Exception as e:
+                            return {"success": False, "error": str(e)}
+                    
+                    # Start tool execution as a task
+                    tool_task = asyncio.create_task(run_tool())
+                    
+                    # Stream status events while tool is running
+                    while not tool_task.done():
+                        try:
+                            # Wait for status with short timeout
+                            status_msg = await asyncio.wait_for(status_queue.get(), timeout=0.1)
+                            all_status_messages.append(status_msg)
+                            yield send_event("status", status_msg)
+                        except asyncio.TimeoutError:
+                            # No status available, check if task is done
+                            await asyncio.sleep(0)
+                    
+                    # Drain any remaining status messages
+                    while not status_queue.empty():
+                        status_msg = await status_queue.get()
+                        all_status_messages.append(status_msg)
+                        yield send_event("status", status_msg)
+                    
+                    # Get tool result
+                    tool_result = await tool_task
+                    
+                    if tool_result["success"]:
+                        result = tool_result["result"]
+                        result_text = json.dumps(result, indent=2, default=str)[:4000]
+                        print(f"   ✅ SSE: Tool {tool_name} completed, result preview: {result_text[:200]}...")
+                        
+                        # Yield completion status with summary
+                        completion_msg = "Analysis complete"
+                        if tool_name == "fetch_and_review_games" and result.get("success"):
+                            completion_msg = f"Analyzed {result.get('games_analyzed', 0)} game(s)"
+                        
+                        tool_complete_status = {
+                            "phase": "executing",
+                            "message": completion_msg,
+                            "tool": tool_name,
+                            "progress": 1.0,
+                            "timestamp": _time.time()
+                        }
+                        all_status_messages.append(tool_complete_status)
+                        yield send_event("status", tool_complete_status)
+                    else:
+                        print(f"   ❌ SSE: Tool {tool_name} failed: {tool_result['error']}")
+                        result = {"error": tool_result["error"]}
+                        result_text = json.dumps(result)
+                        
+                        # Yield error status
+                        error_status = {
+                            "phase": "executing",
+                            "message": f"Tool failed: {tool_result['error'][:50]}",
+                            "tool": tool_name,
+                            "timestamp": _time.time()
+                        }
+                        all_status_messages.append(error_status)
+                        yield send_event("status", error_status)
+                    
+                    tool_results.append({
+                        "role": "tool",
+                        "tool_call_id": tool_call.id,
+                        "name": tool_name,
+                        "content": result_text
+                    })
+                    
+                    # Strip massive raw analysis data before adding
+                    stripped_result = _strip_raw_analysis_from_tool_result(result) if isinstance(result, dict) else result
+                    # Re-format result text with stripped data
+                    stripped_result_text = json.dumps(stripped_result) if isinstance(stripped_result, dict) else str(stripped_result)
+                    
+                    tool_calls_made.append({
+                        "tool": tool_name,
+                        "arguments": tool_args,
+                        "result": stripped_result,
+                        "result_text": stripped_result_text
+                    })
+                
+                # Add to messages and continue
+                messages.append({
+                    "role": "assistant",
+                    "content": response_message.content or "",
+                    "tool_calls": [
+                        {
+                            "id": tc.id,
+                            "type": "function",
+                            "function": {
+                                "name": tc.function.name,
+                                "arguments": tc.function.arguments
+                            }
+                        } for tc in response_message.tool_calls
+                    ]
+                })
+                messages.extend(tool_results)
+            
+            # ============================================================
+            # PHASE 4: GENERATE ANNOTATIONS
+            # ============================================================
+            annotations = {"arrows": [], "highlights": [], "tags_referenced": []}
+            fen = context.get("fen", "")
+            if fen and final_content:
+                try:
+                    cached_analysis = context.get("cached_analysis", {})
+                    annotations = parse_response_for_annotations(
+                        final_content, 
+                        fen, 
+                        cached_analysis
+                    )
+                except Exception as ann_err:
+                    print(f"Annotation error: {ann_err}")
+            
+            # ============================================================
+            # PHASE 5: SEND FINAL RESPONSE
+            # ============================================================
+            print(f"   📤 Preparing to send complete event...")
+            print(f"      final_content length: {len(final_content)}")
+            print(f"      tool_calls_made: {len(tool_calls_made)}")
+            print(f"      iterations: {iterations}")
+            print(f"      status_messages: {len(all_status_messages)}")
+            
+            if not final_content:
+                print(f"   ⚠️ WARNING: final_content is empty! This may cause frontend issues.")
+                # Set a fallback message if content is empty
+                if pre_executed_tool_calls:
+                    tool_names = [tc.get("name", "unknown") for tc in pre_executed_tool_calls]
+                    final_content = f"I've completed the requested action: {', '.join(tool_names)}. The results are available in the tool output."
+                    print(f"   📝 Using fallback content: {final_content[:100]}...")
+            
+            called_tools = [tc.get("tool", "unknown") for tc in tool_calls_made] if tool_calls_made else []
+            
+            # Get frontend commands from orchestration plan
+            frontend_commands = []
+            if orchestration_plan and orchestration_plan.frontend_commands:
+                frontend_commands = [cmd.to_dict() for cmd in orchestration_plan.frontend_commands]
+            
+            response_data = {
+                "content": final_content,
+                "model": request.model,
+                "tool_calls": tool_calls_made,
+                "iterations": iterations,
+                "status_messages": all_status_messages,
+                "annotations": annotations,
+                "frontend_commands": frontend_commands
+            }
+            
+            if orchestration_plan:
+                response_data["orchestration"] = {
+                    "mode": orchestration_plan.mode.value,
+                    "mode_confidence": orchestration_plan.mode_confidence,
+                    "intent": orchestration_plan.user_intent_summary,
+                    "extracted_data": orchestration_plan.extracted_data
+                }
+                response_data["detected_intent"] = orchestration_plan.user_intent_summary
+                planned_tools = [t.name for t in orchestration_plan.tool_sequence] if orchestration_plan.tool_sequence else []
+                response_data["tools_used"] = list(set(planned_tools + called_tools))
+            else:
+                response_data["tools_used"] = called_tools
+                response_data["detected_intent"] = None
+            
+            print(f"   📦 Response data prepared: content={len(final_content)} chars, tools_used={response_data.get('tools_used', [])}")
+            
+            # ============================================================
+            # CHUNKED SSE: Send data in parts for large payloads
+            # ============================================================
+            
+            # Check if we have game review data that needs chunking
+            has_game_review = False
+            game_review_data = None
+            for tc in tool_calls_made:
+                if isinstance(tc.get("result"), dict) and tc["result"].get("first_game_review"):
+                    has_game_review = True
+                    game_review_data = tc["result"]
+                    break
+            
+            if has_game_review and game_review_data:
+                print(f"   📦 Using chunked SSE for game review data...")
+                
+                # Part 1: Game data for loading into tab (~5KB)
+                first_game = game_review_data.get("first_game", {})
+                if first_game:
+                    game_loaded_data = {
+                        "first_game": first_game,
+                        "username": game_review_data.get("username", ""),
+                        "platform": game_review_data.get("platform", ""),
+                        "games_analyzed": game_review_data.get("games_analyzed", 1)
+                    }
+                    print(f"   📤 Sending game_loaded event...")
+                    yield send_event("game_loaded", game_loaded_data)
+                    yield ": keepalive\n\n"
+                    await asyncio.sleep(0.05)
+                
+                # Part 2: Statistics and charts (~30KB)
+                stats_data = {
+                    "stats": game_review_data.get("stats", {}),
+                    "phase_stats": game_review_data.get("phase_stats", {}),
+                    "opening_performance": game_review_data.get("opening_performance", []),
+                    "charts": game_review_data.get("charts", {}),
+                    "loss_diagnosis": game_review_data.get("loss_diagnosis")
+                }
+                print(f"   📤 Sending stats_ready event...")
+                yield send_event("stats_ready", stats_data)
+                yield ": keepalive\n\n"
+                await asyncio.sleep(0.05)
+                
+                # Part 3: Narrative text (~3KB)
+                narrative_data = {
+                    "narrative": game_review_data.get("narrative", "")
+                }
+                print(f"   📤 Sending narrative event...")
+                yield send_event("narrative", narrative_data)
+                yield ": keepalive\n\n"
+                await asyncio.sleep(0.05)
+                
+                # Part 4: Key moments for walkthrough - stripped down (~10KB)
+                first_game_review = game_review_data.get("first_game_review", {})
+                if first_game_review:
+                    # Create minimal ply records for walkthrough (just what's needed)
+                    minimal_ply_records = []
+                    for ply in first_game_review.get("ply_records", []):
+                        minimal_ply_records.append({
+                            "ply": ply.get("ply"),
+                            "san": ply.get("san"),
+                            "uci": ply.get("uci"),
+                            "side_moved": ply.get("side_moved"),
+                            "category": ply.get("category"),
+                            "cp_loss": ply.get("cp_loss"),
+                            "accuracy_pct": ply.get("accuracy_pct"),
+                            "key_point_labels": ply.get("key_point_labels", []),
+                            "fen_before": ply.get("fen_before"),
+                            "fen_after": ply.get("fen_after"),
+                            "phase": ply.get("phase"),
+                            "engine": {
+                                "best_move_san": ply.get("engine", {}).get("best_move_san"),
+                                "eval_before_str": ply.get("engine", {}).get("eval_before_str"),
+                                "played_eval_after_str": ply.get("engine", {}).get("played_eval_after_str")
+                            }
+                        })
+                    
+                    walkthrough_data = {
+                        "ply_records": minimal_ply_records,
+                        "key_points": first_game_review.get("key_points", [])[:20],  # Limit to 20
+                        "selected_key_moments": game_review_data.get("selected_key_moments", []),
+                        "selection_rationale": game_review_data.get("selection_rationale", {}),
+                        "pre_commentary_by_ply": game_review_data.get("pre_commentary_by_ply", {}),
+                        "opening": first_game_review.get("opening", {}),
+                        "game_metadata": first_game_review.get("game_metadata", {}),
+                        "stats": first_game_review.get("stats", {})
+                    }
+                    # Calculate size for debugging
+                    walkthrough_size = len(json.dumps(walkthrough_data, default=str))
+                    print(f"   📤 Sending walkthrough_data event ({len(minimal_ply_records)} plies, {walkthrough_size/1024:.1f} KB)...")
+                    yield send_event("walkthrough_data", walkthrough_data)
+                    yield ": keepalive\n\n"
+                    await asyncio.sleep(0.1)  # Longer delay for large event
+                
+                # Part 5: Final complete event - minimal data
+                # Strip game review data from tool_calls_made since it was sent in chunks
+                for tc in tool_calls_made:
+                    if isinstance(tc.get("result"), dict):
+                        # Remove heavy data that was already sent
+                        tc["result"] = {
+                            "success": tc["result"].get("success", True),
+                            "username": tc["result"].get("username"),
+                            "platform": tc["result"].get("platform"),
+                            "games_analyzed": tc["result"].get("games_analyzed"),
+                            "_chunked": True,
+                            "_note": "Full data sent via chunked SSE events"
+                        }
+                
+                response_data["tool_calls"] = tool_calls_made
+                print(f"   📤 Sending final complete event (minimal)...")
+                
+            else:
+                print(f"   📤 Using standard complete event (no game review)...")
+            
+            # Diagnostic: Calculate final size
+            import sys
+            def get_size_mb(obj):
+                """Get approximate size of object in MB"""
+                try:
+                    return sys.getsizeof(json.dumps(obj, default=str)) / 1024 / 1024
+                except:
+                    return 0
+            
+            total_size = get_size_mb(response_data)
+            print(f"   📊 Final complete event size: {total_size:.2f} MB")
+            if total_size > 0.5:
+                print(f"   ⚠️ WARNING: Complete event still large ({total_size:.2f}MB)")
+            
+            # Validate response_data is JSON-serializable before sending
+            try:
+                json.dumps(response_data, default=str)
+                print(f"   ✅ Response data is JSON-serializable")
+            except Exception as json_err:
+                print(f"   ❌ Response data JSON serialization failed: {json_err}")
+                import traceback
+                traceback.print_exc()
+                response_data = {
+                    "content": final_content or "Error: Could not serialize response",
+                    "error": "JSON serialization failed",
+                    "tools_used": response_data.get('tools_used', [])
+                }
+            
+            print(f"   🚀 Sending complete event...")
+            
+            try:
+                event_str = send_event("complete", response_data)
+                print(f"   📤 Complete event string length: {len(event_str)}")
+                yield event_str
+                yield ": keepalive\n\n"
+                await asyncio.sleep(0.2)
+                print(f"   ✅ Complete event sent and flushed successfully")
+            except Exception as send_err:
+                print(f"   ❌ Failed to send complete event: {send_err}")
+                import traceback
+                error_tb = traceback.format_exc()
+                traceback.print_exc()
+                try:
+                    yield send_event("error", {
+                        "message": f"Failed to send complete event: {send_err}",
+                        "traceback": error_tb
+                    })
+                    await asyncio.sleep(0.1)
+                except:
+                    pass
+                raise
+            
+        except Exception as e:
+            import traceback
+            error_msg = str(e)
+            error_tb = traceback.format_exc()
+            print(f"   ❌ SSE stream error: {error_msg}")
+            print(f"   Traceback: {error_tb}")
+            
+            try:
+                yield send_event("error", {
+                    "message": error_msg,
+                    "traceback": error_tb
+                })
+            except (BrokenPipeError, ConnectionResetError) as pipe_err:
+                # Client disconnected - log and exit gracefully
+                print(f"   ⚠️ Client disconnected during error response: {pipe_err}")
+    
+    async def safe_event_generator():
+        """Wrapper to handle broken pipe errors gracefully"""
+        complete_sent = False
+        
+        # Helper function for error events (defined here since send_event is in event_generator scope)
+        def send_error_event(msg: str, tb: str = ""):
+            return f"event: error\ndata: {json.dumps({'message': msg, 'traceback': tb})}\n\n"
+        
+        try:
+            async for event in event_generator():
+                try:
+                    yield event
+                    # Check if this was a complete event
+                    if isinstance(event, str) and "event: complete" in event:
+                        complete_sent = True
+                        print(f"   ✅ Complete event yielded in safe wrapper")
+                except (BrokenPipeError, ConnectionResetError) as e:
+                    print(f"   ⚠️ Client disconnected while sending event: {e}")
+                    break
+        except (BrokenPipeError, ConnectionResetError) as e:
+            print(f"   ⚠️ Client disconnected during stream: {e}")
+            if not complete_sent:
+                print(f"   ⚠️ WARNING: Stream closed before complete event was sent")
+        except Exception as e:
+            print(f"   ❌ Unexpected error in SSE stream: {e}")
+            import traceback
+            error_tb = traceback.format_exc()
+            traceback.print_exc()
+            if not complete_sent:
+                print(f"   ⚠️ WARNING: Exception occurred before complete event was sent")
+                # Try to send error event
+                try:
+                    yield send_error_event(f"Stream error: {str(e)}", error_tb)
+                    await asyncio.sleep(0.1)
+                except:
+                    pass
+    
+    return StreamingResponse(
+        safe_event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no"
+        }
+    )
 
 
 # ============================================================================
@@ -1874,8 +4731,29 @@ async def get_topics(category: Optional[str] = None, level: Optional[int] = None
         "categories": list(set(v["category"] for v in LESSON_TOPICS.values()))
     }
 
+
+def parse_difficulty_level(difficulty_range: str) -> str:
+    """Parse difficulty range string to level category."""
+    try:
+        low, high = map(int, difficulty_range.split("-"))
+        avg = (low + high) / 2
+        
+        if avg < 1200:
+            return "beginner"
+        elif avg < 1600:
+            return "intermediate"
+        else:
+            return "advanced"
+    except:
+        return "intermediate"  # Default
+
+
 async def generate_position_for_topic(topic_code: str, side: str = "white") -> Dict[str, Any]:
-    """Generate a training position for a specific topic"""
+    """
+    Generate a training position for a specific topic.
+    
+    Uses pre-generated positions if available, otherwise falls back to live generation.
+    """
     if not engine:
         raise HTTPException(status_code=503, detail="Engine not available")
     
@@ -1883,134 +4761,67 @@ async def generate_position_for_topic(topic_code: str, side: str = "white") -> D
     if not topic:
         raise HTTPException(status_code=404, detail=f"Topic {topic_code} not found")
     
-    # For now, generate sample positions based on topic category
-    # In production, this would use sophisticated FEN construction
-    
-    if topic_code == "PS.IQP":
-        # IQP position template
-        fen = "r1bq1rk1/pp1nbppp/2p1pn2/3p4/2PP4/2N1PN2/PP2BPPP/R1BQ1RK1 w - - 0 9"
-        objective = "Play for the e5 break with your isolated d-pawn. Your pieces are active and White has dynamic compensation for the structural weakness."
+    # Try pre-generated positions first (instant)
+    if topic_code in PRE_GENERATED_POSITIONS and PRE_GENERATED_POSITIONS[topic_code]:
+        import random
         
-    elif topic_code == "PS.CARLSBAD":
-        # Carlsbad structure
-        fen = "r1bq1rk1/pp2bppp/2n1pn2/2pp4/2PP4/2N1PN2/PP2BPPP/R1BQ1RK1 w - - 0 9"
-        objective = "Execute the minority attack with b4-b5 to create weaknesses on Black's queenside. Double rooks on the c-file."
+        # Random selection from pre-generated pool
+        position_data = random.choice(PRE_GENERATED_POSITIONS[topic_code])
         
-    elif topic_code == "ST.OUTPOST":
-        # Knight outpost position
-        fen = "r1bqr1k1/pp1nbppp/2p1pn2/3p4/2PP4/2N1PN2/PP2BPPP/R1BQR1K1 w - - 0 11"
-        objective = "Establish a knight on the e5 outpost. This square is protected by your pawn and cannot be attacked by enemy pawns."
-        
-    elif topic_code == "ST.SEVENTH_RANK":
-        # 7th rank invasion
-        fen = "2kr3r/ppp2ppp/3b1n2/3p4/3P4/2PB1N2/PP3PPP/2KR3R w - - 0 15"
-        objective = "Invade the 7th rank with your rook. The 7th rank is where you can attack pawns and restrict the enemy king."
-        
-    elif topic_code == "TM.FORK":
-        # Fork tactics
-        fen = "r1bqk2r/pppp1ppp/2n2n2/2b1p3/2B1P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 4 5"
-        objective = "Find the knight fork that wins material. Look for moves that attack two pieces at once."
-        
-    elif topic_code == "TM.PIN":
-        # Pin tactics
-        fen = "r1bqkb1r/pppp1ppp/2n2n2/4p3/2B1P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 4 4"
-        objective = "Find the pin that restricts your opponent's pieces. A pinned piece cannot move without exposing a more valuable piece."
-        
-    else:
-        # Default training position
-        fen = "rnbqkb1r/ppp2ppp/4pn2/3p4/2PP4/2N2N2/PP2PPPP/R1BQKB1R b KQkq - 0 5"
-        objective = f"Practice the concept: {topic['name']}"
-    
-    # Analyze the position
-    try:
-        board = chess.Board(fen)
-        
-        # Get candidate moves
-        main_info = await engine.analyse(board, chess.engine.Limit(depth=16), multipv=3)
-        
-        candidates = []
-        if hasattr(main_info, '__iter__'):
-            for i, info in enumerate(main_info[:3]):
-                pv = info.get("pv", [])
-                if pv:
-                    # Create a copy of the board to convert PV to SAN without modifying original
-                    temp_board = board.copy()
-                    move_san = temp_board.san(pv[0])
-                    score = info.get("score")
-                    eval_cp = score.relative.score(mate_score=10000) if score else 0
-                    
-                    # Convert entire PV line to SAN
-                    pv_san = []
-                    temp_board = board.copy()
-                    for move in pv[:5]:
-                        pv_san.append(temp_board.san(move))
-                        temp_board.push(move)
-                    
-                    candidates.append({
-                        "move": move_san,
-                        "eval_cp": eval_cp,
-                        "pv": " ".join(pv_san)
-                    })
-        
-        # Generate hints based on topic
-        hints = []
-        if "outpost" in topic_code.lower():
-            hints = ["Look for squares that are protected by your pawns", "Enemy pawns should not be able to attack this square"]
-        elif "seventh" in topic_code.lower():
-            hints = ["The 7th rank is often called the 'pig' rank", "Rooks on the 7th attack pawns and restrict the king"]
-        elif "iqp" in topic_code.lower():
-            hints = ["The e5 break is typical in IQP positions", "Keep your pieces active to compensate for the weak pawn"]
-        elif "carlsbad" in topic_code.lower():
-            hints = ["b4-b5 is the key minority attack move", "Create a weakness on c6 by forcing ...cxb5"]
-        else:
-            hints = [f"Focus on: {topic['goals'][0]}", f"Key theme: {topic['name']}"]
-        
-        # Generate the ideal solution line (best PV, 3-5 moves)
-        ideal_line = []
-        ideal_pgn = ""
-        if main_info and hasattr(main_info, '__iter__') and len(list(main_info)) > 0:
-            best_info = list(main_info)[0]
-            pv = best_info.get("pv", [])
-            if pv:
-                temp_board = board.copy()
-                move_num = temp_board.fullmove_number
-                is_white = temp_board.turn
-                pgn_parts = []
-                
-                for i, move in enumerate(pv[:5]):  # Take first 5 moves of best line
-                    move_san = temp_board.san(move)
-                    ideal_line.append(move_san)
-                    
-                    # Build PGN
-                    if temp_board.turn:  # White's turn
-                        pgn_parts.append(f"{temp_board.fullmove_number}. {move_san}")
-                    else:  # Black's turn
-                        if i == 0 and not is_white:  # First move is black
-                            pgn_parts.append(f"{temp_board.fullmove_number}... {move_san}")
-                        else:
-                            pgn_parts.append(move_san)
-                    
-                    temp_board.push(move)
-                
-                ideal_pgn = " ".join(pgn_parts)
-        
-        return {
-            "fen": fen,
+        # Add metadata
+        full_position = {
+            "fen": position_data["fen"],
             "side": side,
-            "objective": objective,
+            "objective": topic.get("goals", ["Practice this concept"])[0],
             "themes": [topic_code],
-            "candidates": candidates,
-            "hints": hints,
-            "difficulty": topic["difficulty"],
-            "topic_name": topic["name"],
-            "ideal_line": ideal_line,  # List of moves in SAN
-            "ideal_pgn": ideal_pgn     # Human-readable PGN
+            "candidates": [],
+            "hints": [f"Focus on: {goal}" for goal in topic.get('goals', [])[:2]],
+            "difficulty": topic.get("difficulty", "1200-1800"),
+            "topic_name": topic.get("name", "Chess Concept"),
+            "ideal_line": position_data.get("ideal_line", []),
+            "ideal_pgn": " ".join(position_data.get("ideal_line", [])),
+            "meta": {"pre_generated": True, "source": "retrograde_backtracking"}
         }
         
+        return full_position
+    
+    # Fall back to live generation (slower, less reliable)
+    print(f"⚠️  No pre-generated positions for {topic_code}, attempting live generation...")
+    
+    # Parse difficulty from topic metadata
+    difficulty_range = topic.get("difficulty", "1200-1800")
+    difficulty_level = parse_difficulty_level(difficulty_range)
+    
+    # Try cache
+    try:
+        cached = await position_cache.get_position(topic_code, side, difficulty_level)
+        if cached:
+            return cached
     except Exception as e:
-        import traceback
-        print(f"Position generation error: {traceback.format_exc()}")
-        raise HTTPException(status_code=500, detail=f"Failed to analyze position: {str(e)}")
+        print(f"Cache error: {e}")
+    
+    # Live generation (last resort)
+    import time
+    start = time.time()
+    
+    position_data = await generate_fen_for_topic(
+        topic_code=topic_code,
+        side_to_move=side,
+        difficulty=difficulty_level,
+        engine=engine,
+        time_budget_ms=3000
+    )
+    
+    generation_time = (time.time() - start) * 1000
+    print(f"✅ Generated position for {topic_code} in {generation_time:.0f}ms")
+    
+    # Store in cache
+    try:
+        await position_cache.store_position(topic_code, side, difficulty_level, position_data)
+    except Exception as e:
+        print(f"Cache store error: {e}")
+    
+    return position_data
 
 @app.post("/generate_positions")
 async def generate_positions(topic_code: str = Query(...), count: int = Query(3, ge=1, le=10)):
@@ -2069,7 +4880,7 @@ async def check_lesson_move(
             }
         
         # Get best moves
-        main_info = await engine.analyse(board, chess.engine.Limit(depth=16), multipv=3)
+        main_info = await engine_queue.enqueue(engine_queue.engine.analyse, board, chess.engine.Limit(depth=16), multipv=3)
         
         best_moves = []
         best_eval = None
@@ -2096,7 +4907,7 @@ async def check_lesson_move(
         
         # Calculate eval after player's move
         board.push(move)
-        after_info = await engine.analyse(board, chess.engine.Limit(depth=14))
+        after_info = await engine_queue.enqueue(engine_queue.engine.analyse, board, chess.engine.Limit(depth=14))
         after_score = after_info.get("score")
         player_eval = -after_score.relative.score(mate_score=10000) if after_score else 0
         board.pop()
@@ -2136,6 +4947,1040 @@ async def check_lesson_move(
         error_detail = f"Move check error: {str(e)}\n{traceback.format_exc()}"
         print(error_detail)
         raise HTTPException(status_code=500, detail=f"Failed to check move: {str(e)}")
+
+
+async def _generate_opening_lesson_internal(request_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Shared helper for tool calls and REST endpoint."""
+    if not explorer_client:
+        raise HTTPException(status_code=503, detail="Opening explorer not initialized")
+    if not profile_indexer:
+        raise HTTPException(status_code=503, detail="Profile indexer unavailable")
+
+    payload = {
+        "user_id": request_data.get("user_id"),
+        "chat_id": request_data.get("chat_id"),
+        "opening_query": request_data.get("opening_query"),
+        "fen": request_data.get("fen"),
+        "eco": request_data.get("eco"),
+        "orientation": request_data.get("orientation"),
+        "variation_hint": request_data.get("variation_hint"),
+    }
+    response = await create_opening_lesson_payload(
+        payload,
+        explorer_client=explorer_client,
+        profile_indexer=profile_indexer,
+        supabase_client=supabase_client,
+        engine_queue=engine_queue,
+    )
+    
+    # Persist canonical lesson snapshot so `/check_opening_move` can reference it
+    lesson_plan = response.get("canonical_plan")
+    if lesson_plan:
+        # Ensure we have a lesson_id
+        lesson_id = (
+            lesson_plan.get("lesson_id")
+            or response.get("metadata", {}).get("lesson_id")
+            or uuid.uuid4().hex[:12]
+        )
+        lesson_plan["lesson_id"] = lesson_id
+        response.setdefault("metadata", {})["lesson_id"] = lesson_id
+        
+        backend_dir = os.path.dirname(os.path.abspath(__file__))
+        lessons_dir = os.path.join(backend_dir, "opening_lessons")
+        os.makedirs(lessons_dir, exist_ok=True)
+        snapshot_path = os.path.join(lessons_dir, f"{lesson_id}.json")
+        try:
+            with open(snapshot_path, "w") as f:
+                json.dump(lesson_plan, f, indent=2)
+        except Exception as exc:
+            print(f"⚠️ Failed to persist opening lesson snapshot: {exc}")
+    
+    return response
+
+
+@app.post("/generate_opening_lesson")
+async def generate_opening_lesson(request: dict):
+    """
+    Generate an opening lesson from a query.
+    
+    Input: {"query": "Sicilian Najdorf", "db": "lichess"?, "rating_range": [1600, 2000]?}
+    Output: LessonPlan JSON with sections/checkpoints/practice_fens
+    """
+    if not explorer_client:
+        raise HTTPException(status_code=500, detail="Explorer client not initialized")
+    
+    try:
+        query = request.get("query", "")
+        if not query:
+            raise HTTPException(status_code=400, detail="Query is required")
+        
+        db = request.get("db", "lichess")
+        rating_range = tuple(request.get("rating_range", [1600, 2000]))
+        
+        # Build lesson plan
+        lesson_plan = await build_opening_lesson(
+            opening_query=query,
+            explorer=explorer_client,
+            db=db,
+            rating_range=rating_range
+        )
+        
+        # Store lesson snapshot
+        lesson_id = lesson_plan["lesson_id"]
+        backend_dir = os.path.dirname(os.path.abspath(__file__))
+        lessons_dir = os.path.join(backend_dir, "opening_lessons")
+        os.makedirs(lessons_dir, exist_ok=True)
+        snapshot_path = os.path.join(lessons_dir, f"{lesson_id}.json")
+        
+        with open(snapshot_path, "w") as f:
+            json.dump(lesson_plan, f, indent=2)
+        
+        print(f"✅ Generated opening lesson '{lesson_plan['title']}' with {lesson_plan['practice_count']} checkpoints")
+        
+        return lesson_plan
+    
+    except Exception as e:
+        import traceback
+        error_detail = f"Lesson generation error: {str(e)}\n{traceback.format_exc()}"
+        print(error_detail)
+        raise HTTPException(status_code=500, detail=f"Failed to generate opening lesson: {str(e)}")
+
+
+@app.post("/lessons/opening")
+async def create_personalized_opening_lesson(request: OpeningLessonRequest):
+    """Generate a personalized opening lesson that blends explorer data with user history."""
+    try:
+        return await _generate_opening_lesson_internal(request.dict())
+    except HTTPException:
+        raise
+    except Exception as exc:
+        print(f"Opening lesson generation failed: {exc}")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/generate_confidence_lesson")
+async def generate_confidence_lesson(request: dict):
+    """
+    Generate a mini lesson from confidence tree data.
+    
+    Request body:
+    {
+        "nodes": [...],  # List of node dictionaries from confidence tree
+        "baseline": 80,  # Optional, default 80
+    }
+    
+    Returns lesson plan compatible with existing lesson system.
+    """
+    try:
+        from lesson_generator import generate_confidence_lesson
+        from tag_analyzer import track_tag_across_branches
+        from confidence_engine import NodeState
+        
+        nodes_data = request.get("nodes", [])
+        baseline = request.get("baseline", 80)
+        
+        if not nodes_data:
+            raise HTTPException(status_code=400, detail="No nodes provided")
+        
+        # Convert node dictionaries to NodeState objects
+        # We need to reconstruct NodeState from the payload
+        nodes = []
+        for node_data in nodes_data:
+            # Create a minimal NodeState-like object
+            # The lesson generator only needs basic attributes
+            class NodeWrapper:
+                def __init__(self, data):
+                    self.id = data.get("id", "")
+                    self.parent_id = data.get("parent_id")
+                    self.role = data.get("role", "")
+                    self.ply_index = data.get("ply_index", 0)
+                    self.confidence = data.get("ConfidencePercent", 0)
+                    self.frozen_confidence = data.get("frozen_confidence")
+                    self.has_branches = data.get("has_branches", False)
+                    self.fen = data.get("fen", "")
+                    self.move = data.get("move")
+                    self.metadata = data.get("metadata", {})
+                    self.shape = data.get("shape", "circle")
+                    self.color = data.get("color", "red")
+            
+            nodes.append(NodeWrapper(node_data))
+        
+        # Generate lesson
+        lesson_plan = await generate_confidence_lesson(nodes, baseline=baseline)
+        
+        # Save lesson snapshot (optional, for consistency with other lesson types)
+        lessons_dir = os.path.join(os.path.dirname(__file__), "confidence_lessons")
+        os.makedirs(lessons_dir, exist_ok=True)
+        import uuid
+        lesson_id = str(uuid.uuid4())
+        snapshot_path = os.path.join(lessons_dir, f"{lesson_id}.json")
+        
+        with open(snapshot_path, "w") as f:
+            json.dump({**lesson_plan, "lesson_id": lesson_id}, f, indent=2)
+        
+        return {**lesson_plan, "lesson_id": lesson_id}
+    
+    except Exception as e:
+        import traceback
+        error_detail = f"Confidence lesson generation error: {str(e)}\n{traceback.format_exc()}"
+        print(error_detail)
+        raise HTTPException(status_code=500, detail=f"Failed to generate confidence lesson: {str(e)}")
+
+
+@app.post("/check_opening_move")
+async def check_opening_move(fen: str, move_san: str, lesson_id: str):
+    """
+    Check if a move is popular/valid in an opening lesson context.
+    
+    Input: FEN, move SAN, lesson ID
+    Output: {"correct": bool, "is_popular": bool, "popularity": float, 
+             "feedback": str, "popular_alternatives": List[Dict]}
+    """
+    if not explorer_client:
+        raise HTTPException(status_code=500, detail="Explorer client not initialized")
+    
+    try:
+        # Load lesson snapshot
+        backend_dir = os.path.dirname(os.path.abspath(__file__))
+        lessons_dir = os.path.join(backend_dir, "opening_lessons")
+        snapshot_path = os.path.join(lessons_dir, f"{lesson_id}.json")
+        
+        if not os.path.exists(snapshot_path):
+            raise HTTPException(status_code=404, detail="Lesson not found")
+        
+        with open(snapshot_path, "r") as f:
+            lesson_plan = json.load(f)
+        
+        # Query explorer for current position
+        meta = lesson_plan.get("meta", {})
+        db = meta.get("db", "lichess")
+        rating_range = meta.get("rating_range", [1600, 2000])
+        
+        explorer_data = await explorer_client.query_position(
+            fen=fen,
+            db=db,
+            ratings=rating_range
+        )
+        
+        total_games = explorer_data.get("white", 0) + explorer_data.get("draws", 0) + explorer_data.get("black", 0)
+        
+        if total_games == 0:
+            return {
+                "correct": True,
+                "is_popular": True,
+                "popularity": 0.0,
+                "feedback": "Position not in database, allowing move",
+                "popular_alternatives": []
+            }
+        
+        # Find player's move in explorer data
+        moves = explorer_data.get("moves", [])
+        player_move = None
+        player_games = 0
+        
+        for move in moves:
+            if move.get("san") == move_san:
+                player_move = move
+                player_games = move.get("white", 0) + move.get("draws", 0) + move.get("black", 0)
+                break
+        
+        if not player_move:
+            # Move not in database at all
+            popularity = 0.0
+        else:
+            popularity = player_games / total_games
+        
+        # Get top popular moves
+        move_popularities = []
+        for move in moves:
+            games = move.get("white", 0) + move.get("draws", 0) + move.get("black", 0)
+            pop = games / total_games
+            move_popularities.append((move, pop, games))
+        
+        move_popularities.sort(key=lambda x: x[1], reverse=True)
+        
+        # Check if move is in top 2 (popular enough)
+        is_popular = False
+        top_moves = [m[0]["san"] for m in move_popularities[:2]]
+        
+        if move_san in top_moves:
+            is_popular = True
+        
+        # Get alternatives
+        popular_alternatives = []
+        for move_data, pop, games in move_popularities[:4]:
+            if move_data["san"] != move_san:
+                popular_alternatives.append({
+                    "san": move_data["san"],
+                    "pop": pop,
+                    "games": games
+                })
+        
+        # Generate feedback
+        if is_popular:
+            feedback = f"Good! {move_san} is a popular choice ({popularity*100:.0f}% of games)"
+        else:
+            feedback = f"{move_san} is uncommon ({popularity*100:.1f}% of games)"
+            if popular_alternatives:
+                top_alt = popular_alternatives[0]
+                feedback += f". Most popular: {top_alt['san']} ({top_alt['pop']*100:.0f}%)"
+        
+        return {
+            "correct": is_popular,
+            "is_popular": is_popular,
+            "popularity": popularity,
+            "feedback": feedback,
+            "popular_alternatives": popular_alternatives
+        }
+    
+    except Exception as e:
+        import traceback
+        error_detail = f"Opening move check error: {str(e)}\n{traceback.format_exc()}"
+        print(error_detail)
+        raise HTTPException(status_code=500, detail=f"Failed to check opening move: {str(e)}")
+
+
+# ============================================================================
+# PERSONAL REVIEW SYSTEM ENDPOINTS
+# ============================================================================
+
+class FetchGamesRequest(BaseModel):
+    username: str
+    platform: str = "chess.com"  # "chess.com", "lichess", or "combined"
+    max_games: int = 100
+    months_back: int = 6
+    use_cache: bool = True
+
+
+@app.post("/fetch_player_games")
+async def fetch_player_games(request: FetchGamesRequest):
+    """Fetch games for a player from Chess.com or Lichess"""
+    if not game_fetcher:
+        raise HTTPException(status_code=503, detail="Game fetcher not initialized")
+    
+    try:
+        print(f"🎯 Fetching games for {request.username} from {request.platform}")
+        
+        # Try cache first
+        if request.use_cache:
+            cached_games = game_fetcher.load_cached_games(request.username, request.platform)
+            if cached_games:
+                return {
+                    "games": cached_games,
+                    "count": len(cached_games),
+                    "cached": True
+                }
+        
+        # Fetch fresh games
+        games = await game_fetcher.fetch_games(
+            username=request.username,
+            platform=request.platform,
+            max_games=request.max_games,
+            months_back=request.months_back
+        )
+        
+        # Cache the results
+        game_fetcher.cache_games(request.username, request.platform, games)
+        
+        print(f"✅ Fetched {len(games)} games")
+        
+        return {
+            "games": games,
+            "count": len(games),
+            "cached": False
+        }
+    
+    except Exception as e:
+        import traceback
+        error_detail = f"Fetch games error: {str(e)}\n{traceback.format_exc()}"
+        print(error_detail)
+        raise HTTPException(status_code=500, detail=f"Failed to fetch games: {str(e)}")
+
+
+class ProfileAccountPayload(BaseModel):
+    platform: Literal["chesscom", "lichess"] = "chesscom"
+    username: str = Field(..., min_length=1)
+
+
+class ProfilePreferencesPayload(BaseModel):
+    user_id: str = Field(..., min_length=1)
+    accounts: List[ProfileAccountPayload]
+    time_controls: List[str] = Field(default_factory=list)
+
+
+def _default_profile_status() -> Dict[str, Any]:
+    return {
+        "state": "idle",
+        "message": "Not started",
+        "total_accounts": 0,
+        "completed_accounts": 0,
+        "total_games_estimate": 0,
+        "games_indexed": 0,
+        "progress_percent": 0,
+        "started_at": None,
+        "finished_at": None,
+        "last_updated": None,
+        "last_error": None,
+        "accounts": [],
+    }
+
+
+def _profile_overview_payload(user_id: str, prefs_override: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    if not profile_indexer:
+        return {
+            "preferences": prefs_override or {},
+            "status": _default_profile_status(),
+            "highlights": [],
+            "games": [],
+        }
+
+    prefs = prefs_override or profile_indexer.load_preferences(user_id) or {}
+    if (not prefs) and supabase_client:
+        profile_row = supabase_client.get_or_create_profile(user_id)
+        if profile_row:
+            linked = profile_row.get("linked_accounts") or []
+            time_controls = profile_row.get("time_controls") or []
+            if linked or time_controls:
+                prefs = {"accounts": linked, "time_controls": time_controls}
+    
+    status = profile_indexer.get_status(user_id)
+    highlights = profile_indexer.get_highlights(user_id)
+    games = profile_indexer.get_games(user_id, limit=25)
+    return {
+        "preferences": prefs,
+        "status": status,
+        "highlights": highlights,
+        "games": games,
+    }
+
+
+@app.get("/profile/preferences")
+async def get_profile_preferences(user_id: str):
+    if not profile_indexer:
+        raise HTTPException(status_code=503, detail="Profile indexer not initialized")
+    prefs = profile_indexer.load_preferences(user_id) or {}
+    return {"preferences": prefs}
+
+
+@app.post("/profile/preferences")
+async def save_profile_preferences(payload: ProfilePreferencesPayload):
+    if not profile_indexer:
+        raise HTTPException(status_code=503, detail="Profile indexer not initialized")
+
+    normalized_accounts = [
+        {"platform": acc.platform, "username": acc.username.strip()}
+        for acc in payload.accounts
+        if acc.username.strip()
+    ]
+    prefs = {
+        "accounts": normalized_accounts,
+        "time_controls": [tc.lower() for tc in payload.time_controls],
+    }
+
+    profile_indexer.save_preferences(payload.user_id, prefs)
+    await profile_indexer.start_indexing(
+        user_id=payload.user_id,
+        accounts=prefs["accounts"],
+        time_controls=prefs["time_controls"],
+    )
+    return _profile_overview_payload(payload.user_id, prefs_override=prefs)
+
+
+@app.get("/profile/overview")
+async def profile_overview(user_id: str):
+    if not profile_indexer:
+        raise HTTPException(status_code=503, detail="Profile indexer not initialized")
+    overview = _profile_overview_payload(user_id)
+    await profile_indexer.ensure_background_index(user_id)
+    return overview
+
+
+@app.get("/profile/stats")
+async def profile_stats(user_id: str):
+    if not profile_indexer:
+        raise HTTPException(status_code=503, detail="Profile indexer not initialized")
+    stats = profile_indexer.get_stats(user_id)
+    return {"stats": stats}
+
+
+class PlanReviewRequest(BaseModel):
+    query: str
+    games: List[Dict]
+
+
+@app.post("/plan_personal_review")
+async def plan_personal_review(request: PlanReviewRequest):
+    """Plan a personal review based on natural language query"""
+    if not llm_planner:
+        raise HTTPException(status_code=503, detail="LLM planner not initialized")
+    
+    try:
+        print(f"🤔 Planning analysis for query: {request.query}")
+        
+        plan = llm_planner.plan_analysis(request.query, request.games)
+        
+        print(f"✅ Generated plan with intent: {plan.get('intent', 'unknown')}")
+        
+        return plan
+    
+    except Exception as e:
+        import traceback
+        error_detail = f"Plan review error: {str(e)}\n{traceback.format_exc()}"
+        print(error_detail)
+        raise HTTPException(status_code=500, detail=f"Failed to plan review: {str(e)}")
+
+
+class AggregateReviewRequest(BaseModel):
+    plan: Dict
+    games: List[Dict]
+
+
+@app.post("/aggregate_personal_review")
+async def aggregate_personal_review(request: AggregateReviewRequest):
+    """Aggregate statistics from analyzed games"""
+    if not review_aggregator or not engine:
+        raise HTTPException(status_code=503, detail="Aggregator or engine not initialized")
+    
+    try:
+        print(f"\n{'='*60}")
+        print(f"🎯 AGGREGATE_PERSONAL_REVIEW ENDPOINT CALLED")
+        print(f"{'='*60}")
+        
+        # First, analyze the games using existing review_game logic
+        # We'll analyze a subset based on the plan
+        games_to_analyze = request.plan.get("games_to_analyze", min(len(request.games), 50))
+        analysis_depth = request.plan.get("analysis_depth", 15)
+        
+        print(f"📊 Starting aggregation for {len(request.games)} games")
+        print(f"   Settings: depth={analysis_depth}, games_to_analyze={games_to_analyze}")
+        print(f"   Plan: {request.plan.get('intent', 'unknown')}")
+        print(f"   Filters: {request.plan.get('filters', {})}")
+        
+        analyzed_games = []
+        for idx, game in enumerate(request.games[:games_to_analyze]):
+            print(f"\n  ===== Analyzing game {idx + 1}/{games_to_analyze} =====")
+            print(f"  Game ID: {game.get('game_id', 'unknown')}")
+            print(f"  Platform: {game.get('platform', 'unknown')}")
+            print(f"  Player color: {game.get('player_color', 'unknown')}")
+            
+            try:
+                # Use the existing review_game logic
+                pgn_string = game.get("pgn", "")
+                if not pgn_string:
+                    print(f"  ⚠️ Skipping - no PGN data")
+                    continue
+                
+                print(f"  PGN length: {len(pgn_string)} chars")
+                
+                # Get player color for focused analysis
+                player_color = game.get("player_color", "white")
+                
+                # Call internal review function with player's side focus
+                review_result = await _review_game_internal(
+                    pgn_string=pgn_string,
+                    side_focus=player_color,
+                    include_timestamps=game.get("has_clock", False),
+                    engine_instance=engine,
+                    depth=analysis_depth
+                )
+                
+                # Skip if review failed
+                if "error" in review_result:
+                    print(f"  ❌ Review failed: {review_result['error']}")
+                    continue
+                
+                print(f"  ✅ Review complete: {len(review_result.get('ply_records', []))} moves analyzed")
+                
+                # Add metadata from the game
+                review_result["metadata"] = {
+                    "game_id": game.get("game_id"),
+                    "platform": game.get("platform"),
+                    "player_rating": game.get("player_rating"),
+                    "opponent_rating": game.get("opponent_rating"),
+                    "result": game.get("result"),
+                    "player_color": game.get("player_color"),
+                    "time_category": game.get("time_category"),
+                    "date": game.get("date")
+                }
+                
+                analyzed_games.append(review_result)
+            
+            except Exception as e:
+                print(f"    Warning: Failed to analyze game {idx + 1}: {e}")
+                continue
+        
+        print(f"\n{'='*60}")
+        print(f"✅ Analyzed {len(analyzed_games)} games successfully")
+        print(f"{'='*60}\n")
+        
+        if len(analyzed_games) == 0:
+            print(f"⚠️ WARNING: No games were successfully analyzed!")
+            return {
+                "error": "No games could be analyzed",
+                "summary": {"total_games": 0}
+            }
+        
+        # Now aggregate the results
+        print(f"🔄 Starting aggregation of {len(analyzed_games)} analyzed games...")
+        filters = request.plan.get("filters", {})
+        cohorts = request.plan.get("cohorts")
+        
+        print(f"   Calling review_aggregator.aggregate()...")
+        aggregated_data = review_aggregator.aggregate(
+            analyzed_games=analyzed_games,
+            filters=filters,
+            cohorts=cohorts
+        )
+        print(f"   ✅ Aggregation complete!")
+        
+        # Add action plan based on the data
+        print(f"   Generating action plan...")
+        aggregated_data["action_plan"] = _generate_action_plan(aggregated_data)
+        print(f"   ✅ Action plan generated")
+        
+        # Add analyzed games for training system (feed-through mode)
+        aggregated_data["analyzed_games"] = analyzed_games
+        
+        print(f"\n{'='*60}")
+        print(f"✅ AGGREGATION PIPELINE COMPLETE")
+        print(f"   Total games: {aggregated_data.get('total_games_analyzed', 0)}")
+        print(f"   Summary accuracy: {aggregated_data.get('summary', {}).get('overall_accuracy', 0):.1f}%")
+        print(f"   Analyzed games included: {len(analyzed_games)} (for training)")
+        print(f"{'='*60}\n")
+        
+        return aggregated_data
+    
+    except Exception as e:
+        import traceback
+        error_detail = f"\n{'='*60}\n❌ AGGREGATE REVIEW ERROR\n{'='*60}\n{str(e)}\n\n{traceback.format_exc()}\n{'='*60}\n"
+        print(error_detail)
+        raise HTTPException(status_code=500, detail=f"Failed to aggregate review: {str(e)}")
+
+
+@app.get("/personal_stats/{user_id}")
+async def get_personal_stats_endpoint(user_id: str):
+    """Get aggregated personal stats"""
+    if not stats_manager:
+        raise HTTPException(status_code=503, detail="Stats manager not initialized")
+    
+    try:
+        stats = stats_manager.get_stats(user_id)
+        return {"stats": stats}
+    except Exception as e:
+        import traceback
+        print(f"Error getting personal stats: {e}\n{traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Failed to get personal stats: {str(e)}")
+
+
+@app.post("/personal_stats/{user_id}/recalculate")
+async def recalculate_personal_stats_endpoint(user_id: str):
+    """Force full recalculation of personal stats"""
+    if not stats_manager:
+        raise HTTPException(status_code=503, detail="Stats manager not initialized")
+    
+    try:
+        stats = stats_manager.full_recalculate(user_id)
+        return {"stats": stats, "message": "Stats recalculated successfully"}
+    except Exception as e:
+        import traceback
+        print(f"Error recalculating personal stats: {e}\n{traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Failed to recalculate stats: {str(e)}")
+
+
+@app.post("/personal_stats/{user_id}/validate")
+async def validate_personal_stats_endpoint(user_id: str):
+    """Validate stats integrity"""
+    if not stats_manager:
+        raise HTTPException(status_code=503, detail="Stats manager not initialized")
+    
+    try:
+        validation = stats_manager.validate_stats(user_id)
+        return validation
+    except Exception as e:
+        import traceback
+        print(f"Error validating personal stats: {e}\n{traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Failed to validate stats: {str(e)}")
+
+
+def _generate_action_plan(data: Dict) -> List[str]:
+    """Generate simple action plan from data"""
+    actions = []
+    summary = data.get("summary", {})
+    phase_stats = data.get("phase_stats", {})
+    
+    # Check blunder rate
+    if summary.get("blunder_rate", 0) > 5:
+        actions.append("Focus on reducing blunders through tactical puzzles (3-5 puzzles daily)")
+    
+    # Check phase weaknesses
+    if phase_stats:
+        weakest_phase = min(phase_stats.items(), key=lambda x: x[1].get("accuracy", 100))
+        if weakest_phase[1].get("accuracy", 100) < 80:
+            actions.append(f"Study {weakest_phase[0]} principles - your accuracy is lower here")
+    
+    # Check opening performance
+    opening_perf = data.get("opening_performance", [])
+    if opening_perf:
+        worst_opening = min(opening_perf[:5], key=lambda x: x["win_rate"])
+        if worst_opening["win_rate"] < 40 and worst_opening["count"] >= 3:
+            actions.append(f"Review or replace {worst_opening['name']} - poor win rate")
+    
+    # Time management
+    time_mgmt = data.get("time_management", {})
+    if time_mgmt.get("fast_move_accuracy", 100) < time_mgmt.get("slow_move_accuracy", 0):
+        actions.append("Take more time on critical moves - fast moves show lower accuracy")
+    
+    # Default action if none triggered
+    if not actions:
+        actions.append("Continue your current training routine - maintain consistency")
+        actions.append("Focus on converting winning positions to reduce draws")
+    
+    return actions
+
+
+class GenerateReportRequest(BaseModel):
+    query: str
+    plan: Dict
+    data: Dict
+
+
+@app.post("/generate_personal_report")
+async def generate_personal_report(request: GenerateReportRequest):
+    """Generate natural language report from aggregated data"""
+    if not llm_reporter:
+        raise HTTPException(status_code=503, detail="LLM reporter not initialized")
+    
+    try:
+        print(f"📝 Generating report...")
+        
+        report = llm_reporter.generate_report(
+            query=request.query,
+            plan=request.plan,
+            data=request.data
+        )
+        
+        print(f"✅ Report generated")
+        
+        return {"report": report}
+    
+    except Exception as e:
+        import traceback
+        error_detail = f"Generate report error: {str(e)}\n{traceback.format_exc()}"
+        print(error_detail)
+        raise HTTPException(status_code=500, detail=f"Failed to generate report: {str(e)}")
+
+
+@app.post("/compare_cohorts")
+async def compare_cohorts(cohorts: List[Dict], games: List[Dict]):
+    """Compare statistics between different cohorts"""
+    if not review_aggregator:
+        raise HTTPException(status_code=503, detail="Aggregator not initialized")
+    
+    try:
+        comparison = review_aggregator._compare_cohorts(games, cohorts)
+        return {"comparison": comparison}
+    
+    except Exception as e:
+        import traceback
+        error_detail = f"Compare cohorts error: {str(e)}\n{traceback.format_exc()}"
+        print(error_detail)
+        raise HTTPException(status_code=500, detail=f"Failed to compare cohorts: {str(e)}")
+
+
+# ============================================================================
+# TRAINING & DRILL SYSTEM ENDPOINTS
+# ============================================================================
+
+class MinePositionsRequest(BaseModel):
+    analyzed_games: List[Dict]
+    focus_tags: Optional[List[str]] = None
+    max_positions: int = 20
+    phase_filter: Optional[str] = None
+    side_filter: Optional[str] = None
+    include_critical_choices: bool = True
+
+
+@app.post("/mine_positions")
+async def mine_positions_endpoint(request: MinePositionsRequest):
+    """Mine training positions from analyzed games"""
+    if not position_miner:
+        raise HTTPException(status_code=503, detail="Position miner not initialized")
+    
+    try:
+        print(f"⛏️ Mining positions from {len(request.analyzed_games)} games")
+        
+        positions = position_miner.mine_positions(
+            analyzed_games=request.analyzed_games,
+            focus_tags=request.focus_tags,
+            max_positions=request.max_positions,
+            phase_filter=request.phase_filter,
+            side_filter=request.side_filter,
+            include_critical_choices=request.include_critical_choices
+        )
+        
+        print(f"✅ Mined {len(positions)} positions")
+        
+        return {"positions": positions, "count": len(positions)}
+    
+    except Exception as e:
+        import traceback
+        error_detail = f"Mine positions error: {str(e)}\n{traceback.format_exc()}"
+        print(error_detail)
+        raise HTTPException(status_code=500, detail=f"Failed to mine positions: {str(e)}")
+
+
+class GenerateDrillsRequest(BaseModel):
+    positions: List[Dict]
+    drill_types: List[str] = ["tactics"]
+    verify_ground_truth: bool = True
+    verify_depth: int = 18
+
+
+@app.post("/generate_drills")
+async def generate_drills_endpoint(request: GenerateDrillsRequest):
+    """Generate drills from mined positions"""
+    if not drill_generator or not engine:
+        raise HTTPException(status_code=503, detail="Drill generator or engine not initialized")
+    
+    try:
+        print(f"🎯 Generating drills from {len(request.positions)} positions")
+        
+        drills = await drill_generator.generate_drills(
+            positions=request.positions,
+            drill_types=request.drill_types,
+            engine=engine if request.verify_ground_truth else None,
+            verify_depth=request.verify_depth
+        )
+        
+        print(f"✅ Generated {len(drills)} drills")
+        
+        return {"drills": drills, "count": len(drills)}
+    
+    except Exception as e:
+        import traceback
+        error_detail = f"Generate drills error: {str(e)}\n{traceback.format_exc()}"
+        print(error_detail)
+        raise HTTPException(status_code=500, detail=f"Failed to generate drills: {str(e)}")
+
+
+class PlanTrainingRequest(BaseModel):
+    query: str
+    analyzed_games: Optional[List[Dict]] = None
+    user_stats: Optional[Dict] = None
+
+
+@app.post("/plan_training")
+async def plan_training_endpoint(request: PlanTrainingRequest):
+    """Plan training based on query"""
+    if not training_planner:
+        raise HTTPException(status_code=503, detail="Training planner not initialized")
+    
+    try:
+        print(f"📋 Planning training for query: {request.query}")
+        
+        blueprint = training_planner.plan_training(
+            query=request.query,
+            analyzed_games=request.analyzed_games,
+            user_stats=request.user_stats
+        )
+        
+        print(f"✅ Training blueprint created")
+        
+        return blueprint
+    
+    except Exception as e:
+        import traceback
+        error_detail = f"Plan training error: {str(e)}\n{traceback.format_exc()}"
+        print(error_detail)
+        raise HTTPException(status_code=500, detail=f"Failed to plan training: {str(e)}")
+
+
+class CreateTrainingSessionRequest(BaseModel):
+    username: str
+    analyzed_games: List[Dict]
+    training_query: str
+    mode: str = "quick"
+
+
+@app.post("/create_training_session")
+async def create_training_session_endpoint(request: CreateTrainingSessionRequest):
+    """Create complete training session from analyzed games"""
+    if not training_planner or not position_miner or not drill_generator or not srs_scheduler:
+        raise HTTPException(status_code=503, detail="Training system not fully initialized")
+    
+    try:
+        print(f"\n{'='*60}")
+        print(f"🎓 CREATE TRAINING SESSION")
+        print(f"{'='*60}")
+        print(f"   User: {request.username}")
+        print(f"   Query: {request.training_query}")
+        print(f"   Mode: {request.mode}")
+        print(f"   Analyzed games: {len(request.analyzed_games)}")
+        
+        # Step 1: Plan training
+        print(f"\n📋 Step 1: Planning training...")
+        blueprint = training_planner.plan_training(
+            query=request.training_query,
+            analyzed_games=request.analyzed_games
+        )
+        
+        # Step 2: Mine positions
+        print(f"\n⛏️ Step 2: Mining positions...")
+        positions = position_miner.mine_positions(
+            analyzed_games=request.analyzed_games,
+            focus_tags=blueprint.get("focus_tags"),
+            max_positions=blueprint.get("session_config", {}).get("length", 20),
+            phase_filter=blueprint.get("context_filters", {}).get("phases", [None])[0] if blueprint.get("context_filters", {}).get("phases") else None
+        )
+        
+        # Check if no positions found
+        if len(positions) == 0:
+            print(f"\n⚠️ NO POSITIONS FOUND - Returning empty session")
+            return {
+                "session_id": None,
+                "cards": [],
+                "total_cards": 0,
+                "blueprint": blueprint,
+                "search_criteria": blueprint.get("search_criteria", []),
+                "message": "No relevant positions found. Try a broader query or analyze more games.",
+                "empty": True
+            }
+        
+        # Step 3: Generate drills
+        print(f"\n🎯 Step 3: Generating drills...")
+        drills = await drill_generator.generate_drills(
+            positions=positions,
+            drill_types=blueprint.get("drill_types", ["tactics"]),
+            engine=engine,
+            verify_depth=15  # Faster verification
+        )
+        
+        # Step 4: Load or create card database for user
+        print(f"\n💾 Step 4: Loading card database...")
+        if request.username not in card_databases:
+            card_databases[request.username] = CardDatabase()
+            card_databases[request.username].load(request.username)
+        
+        card_db = card_databases[request.username]
+        
+        # Step 5: Create session
+        print(f"\n📚 Step 5: Building session...")
+        # Add new drills to database
+        from drill_card import DrillCard
+        for drill in drills:
+            if drill["card_id"] not in card_db.cards:
+                card = DrillCard(
+                    card_id=drill["card_id"],
+                    fen=drill["fen"],
+                    side_to_move=drill["side_to_move"],
+                    best_move_san=drill["best_move_san"],
+                    best_move_uci=drill["best_move_uci"],
+                    tags=drill["tags"],
+                    themes={},
+                    difficulty=drill["difficulty"],
+                    source=drill["source"]
+                )
+                card_db.add_card(card)
+        
+        # Build session from cards
+        session = srs_scheduler.create_session(
+            card_db=card_db,
+            session_length=blueprint.get("session_config", {}).get("length", 20),
+            mode=request.mode
+        )
+        
+        # Add blueprint and metadata to session
+        session["blueprint"] = blueprint
+        session["lesson_goals"] = blueprint.get("lesson_goals", [])
+        session["search_criteria"] = blueprint.get("search_criteria", [])
+        session["empty"] = False
+        
+        # Save updated database
+        card_db.save(request.username)
+        
+        print(f"\n{'='*60}")
+        print(f"✅ TRAINING SESSION CREATED")
+        print(f"   Session ID: {session['session_id']}")
+        print(f"   Total drills: {session['total_cards']}")
+        print(f"   Composition: {session['composition']}")
+        print(f"   Search criteria matched: {len(session['search_criteria'])} criteria")
+        print(f"{'='*60}\n")
+        
+        return session
+    
+    except Exception as e:
+        import traceback
+        error_detail = f"\n{'='*60}\n❌ CREATE TRAINING SESSION ERROR\n{'='*60}\n{str(e)}\n\n{traceback.format_exc()}\n{'='*60}\n"
+        print(error_detail)
+        raise HTTPException(status_code=500, detail=f"Failed to create training session: {str(e)}")
+
+
+class UpdateDrillResultRequest(BaseModel):
+    username: str
+    card_id: str
+    correct: bool
+    time_s: float
+    hints_used: int = 0
+
+
+@app.post("/update_drill_result")
+async def update_drill_result_endpoint(request: UpdateDrillResultRequest):
+    """Update drill card after attempt"""
+    try:
+        if request.username not in card_databases:
+            card_databases[request.username] = CardDatabase()
+            card_databases[request.username].load(request.username)
+        
+        card_db = card_databases[request.username]
+        
+        if request.card_id not in card_db.cards:
+            raise HTTPException(status_code=404, detail="Card not found")
+        
+        card = card_db.cards[request.card_id]
+        card.update_srs(request.correct, request.time_s)
+        card.stats["hints_used"] += request.hints_used
+        
+        # Save updated database
+        card_db.save(request.username)
+        
+        return {
+            "success": True,
+            "new_due_date": card.srs_state["due_date"],
+            "interval_days": card.srs_state["interval_days"],
+            "stage": card.srs_state["stage"]
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        error_detail = f"Update drill result error: {str(e)}\n{traceback.format_exc()}"
+        print(error_detail)
+        raise HTTPException(status_code=500, detail=f"Failed to update drill result: {str(e)}")
+
+
+@app.get("/get_srs_queue")
+async def get_srs_queue_endpoint(username: str, max_cards: int = 20):
+    """Get due drills for user"""
+    try:
+        if username not in card_databases:
+            card_databases[username] = CardDatabase()
+            card_databases[username].load(username)
+        
+        card_db = card_databases[username]
+        due_cards = card_db.get_due_cards(max_cards)
+        
+        return {
+            "cards": [card.to_dict() for card in due_cards],
+            "count": len(due_cards)
+        }
+    
+    except Exception as e:
+        import traceback
+        error_detail = f"Get SRS queue error: {str(e)}\n{traceback.format_exc()}"
+        print(error_detail)
+        raise HTTPException(status_code=500, detail=f"Failed to get SRS queue: {str(e)}")
+
 
 if __name__ == "__main__":
     import uvicorn

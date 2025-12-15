@@ -33,6 +33,14 @@ namespace Eval {
   std::string trace(Position& pos);
   Value evaluate(const Position& pos);
 
+  // Debug / interpretability flags (set via UCI options)
+  extern bool dumpNNUE;
+  extern bool dumpFeatures;
+  extern bool dumpActivations;
+  extern bool dumpClassical;
+  extern std::string dumpPath;
+  void refresh_debug_options();
+
   extern bool useNNUE;
   extern std::string currentEvalFileName;
 

@@ -38,6 +38,8 @@ export default function Board({
     }
   }, [fen]);
 
+  // react-chessboard handles its own responsive sizing via ResizeObserver
+
   // Update square styles for highlights
   useEffect(() => {
     const styles: { [square: string]: React.CSSProperties } = {};

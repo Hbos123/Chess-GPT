@@ -280,6 +280,29 @@ void UCI::loop(int argc, char* argv[]) {
       else if (token == "bench")    bench(pos, is, states);
       else if (token == "d")        sync_cout << pos << sync_endl;
       else if (token == "eval")     trace_eval(pos);
+      else if (token == "maskpiece")
+      {
+          std::string sqStr;
+          if (!(is >> sqStr))
+          {
+              sync_cout << "info string maskpiece requires a square" << sync_endl;
+          }
+          else
+          {
+              Square sq = UCI::to_square(sqStr);
+              StateListPtr states(new std::deque<StateInfo>(1));
+              Position p;
+              p.set(pos.fen(), Options["UCI_Chess960"], &states->back(), Threads.main());
+              Piece pc = p.piece_on(sq);
+              if (pc != NO_PIECE)
+                  p.remove_piece(sq);
+              Value masked = Eval::evaluate(p);
+              sync_cout << "info string maskpiece " << sqStr
+                        << " piece=" << (pc == NO_PIECE ? "none" : std::to_string(pc))
+                        << " eval_cp=" << masked * 100 / UCI::NormalizeToPawnValue
+                        << sync_endl;
+          }
+      }
       else if (token == "compiler") sync_cout << compiler_info() << sync_endl;
       else if (token == "export_net")
       {
@@ -349,6 +372,16 @@ string UCI::wdl(Value v, int ply) {
 
 std::string UCI::square(Square s) {
   return std::string{ char('a' + file_of(s)), char('1' + rank_of(s)) };
+}
+
+Square UCI::to_square(const std::string& s) {
+  if (s.size() != 2)
+      return SQ_NONE;
+  File f = File(s[0] - 'a');
+  Rank r = Rank(s[1] - '1');
+  if (f < FILE_A || f > FILE_H || r < RANK_1 || r > RANK_8)
+      return SQ_NONE;
+  return make_square(f, r);
 }
 
 

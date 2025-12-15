@@ -78,6 +78,7 @@ void init(OptionsMap&);
 void loop(int argc, char* argv[]);
 std::string value(Value v);
 std::string square(Square s);
+Square to_square(const std::string& s);
 std::string move(Move m, bool chess960);
 std::string pv(const Position& pos, Depth depth);
 std::string wdl(Value v, int ply);

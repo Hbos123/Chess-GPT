@@ -335,6 +335,13 @@ namespace Stockfish::Eval::NNUE {
       return psqt;
     } // end of function transform()
 
+    // Debug-only: zero the entire transformed buffer to approximate masking.
+    // This is coarse: it zeros all features; we will zero the buffer provided by caller.
+    // Used only in debug dumps; normal eval remains unchanged.
+    void mask_transformed_buffer(OutputType* output) const {
+      std::memset(output, 0, sizeof(OutputType) * OutputDimensions);
+    }
+
     void hint_common_access(const Position& pos) const {
       hint_common_access_for_perspective<WHITE>(pos);
       hint_common_access_for_perspective<BLACK>(pos);

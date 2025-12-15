@@ -24,6 +24,7 @@
 #include <set>
 #include <sstream>
 #include <string_view>
+#include <vector>
 
 #include "../evaluate.h"
 #include "../position.h"
@@ -142,7 +143,47 @@ namespace Stockfish::Eval::NNUE {
   }
 
   // Evaluation function. Perform differential calculation.
-  Value evaluate(const Position& pos, bool adjusted, int* complexity) {
+  // Helper to mask by zeroing transformed feature buffer (coarse)
+  Value evaluate_masked(const Position& pos, Square /*sq*/, bool adjusted, bool /*useNNUE*/, DebugInfo* debug) {
+    constexpr uint64_t alignment = CacheLineSize;
+    constexpr int delta = 24;
+
+#if defined(ALIGNAS_ON_STACK_VARIABLES_BROKEN)
+    TransformedFeatureType transformedFeaturesUnaligned[
+      FeatureTransformer::BufferSize + alignment / sizeof(TransformedFeatureType)];
+
+    auto* transformedFeatures = align_ptr_up<alignment>(&transformedFeaturesUnaligned[0]);
+#else
+    alignas(alignment)
+      TransformedFeatureType transformedFeatures[FeatureTransformer::BufferSize];
+#endif
+    ASSERT_ALIGNED(transformedFeatures, alignment);
+
+    const int bucket = (pos.count<ALL_PIECES>() - 1) / 4;
+
+    // Accumulate normally
+    featureTransformer->transform(pos, transformedFeatures, bucket);
+    // Mask: zero transformed buffer (coarse approximation)
+    featureTransformer->mask_transformed_buffer(transformedFeatures);
+
+    const auto positional = network[bucket]->propagate(transformedFeatures);
+    const auto psqt = 0; // psqt zeroed by masking
+
+    Value result;
+    if (adjusted)
+        result = static_cast<Value>(((1024 - delta) * psqt + (1024 + delta) * positional) / (1024 * OutputScale));
+    else
+        result = static_cast<Value>((psqt + positional) / OutputScale);
+
+    if (debug) {
+      debug->bucket = bucket;
+      debug->psqt_raw = psqt;
+      debug->positional_raw = positional;
+    }
+    return result;
+  }
+
+  Value evaluate(const Position& pos, bool adjusted, int* complexity, DebugInfo* debug) {
 
     // We manually align the arrays on the stack because with gcc < 9.3
     // overaligning stack variables with alignas() doesn't work correctly.
@@ -170,10 +211,25 @@ namespace Stockfish::Eval::NNUE {
         *complexity = abs(psqt - positional) / OutputScale;
 
     // Give more value to positional evaluation when adjusted flag is set
+    Value result;
     if (adjusted)
-        return static_cast<Value>(((1024 - delta) * psqt + (1024 + delta) * positional) / (1024 * OutputScale));
+        result = static_cast<Value>(((1024 - delta) * psqt + (1024 + delta) * positional) / (1024 * OutputScale));
     else
-        return static_cast<Value>((psqt + positional) / OutputScale);
+        result = static_cast<Value>((psqt + positional) / OutputScale);
+
+    if (debug)
+    {
+        debug->bucket = bucket;
+        debug->psqt_raw = psqt;
+        debug->positional_raw = positional;
+        debug->transformed_features.assign(
+            transformedFeatures,
+            transformedFeatures + FeatureTransformer::BufferSize);
+        debug->layer_outputs.clear();
+        debug->layer_outputs.push_back(positional);
+    }
+
+    return result;
   }
 
   struct NnueEvalTrace {

@@ -4,6 +4,8 @@ import { useState, useRef, useEffect } from "react";
 import type { ChatMessage, Mode, Annotation } from "@/types";
 import OpenAI from "openai";
 import EvalGraph from "./EvalGraph";
+import MarkdownTable from "./MarkdownTable";
+import ExpandableTable from "./ExpandableTable";
 
 interface ChatProps {
   messages: ChatMessage[];
@@ -21,6 +23,7 @@ interface ChatProps {
   lessonMode?: boolean;
   isOffMainLine?: boolean;
   onReturnToMainLine?: () => void;
+  isAnalyzing?: boolean;  // Block input while analyzing
 }
 
 export default function Chat({
@@ -39,6 +42,7 @@ export default function Chat({
   lessonMode,
   isOffMainLine,
   onReturnToMainLine,
+  isAnalyzing,
 }: ChatProps) {
   const [input, setInput] = useState("");
   const [showMetaModal, setShowMetaModal] = useState(false);
@@ -71,12 +75,88 @@ export default function Chat({
     setShowMetaModal(true);
   };
 
+  const formatSystemMessage = (content: string) => {
+    // Convert **text** to bold
+    const boldRegex = /\*\*(.+?)\*\*/g;
+    const parts: (string | JSX.Element)[] = [];
+    let lastIndex = 0;
+    let match;
+    let key = 0;
+
+    while ((match = boldRegex.exec(content)) !== null) {
+      // Add text before the match
+      if (match.index > lastIndex) {
+        parts.push(content.substring(lastIndex, match.index));
+      }
+      // Add bold text
+      parts.push(<strong key={key++}>{match[1]}</strong>);
+      lastIndex = match.index + match[0].length;
+    }
+
+    // Add remaining text
+    if (lastIndex < content.length) {
+      parts.push(content.substring(lastIndex));
+    }
+
+    return parts.length > 0 ? parts : content;
+  };
+
+  // Parse message content and extract markdown tables
+  const parseMessageContent = (content: string): Array<{type: 'text' | 'table', content: string}> => {
+    const lines = content.split('\n');
+    const blocks: Array<{type: 'text' | 'table', content: string}> = [];
+    let currentBlock: string[] = [];
+    let inTable = false;
+    
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      const isTableLine = line.trim().startsWith('|') && line.trim().endsWith('|');
+      
+      if (isTableLine) {
+        if (!inTable) {
+          // Start of table - save any previous text block
+          if (currentBlock.length > 0) {
+            blocks.push({ type: 'text', content: currentBlock.join('\n') });
+            currentBlock = [];
+          }
+          inTable = true;
+        }
+        currentBlock.push(line);
+      } else {
+        if (inTable) {
+          // End of table - save table block
+          if (currentBlock.length > 0) {
+            blocks.push({ type: 'table', content: currentBlock.join('\n') });
+            currentBlock = [];
+          }
+          inTable = false;
+        }
+        currentBlock.push(line);
+      }
+    }
+    
+    // Save remaining block
+    if (currentBlock.length > 0) {
+      blocks.push({ 
+        type: inTable ? 'table' : 'text', 
+        content: currentBlock.join('\n') 
+      });
+    }
+    
+    return blocks;
+  };
+
   const formatMessageWithColors = (content: string, meta?: any) => {
     // Remove surrounding quotes if present
     let cleaned = content.trim();
     if (cleaned.startsWith('"') && cleaned.endsWith('"')) {
       cleaned = cleaned.slice(1, -1);
     }
+    
+    // Convert ### headers to bold text with proper spacing
+    // Match any ### header and replace with bold, ensuring line break before
+    cleaned = cleaned.replace(/([^\n])###\s+(.+?)$/gm, '$1\n\n**$2**\n');
+    cleaned = cleaned.replace(/^###\s+(.+?)$/gm, '**$1**\n');
     
     // Process markdown bold text first (**text** or *text*)
     const processBoldText = (text: string): (string | JSX.Element)[] => {
@@ -281,6 +361,14 @@ export default function Chat({
                   {msg.buttonLabel || 'Start Walkthrough'}
                 </button>
               </div>
+            ) : msg.role === 'expandable_table' ? (
+              <div className="message message-expandable">
+                <ExpandableTable 
+                  title={msg.tableTitle || 'Details'} 
+                  content={msg.tableContent || ''} 
+                  defaultOpen={false}
+                />
+              </div>
             ) : (
               <div className={`message message-${msg.role}`}>
                 <div className="message-role">
@@ -301,9 +389,23 @@ export default function Chat({
                 </div>
                 <div className="message-content">
                   {typeof msg.content === "string" ? (
-                    <pre className="message-text">
-                      {msg.role === "assistant" ? formatMessageWithColors(msg.content, msg.meta) : msg.content}
-                    </pre>
+                    <>
+                      {parseMessageContent(msg.content).map((block, blockIndex) => {
+                        if (block.type === 'table') {
+                          return <MarkdownTable key={blockIndex} content={block.content} />;
+                        } else {
+                          return (
+                            <pre key={blockIndex} className="message-text">
+                              {msg.role === "assistant" 
+                                ? formatMessageWithColors(block.content, msg.meta) 
+                                : msg.role === "system"
+                                  ? formatSystemMessage(block.content)
+                                  : block.content}
+                            </pre>
+                          );
+                        }
+                      })}
+                    </>
                   ) : (
                     <div>{JSON.stringify(msg.content, null, 2)}</div>
                   )}
@@ -347,12 +449,13 @@ export default function Chat({
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder={`Ask about the position (${mode} mode)...`}
+          placeholder={isAnalyzing ? "⏳ Analyzing position..." : `Ask about the position (${mode} mode)...`}
           className="chat-input"
           rows={3}
+          disabled={isAnalyzing}
         />
-        <button onClick={handleSend} className="send-button" disabled={!input.trim()}>
-          Send
+        <button onClick={handleSend} className="send-button" disabled={!input.trim() || isAnalyzing}>
+          {isAnalyzing ? "⏳ Analyzing..." : "Send"}
         </button>
       </div>
 
@@ -398,9 +501,38 @@ export default function Chat({
               )}
               
               {selectedMeta.rawEngineData && (
+                <>
+                  {selectedMeta.rawEngineData.move_analysis && (
+                    <div className="meta-section">
+                      <strong>📍 Move Analysis (Quality & Alternatives):</strong>
+                      <pre className="meta-data">{JSON.stringify(selectedMeta.rawEngineData.move_analysis, null, 2)}</pre>
+                    </div>
+                  )}
+                  <div className="meta-section">
+                    <strong>📊 Position Analysis (Full Engine Output):</strong>
+                    <pre className="meta-data">{JSON.stringify(
+                      // Exclude move_analysis to avoid duplication
+                      Object.fromEntries(
+                        Object.entries(selectedMeta.rawEngineData).filter(([k]) => k !== 'move_analysis')
+                      ), 
+                      null, 
+                      2
+                    )}</pre>
+                  </div>
+                </>
+              )}
+              
+              {selectedMeta.tool_context && (
                 <div className="meta-section">
-                  <strong>Raw Engine Output:</strong>
-                  <pre className="meta-data">{JSON.stringify(selectedMeta.rawEngineData, null, 2)}</pre>
+                  <strong>🔧 Context Sent to LLM:</strong>
+                  <pre className="meta-data">{JSON.stringify(selectedMeta.tool_context, null, 2)}</pre>
+                </div>
+              )}
+              
+              {selectedMeta.tool_raw_data && (
+                <div className="meta-section">
+                  <strong>🔧 Tool Calls Made:</strong>
+                  <pre className="meta-data">{JSON.stringify(selectedMeta.tool_raw_data, null, 2)}</pre>
                 </div>
               )}
             </div>

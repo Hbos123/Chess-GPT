@@ -31,6 +31,17 @@ namespace Stockfish::Eval::NNUE {
   constexpr std::uint32_t HashValue =
       FeatureTransformer::get_hash_value() ^ Network::get_hash_value();
 
+  struct DebugInfo {
+    int bucket = 0;
+    int psqt_raw = 0;
+    int positional_raw = 0;
+    std::vector<int> transformed_features;
+    std::vector<int> layer_outputs;
+    // Masked eval (feature-plane zeroing) per square, NNUE on/off
+    std::vector<std::pair<std::string, int>> masked_total;
+    std::vector<std::pair<std::string, int>> masked_classical;
+  };
+
 
   // Deleter for automating release of memory area
   template <typename T>
@@ -56,7 +67,7 @@ namespace Stockfish::Eval::NNUE {
   using LargePagePtr = std::unique_ptr<T, LargePageDeleter<T>>;
 
   std::string trace(Position& pos);
-  Value evaluate(const Position& pos, bool adjusted = false, int* complexity = nullptr);
+  Value evaluate(const Position& pos, bool adjusted = false, int* complexity = nullptr, DebugInfo* debug = nullptr);
   void hint_common_parent_position(const Position& pos);
 
   bool load_eval(std::string name, std::istream& stream);

@@ -26,6 +26,8 @@
 #include <iostream>
 #include <streambuf>
 #include <vector>
+#include <chrono>
+#include <sys/stat.h>
 
 #include "bitboard.h"
 #include "evaluate.h"
@@ -62,6 +64,23 @@ namespace Eval {
 
   bool useNNUE;
   string currentEvalFileName = "None";
+  bool dumpNNUE = false;
+  bool dumpFeatures = false;
+  bool dumpActivations = false;
+  bool dumpClassical = false;
+  string dumpPath = "chess-interpretability/stockfish-modified/nnue-dumps";
+// Guard to prevent recursive dumps during internal masked evaluations
+thread_local bool dump_guard = false;
+
+  void refresh_debug_options() {
+    dumpNNUE        = Options["DumpNNUE"];
+    dumpFeatures    = Options["DumpFeatures"];
+    dumpActivations = Options["DumpActivations"];
+    dumpClassical   = Options["DumpClassical"];
+    dumpPath        = std::string(Options["DumpPath"]);
+    if (!dumpPath.empty() && dumpPath.back() == '/')
+      dumpPath.pop_back();
+  }
 
   /// NNUE::init() tries to load a NNUE network at startup time, or when the engine
   /// receives a UCI command "setoption name EvalFile value nn-[a-z0-9]{12}.nnue"
@@ -1043,12 +1062,297 @@ make_v:
 } // namespace Eval
 
 
+namespace {
+
+  static std::string piece_to_string(Piece pc) {
+    Color c = color_of(pc);
+    PieceType pt = type_of(pc);
+    std::string name;
+    name += (c == WHITE ? "white_" : "black_");
+    switch (pt) {
+      case KING:   name += "king"; break;
+      case QUEEN:  name += "queen"; break;
+      case ROOK:   name += "rook"; break;
+      case BISHOP: name += "bishop"; break;
+      case KNIGHT: name += "knight"; break;
+      case PAWN:   name += "pawn"; break;
+      default:     name += "unknown"; break;
+    }
+    return name;
+  }
+
+  // Create a FEN string with a piece removed at the given square
+  static std::string fen_without_piece(const std::string& fen, Square sq) {
+    // Parse board part of FEN
+    std::string result;
+    int file = 0, rank = 7;
+    size_t i = 0;
+    
+    for (; i < fen.size() && fen[i] != ' '; ++i) {
+      char c = fen[i];
+      if (c == '/') {
+        result += c;
+        rank--;
+        file = 0;
+      } else if (c >= '1' && c <= '8') {
+        int emptyCount = c - '0';
+        for (int j = 0; j < emptyCount; ++j) {
+          if (file == file_of(sq) && rank == rank_of(sq)) {
+            // This square should be empty - we're removing the piece
+            // But it's already counted as empty, so just continue
+          }
+          file++;
+        }
+        result += c;
+      } else {
+        // It's a piece
+        if (file == file_of(sq) && rank == rank_of(sq)) {
+          // Skip this piece - replace with empty square
+          // Need to merge with adjacent empty counts
+          if (!result.empty() && result.back() >= '1' && result.back() <= '7') {
+            result.back()++;
+          } else {
+            result += '1';
+          }
+        } else {
+          result += c;
+        }
+        file++;
+      }
+    }
+    
+    // Append the rest of the FEN (side to move, castling, etc.)
+    result += fen.substr(i);
+    
+    // Normalize consecutive empty squares (e.g., "11" -> "2")
+    std::string normalized;
+    for (size_t j = 0; j < result.size(); ++j) {
+      if (result[j] >= '1' && result[j] <= '8') {
+        int count = result[j] - '0';
+        while (j + 1 < result.size() && result[j + 1] >= '1' && result[j + 1] <= '8') {
+          count += result[j + 1] - '0';
+          j++;
+        }
+        if (count <= 8) {
+          normalized += ('0' + count);
+        } else {
+          // Shouldn't happen in valid FEN
+          normalized += '8';
+        }
+      } else {
+        normalized += result[j];
+      }
+    }
+    
+    return normalized;
+  }
+
+  static void dump_debug_payload(const Position& pos,
+                                 Value finalVal,
+                                 bool usedNNUE,
+                                 Value nnueVal,
+                                 Value classicalVal,
+                                 const Eval::NNUE::DebugInfo* nnueInfo) {
+    if (!(Eval::dumpNNUE || Eval::dumpFeatures || Eval::dumpActivations || Eval::dumpClassical))
+      return;
+
+    // Minimal mkdir -p equivalent without exceptions / filesystem
+    if (!Eval::dumpPath.empty()) {
+      std::string cmd = "mkdir -p \"" + Eval::dumpPath + "\"";
+      std::system(cmd.c_str());
+    }
+
+    // Build classical trace if requested
+    std::vector<std::array<int, 2>> classicalTerms;
+    if (Eval::dumpClassical) {
+      StateListPtr states(new std::deque<StateInfo>(1));
+      Position p;
+      p.set(pos.fen(), Options["UCI_Chess960"], &states->back(), Threads.main());
+      std::memset(scores, 0, sizeof(scores));
+      Evaluation<TRACE>(p).value();
+      classicalTerms.resize(TERM_NB);
+      for (int t = 0; t < TERM_NB; ++t) {
+        classicalTerms[t][0] = mg_value(scores[t][WHITE]);
+        classicalTerms[t][1] = mg_value(scores[t][BLACK]);
+      }
+    }
+
+    // Per-piece masked evaluations via FEN manipulation
+    // For each piece, create a new position with that piece removed and evaluate
+    std::vector<std::pair<std::string, long long>> maskedTotal;
+    std::vector<std::pair<std::string, long long>> maskedClassical;
+    
+    if (!Eval::dump_guard) {
+      Eval::dump_guard = true; // prevent recursive dumps
+      
+      // Save current dump flags and disable them during masked evals
+      bool savedDumpNNUE = Eval::dumpNNUE;
+      bool savedDumpFeatures = Eval::dumpFeatures;
+      bool savedDumpActivations = Eval::dumpActivations;
+      bool savedDumpClassical = Eval::dumpClassical;
+      Eval::dumpNNUE = Eval::dumpFeatures = Eval::dumpActivations = Eval::dumpClassical = false;
+      
+      std::string originalFen = pos.fen();
+      
+      for (Square s = SQ_A1; s <= SQ_H8; ++s) {
+        Piece pc = pos.piece_on(s);
+        if (pc == NO_PIECE) continue;
+        
+        // Don't remove kings - that creates invalid positions
+        if (type_of(pc) == KING) {
+          std::string pid = piece_to_string(pc) + "_" + UCI::square(s);
+          maskedTotal.emplace_back(pid, 0LL);
+          maskedClassical.emplace_back(pid, 0LL);
+          continue;
+        }
+        
+        std::string pid = piece_to_string(pc) + "_" + UCI::square(s);
+        
+        // Create FEN without this piece
+        std::string maskedFen = fen_without_piece(originalFen, s);
+        
+        // Create new position from masked FEN
+        StateListPtr st(new std::deque<StateInfo>(1));
+        Position pMasked;
+        pMasked.set(maskedFen, Options["UCI_Chess960"], &st->back(), Threads.main());
+        
+        // Skip if position is in check (can happen after removing a blocking piece)
+        if (pMasked.checkers()) {
+          maskedTotal.emplace_back(pid, 0LL);
+          maskedClassical.emplace_back(pid, 0LL);
+          continue;
+        }
+        
+        // Evaluate with NNUE
+        bool savedUseNNUE = Eval::useNNUE;
+        Eval::useNNUE = true;
+        Value v_nnue = Eval::evaluate(pMasked);
+        long long cp_nnue = static_cast<long long>(v_nnue) * 100 / UCI::NormalizeToPawnValue;
+        maskedTotal.emplace_back(pid, cp_nnue);
+        
+        // Evaluate with classical (NNUE off)
+        Eval::useNNUE = false;
+        Value v_cl = Eval::evaluate(pMasked);
+        long long cp_cl = static_cast<long long>(v_cl) * 100 / UCI::NormalizeToPawnValue;
+        maskedClassical.emplace_back(pid, cp_cl);
+        
+        Eval::useNNUE = savedUseNNUE;
+      }
+      
+      // Restore dump flags
+      Eval::dumpNNUE = savedDumpNNUE;
+      Eval::dumpFeatures = savedDumpFeatures;
+      Eval::dumpActivations = savedDumpActivations;
+      Eval::dumpClassical = savedDumpClassical;
+      Eval::dump_guard = false;
+    } else {
+      // We're in a recursive call - just record placeholders
+      for (Square s = SQ_A1; s <= SQ_H8; ++s) {
+        Piece pc = pos.piece_on(s);
+        if (pc == NO_PIECE) continue;
+        std::string pid = piece_to_string(pc) + "_" + UCI::square(s);
+        maskedTotal.emplace_back(pid, 0LL);
+        maskedClassical.emplace_back(pid, 0LL);
+      }
+    }
+
+    auto ts = std::chrono::system_clock::now().time_since_epoch();
+    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(ts).count();
+    std::string outPath = Eval::dumpPath + "/eval_" + std::to_string(ms) + ".json";
+
+    std::ofstream ofs(outPath, std::ios::out | std::ios::trunc);
+    if (!ofs.good())
+      return;
+
+    ofs << "{\n";
+    ofs << "  \"fen\": \"" << pos.fen() << "\",\n";
+    ofs << "  \"used_nnue\": " << (usedNNUE ? "true" : "false") << ",\n";
+    ofs << "  \"final_eval_cp\": " << finalVal * 100 / UCI::NormalizeToPawnValue << ",\n";
+    ofs << "  \"nnue_eval_cp\": " << nnueVal * 100 / UCI::NormalizeToPawnValue << ",\n";
+    ofs << "  \"classical_eval_cp\": " << classicalVal * 100 / UCI::NormalizeToPawnValue << ",\n";
+
+    // Pieces snapshot
+    ofs << "  \"pieces\": {\n";
+    bool firstPiece = true;
+    for (Square s = SQ_A1; s <= SQ_H8; ++s) {
+      Piece pc = pos.piece_on(s);
+      if (pc == NO_PIECE) continue;
+      if (!firstPiece) ofs << ",\n";
+      firstPiece = false;
+      ofs << "    \"" << piece_to_string(pc) << "_" << UCI::square(s) << "\": {\"square\":\"" << UCI::square(s) << "\"}";
+    }
+    ofs << "\n  },\n";
+
+    // NNUE raw
+    ofs << "  \"nnue_raw\": {\n";
+    if (nnueInfo) {
+      ofs << "    \"bucket\": " << nnueInfo->bucket << ",\n";
+      ofs << "    \"psqt_raw\": " << nnueInfo->psqt_raw << ",\n";
+      ofs << "    \"positional_raw\": " << nnueInfo->positional_raw << ",\n";
+      ofs << "    \"layer_outputs\": [";
+      for (size_t i = 0; i < nnueInfo->layer_outputs.size(); ++i) {
+        if (i) ofs << ", ";
+        ofs << nnueInfo->layer_outputs[i];
+      }
+      ofs << "],\n";
+      ofs << "    \"transformed_features\": [";
+      for (size_t i = 0; i < nnueInfo->transformed_features.size(); ++i) {
+        if (i) ofs << ", ";
+        ofs << nnueInfo->transformed_features[i];
+      }
+      ofs << "]\n";
+    } else {
+      ofs << "    \"note\": \"nnue debug disabled\"\n";
+    }
+    ofs << "  },\n";
+
+    // Classical terms
+    ofs << "  \"classical_terms\": {\n";
+    if (!classicalTerms.empty()) {
+      const char* names[] = {"MATERIAL","IMBALANCE","MOBILITY","THREAT","PASSED","SPACE","WINNABLE","TOTAL"};
+      bool first = true;
+      for (int t = MATERIAL; t <= TOTAL; ++t) {
+        if (!first) ofs << ",\n";
+        first = false;
+        ofs << "    \"" << names[t - MATERIAL] << "\": {\"white_mg\": " << classicalTerms[t][0]
+            << ", \"black_mg\": " << classicalTerms[t][1] << "}";
+      }
+      ofs << "\n  }\n";
+    } else {
+      ofs << "    \"note\": \"classical debug disabled\"\n  }\n";
+    }
+
+    // Masked dumps (per-piece)
+    ofs << ",\n  \"masked_total\": {";
+    for (size_t i = 0; i < maskedTotal.size(); ++i) {
+      if (i) ofs << ", ";
+      ofs << "\"" << maskedTotal[i].first << "\": " << maskedTotal[i].second;
+    }
+    ofs << "},\n  \"masked_classical\": {";
+    for (size_t i = 0; i < maskedClassical.size(); ++i) {
+      if (i) ofs << ", ";
+      ofs << "\"" << maskedClassical[i].first << "\": " << maskedClassical[i].second;
+    }
+    ofs << "}\n";
+
+    ofs << "}\n";
+  }
+}
+
+
 /// evaluate() is the evaluator for the outer world. It returns a static
 /// evaluation of the position from the point of view of the side to move.
 
 Value Eval::evaluate(const Position& pos) {
 
   assert(!pos.checkers());
+
+  // Refresh debug flags each call to ensure latest values (unless in masked eval)
+  if (!dump_guard)
+    refresh_debug_options();
+
+  // Skip dumping entirely when in masked evaluation mode
+  bool shouldDump = !dump_guard && (dumpNNUE || dumpFeatures || dumpActivations || dumpClassical);
 
   Value v;
   Value psq = pos.psq_eg_stm();
@@ -1058,8 +1362,11 @@ Value Eval::evaluate(const Position& pos) {
   // PSQ advantage is decisive. (~4 Elo at STC, 1 Elo at LTC)
   bool useClassical = !useNNUE || abs(psq) > 2048;
 
+  Value nnueValue = VALUE_ZERO;
+  Value classicalValue = VALUE_ZERO;
+
   if (useClassical)
-      v = Evaluation<NO_TRACE>(pos).value();
+      v = classicalValue = Evaluation<NO_TRACE>(pos).value();
   else
   {
       int nnueComplexity;
@@ -1068,11 +1375,20 @@ Value Eval::evaluate(const Position& pos) {
       Color stm = pos.side_to_move();
       Value optimism = pos.this_thread()->optimism[stm];
 
-      Value nnue = NNUE::evaluate(pos, true, &nnueComplexity);
+      NNUE::DebugInfo debugInfo;
+      NNUE::DebugInfo* dbgPtr = shouldDump ? &debugInfo : nullptr;
+
+      nnueValue = NNUE::evaluate(pos, true, &nnueComplexity, dbgPtr);
 
       // Blend optimism with nnue complexity and (semi)classical complexity
-      optimism += optimism * (nnueComplexity + abs(psq - nnue)) / 512;
-      v = (nnue * (945 + npm) + optimism * (150 + npm)) / 1024;
+      optimism += optimism * (nnueComplexity + abs(psq - nnueValue)) / 512;
+      v = (nnueValue * (945 + npm) + optimism * (150 + npm)) / 1024;
+
+      if (shouldDump && dumpClassical)
+          classicalValue = Evaluation<NO_TRACE>(pos).value();
+
+      if (shouldDump)
+          dump_debug_payload(pos, v, !useClassical, nnueValue, classicalValue, dbgPtr);
   }
 
   // Damp down the evaluation linearly when shuffling
@@ -1080,6 +1396,11 @@ Value Eval::evaluate(const Position& pos) {
 
   // Guarantee evaluation does not hit the tablebase range
   v = std::clamp(v, VALUE_TB_LOSS_IN_MAX_PLY + 1, VALUE_TB_WIN_IN_MAX_PLY - 1);
+
+  // If using classical path and dumping enabled, dump now
+  if (shouldDump && useClassical) {
+      dump_debug_payload(pos, v, !useClassical, nnueValue, classicalValue, nullptr);
+  }
 
   return v;
 }

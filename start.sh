@@ -27,8 +27,8 @@ sleep 3
 # Start frontend in background
 echo "🎨 Starting frontend server..."
 cd frontend
-export PATH=/Users/hugobosnic/Desktop/chess-gpt/backend/node-v20.11.0-darwin-arm64/bin:$PATH
-/Users/hugobosnic/Desktop/chess-gpt/backend/node-v20.11.0-darwin-arm64/bin/npm run dev &
+export PATH="/opt/homebrew/opt/node@20/bin:$PATH"
+npm run dev &
 FRONTEND_PID=$!
 cd ..
 

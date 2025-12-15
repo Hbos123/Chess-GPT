@@ -26,6 +26,9 @@ Create a `.env` file (optional) if you want to customize settings:
 
 ```bash
 STOCKFISH_PATH=./stockfish
+OPENAI_API_KEY=sk-your-openai-key
+# Set CG_FAKE_VISION=1 to bypass photo recognition during local testing
+CG_FAKE_VISION=0
 ```
 
 Or set the environment variable when running:
@@ -53,6 +56,7 @@ Once running, visit:
 - `GET /analyze_position` - Analyze a position (FEN, lines, depth)
 - `POST /play_move` - Make a move and get engine response
 - `GET /opening_lookup` - Look up opening information (stub)
+- `POST /vision/board` - Send a board photo and receive the detected FEN (uses GPT-4o-mini vision)
 - `GET /tactics_next` - Get next tactics puzzle
 - `POST /annotate` - Save/validate annotations
 

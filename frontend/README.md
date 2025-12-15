@@ -81,6 +81,12 @@ The app will be available at `http://localhost:3000`
 - Toggle LLM on/off (show only structured engine data)
 - Context-aware responses (includes FEN, PGN, annotations)
 
+### Load Game Panel
+
+- PGN/FEN import, cloud game lookup, and **Photo** tab.
+- Photo tab accepts drag & drop uploads or camera capture, sends the image to the backend vision endpoint, and renders the detected FEN on a mini board.
+- Digital preset is optimised for Chess GPT screenshots; physical boards are supported via GPT-4o-mini vision with uncertainty highlights so you can manually tweak squares before loading.
+
 ## Project Structure
 
 ```
