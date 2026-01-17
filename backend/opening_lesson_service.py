@@ -583,9 +583,23 @@ async def create_opening_lesson_payload(
         inferred_opening_name = opening_info.get("name", "Current opening")
         eco = eco or opening_info.get("eco")
     elif opening_query and not fen:
-        # Try to resolve query to FEN so we can pass to explorer
-        resolved = await explorer_client.parse_san_to_fen(opening_query.split())
-        resolved_fen = resolved
+        # Try to resolve query to FEN using opening resolver
+        # Note: build_opening_lesson will also resolve, but we need the FEN here for user history lookup
+        from opening_resolver import resolve_opening
+        try:
+            resolved_data = await resolve_opening(opening_query, explorer_client)
+            resolved_fen = resolved_data.get("seed_fen")
+            inferred_opening_name = resolved_data.get("name", opening_query)
+            eco = eco or resolved_data.get("eco")
+            print(f"✅ Resolved '{opening_query}' -> '{inferred_opening_name}' (ECO: {eco}, FEN: {resolved_fen[:30]}...)")
+        except Exception as resolve_err:
+            print(f"⚠️ Failed to resolve opening '{opening_query}': {resolve_err}")
+            import traceback
+            print(f"⚠️ Resolver traceback: {traceback.format_exc()}")
+            # Fallback: use starting position - don't try to parse as moves
+            # The resolver should handle all opening name resolution
+            resolved_fen = chess.STARTING_FEN
+            print(f"⚠️ Using starting position as fallback for '{opening_query}'")
 
     if not inferred_opening_name:
         inferred_opening_name = "Current opening"

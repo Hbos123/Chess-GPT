@@ -158,12 +158,24 @@ def diagnose_loss_type(
     # Tag-based blindspot
     tag_stats = statistics.get("performance_by_tags", {})
     worst_tags = tag_stats.get("bottom_performing", [])
-    if worst_tags and worst_tags[0].get("accuracy", 100) < 60:
+    if worst_tags:
+        try:
+            worst_acc = worst_tags[0].get("accuracy")
+            worst_acc_f = float(worst_acc) if worst_acc is not None else 100.0
+        except Exception:
+            worst_acc_f = 100.0
+    else:
+        worst_acc_f = 100.0
+    if worst_tags and worst_acc_f < 60:
         worst_tag = worst_tags[0]
+        try:
+            acc_f = float(worst_tag.get("accuracy")) if worst_tag.get("accuracy") is not None else 0.0
+        except Exception:
+            acc_f = 0.0
         return {
             "loss_type": "tag_blindspot",
-            "detail": f"Low accuracy ({worst_tag['accuracy']:.0f}%) in {worst_tag['tag']} positions",
-            "tag": worst_tag["tag"],
+            "detail": f"Low accuracy ({acc_f:.0f}%) in {worst_tag.get('tag', 'unknown')} positions",
+            "tag": worst_tag.get("tag", "unknown"),
             "key_moves": []  # Will be filled by selector
         }
     
@@ -592,7 +604,8 @@ async def select_moments_with_llm(
     ply_records: List[Dict],
     player_color: str,
     game_metadata: Dict,
-    openai_client
+    openai_client,
+    llm_router=None,
 ) -> Dict:
     """
     Use LLM to select which moments to include based on ANY query.
@@ -605,7 +618,7 @@ async def select_moments_with_llm(
             "selection_rationale": "Why these moves were selected"
         }
     """
-    if not openai_client:
+    if not openai_client and not llm_router:
         # Fallback to default selection
         return {
             "selected_plies": [],
@@ -679,33 +692,43 @@ Examples:
 """
     
     try:
-        loop = asyncio.get_event_loop()
-        
-        def call_openai():
-            return openai_client.chat.completions.create(
-                model="gpt-4o",
-                messages=[
-                    {"role": "system", "content": "You are a chess game analyzer. Select the most relevant moves to show based on the user's query. Return only valid JSON."},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.3
+        if llm_router:
+            result = llm_router.complete_json(
+                session_id="default",
+                stage="key_moment_selector",
+                system_prompt="You are a chess game analyzer. Select the most relevant moves to show based on the user's query. Return only valid JSON.",
+                user_text=prompt,
+                temperature=0.3,
+                model="gpt-5",
             )
-        
-        with concurrent.futures.ThreadPoolExecutor() as pool:
-            response = await asyncio.wait_for(
-                loop.run_in_executor(pool, call_openai),
-                timeout=8.0
-            )
-        
-        content = response.choices[0].message.content
-        
-        # Extract JSON from response (handle markdown code blocks)
-        if "```json" in content:
-            content = content.split("```json")[1].split("```")[0]
-        elif "```" in content:
-            content = content.split("```")[1].split("```")[0]
-        
-        result = json.loads(content.strip())
+        else:
+            loop = asyncio.get_event_loop()
+            
+            def call_openai():
+                return openai_client.chat.completions.create(
+                    model="gpt-5",
+                    messages=[
+                        {"role": "system", "content": "You are a chess game analyzer. Select the most relevant moves to show based on the user's query. Return only valid JSON."},
+                        {"role": "user", "content": prompt}
+                    ],
+                    temperature=0.3
+                )
+            
+            with concurrent.futures.ThreadPoolExecutor() as pool:
+                response = await asyncio.wait_for(
+                    loop.run_in_executor(pool, call_openai),
+                    timeout=8.0
+                )
+            
+            content = response.choices[0].message.content
+            
+            # Extract JSON from response (handle markdown code blocks)
+            if "```json" in content:
+                content = content.split("```json")[1].split("```")[0]
+            elif "```" in content:
+                content = content.split("```")[1].split("```")[0]
+            
+            result = json.loads(content.strip())
         
         # Validate result
         if "selected_plies" not in result:

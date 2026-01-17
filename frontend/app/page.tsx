@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback, CSSProperties, MouseEvent as ReactMouseEvent } from "react";
+import { useState, useEffect, useRef, useCallback, CSSProperties, MouseEvent as ReactMouseEvent, Suspense } from "react";
+import { useSearchParams } from "next/navigation";
 import { Chess, type Move } from "chess.js";
 import Board from "@/components/Board";
 import TopBar from "@/components/TopBar";
@@ -12,10 +13,18 @@ import HistoryCurtain from "@/components/HistoryCurtain";
 import LoadGamePanel, { LoadedGamePayload } from "@/components/LoadGamePanel";
 import RotatingExamples, { useRotatingPlaceholder } from "@/components/RotatingExamples";
 import AuthModal from "@/components/AuthModal";
+import PersonalReview from "@/components/PersonalReview";
 import ProfileSetupModal, { ProfilePreferences } from "@/components/ProfileSetupModal";
 import StatusIndicator from "@/components/StatusIndicator";
+import FactsCard from "@/components/FactsCard";
 import IntentBox from "@/components/IntentBox";
+import ExecutionPlan from "@/components/ExecutionPlan";
+import ThinkingStage from "@/components/ThinkingStage";
 import TabBar, { BoardTab, createDefaultTab, createTabFromGame, generateTabName } from "@/components/TabBar";
+import ProfileDashboard from "@/components/ProfileDashboard/ProfileDashboard";
+import GameSetupModal from "@/components/GameSetupModal";
+import OpeningLessonModal from "@/components/OpeningLessonModal";
+import TrainingSession from "@/components/TrainingSession";
 import { useAuth } from "@/contexts/AuthContext";
 import { stripEmojis } from "@/utils/emojiFilter";
 import type {
@@ -27,6 +36,7 @@ import type {
 } from "@/types";
 import type { MoveNode } from "@/lib/moveTree";
 import { MoveTree } from "@/lib/moveTree";
+import { handleUICommands } from "@/lib/commandHandler";
 import {
   getMeta,
   analyzePosition,
@@ -44,18 +54,27 @@ import {
   type OpeningLessonResponse,
   type OpeningPracticePosition,
 } from "@/lib/api";
+import { getBackendBase } from "@/lib/backendBase";
 import "../styles/chatUI.css";
 import "./styles.css";
 
 const INITIAL_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
-const BACKEND_BASE = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
+const BACKEND_BASE = getBackendBase();
+const MAX_BOARD_TABS = 5;
 const LESSON_ARROW_COLORS = {
   main: "rgba(34, 139, 34, 0.7)", // Dark semi-transparent green
   alternate: "#17c37b",
   threat: "#f87171",
 } as const;
 
-export default function Home() {
+function HomeInner() {
+  const searchParams = useSearchParams();
+  const isMobileMode = searchParams.get('mobile') === 'true';
+  
+  return <Home isMobileMode={isMobileMode} />;
+}
+
+function Home({ isMobileMode = false }: { isMobileMode?: boolean }) {
   // Rotating placeholder text for hero composer
   const { text: rotatingPlaceholder, isVisible: placeholderVisible } = useRotatingPlaceholder();
   
@@ -92,8 +111,29 @@ export default function Home() {
   const [game, setGame] = useState(new Chess());
   const [waitingForEngine, setWaitingForEngine] = useState(false);
   const [liveStatusMessages, setLiveStatusMessages] = useState<any[]>([]); // Live status during LLM call
+  const [factsByTask, setFactsByTask] = useState<Record<string, any>>({});
   const lastStatusUpdateRef = useRef<number>(0); // Throttle status updates to prevent flashing
   const [isLLMProcessing, setIsLLMProcessing] = useState(false);
+  // Treat a running SSE analysis as "in progress" so we can pause noisy background polling.
+  const [analysisInProgress, setAnalysisInProgress] = useState(false);
+
+  // Declare state variables that are used in useEffect hooks before the hooks themselves
+  const [aiGameActive, setAiGameActive] = useState(false); // Track if actively playing a game with AI
+  const [lessonMode, setLessonMode] = useState(false);
+
+  // Expose current mode to helper libs (e.g., to gate WASM analysis to PLAY only).
+  useEffect(() => {
+    try {
+      if (typeof window !== "undefined") {
+        (window as any).__CHESS_GPT_MODE = mode;
+        (window as any).__CHESS_GPT_ALLOW_WASM_ANALYZE = Boolean(mode === "PLAY" || aiGameActive || lessonMode);
+      }
+    } catch {
+      // ignore
+    }
+  }, [mode, aiGameActive, lessonMode]);
+  const [executionPlan, setExecutionPlan] = useState<any>(null); // Execution plan from Planner
+  const [thinkingStage, setThinkingStage] = useState<any>(null); // Thinking stage info
   const [boardOrientation, setBoardOrientation] = useState<"white" | "black">("white");
   const [moveTree, setMoveTree] = useState<MoveTree>(new MoveTree());
   const [treeVersion, setTreeVersion] = useState(0); // Force re-render counter
@@ -111,8 +151,27 @@ export default function Home() {
   const [gameReviewKeyPoints, setGameReviewKeyPoints] = useState<any[]>([]); // Store key points for clicking
   const [retryMoveData, setRetryMoveData] = useState<any>(null); // Store move to retry
   const [isRetryMode, setIsRetryMode] = useState(false); // Track if in retry mode
-  const [aiGameActive, setAiGameActive] = useState(false); // Track if actively playing a game with AI
+  const [aiGameElo, setAiGameElo] = useState<number>(1500);
+  const [aiGameUserSide, setAiGameUserSide] = useState<"white" | "black" | null>(null);
   const [pendingConfirmation, setPendingConfirmation] = useState<{action: string, intent: string} | null>(null); // Track pending confirmations
+
+  // Stable per-tab session id for backend-side LLM prefix caching.
+  // Use sessionStorage (tab-scoped) to avoid collisions across tabs.
+  const [sessionId] = useState<string>(() => {
+    try {
+      const key = "chessgpt_session_id";
+      const existing = typeof window !== "undefined" ? window.sessionStorage.getItem(key) : null;
+      if (existing) return existing;
+      const id =
+        typeof crypto !== "undefined" && "randomUUID" in crypto
+          ? crypto.randomUUID()
+          : `sess_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+      if (typeof window !== "undefined") window.sessionStorage.setItem(key, id);
+      return id;
+    } catch {
+      return `sess_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+    }
+  });
   
   // Lesson system state
   const [showLessonBuilder, setShowLessonBuilder] = useState(false);
@@ -121,7 +180,6 @@ export default function Home() {
   const [currentLesson, setCurrentLesson] = useState<any>(null);
   const [lessonProgress, setLessonProgress] = useState({ current: 0, total: 0 });
   const [currentLessonPosition, setCurrentLessonPosition] = useState<any>(null);
-  const [lessonMode, setLessonMode] = useState(false);
   const [lessonMoveIndex, setLessonMoveIndex] = useState(0); // Current move in ideal line
   const [isOffMainLine, setIsOffMainLine] = useState(false); // Player deviated from ideal line
   const [mainLineFen, setMainLineFen] = useState<string>(""); // FEN to return to
@@ -177,6 +235,7 @@ export default function Home() {
   
   // Personal Review state
   const [showPersonalReview, setShowPersonalReview] = useState(false);
+  const [showProfileDashboard, setShowProfileDashboard] = useState(false);
   
   // Training & Drills state
   const [showTraining, setShowTraining] = useState(false);
@@ -209,6 +268,8 @@ export default function Home() {
     messages: ChatMessage[];
     game: Chess;
     moveTree: MoveTree;
+    tabType?: 'review' | 'lesson' | 'play' | 'discuss' | 'training';
+    trainingSession?: any; // Training session data for training tabs
     
     // Tab UI state
     isAnalyzing: boolean;
@@ -222,6 +283,7 @@ export default function Home() {
     fen: INITIAL_FEN,
     pgn: '',
     moveHistory: [],
+    tabType: 'discuss',
     annotations: {
       fen: INITIAL_FEN,
       pgn: '',
@@ -241,6 +303,241 @@ export default function Home() {
   
   const [tabs, setTabs] = useState<BoardTabState[]>(() => [createInitialTab()]);
   const [activeTabId, setActiveTabId] = useState<string>(() => tabs[0]?.id || '');
+  // Backend D2/D16 tree node pointer per tab (thread_id = tab.id)
+  const backendTreeNodeByTabRef = useRef<Record<string, string>>({});
+
+  // NEW: UI Command Handler Integration
+  const executeUICommands = useCallback((commands: any[], sendMessageFn?: (msg: string) => void) => {
+    if (!commands || commands.length === 0) {
+      console.log("[executeUICommands] No commands to execute");
+      return;
+    }
+    
+    console.log(`[executeUICommands] Executing ${commands.length} UI command(s):`, commands.map(c => `${c.action}${c.params?.pgn ? ` (PGN length: ${c.params.pgn.length})` : ''}`));
+    
+    try {
+      handleUICommands(commands, {
+        setFen: (newFen: string) => {
+          setFen(newFen);
+          setGame(new Chess(newFen));
+        },
+        setPgn: (newPgn: string) => {
+          setPgn(newPgn);
+          // Also need to rebuild the move tree if PGN changes
+          try {
+            const tree = MoveTree.fromPGN(newPgn);
+            setMoveTree(tree);
+          } catch (e) {
+            console.error("Failed to rebuild move tree from PGN:", e);
+          }
+        },
+        setAnnotations: (ann: any) => {
+          setAnnotations(prev => ({
+            ...prev,
+            arrows: ann.arrows || [],
+            highlights: ann.highlights || []
+          }));
+        },
+        navigate: (index?: number, offset?: number) => {
+          if (index !== undefined) {
+            // Find node by index (ply)
+            const node = moveTree.findNodeByPly(index);
+            if (node) handleMoveClick(node);
+          } else if (offset !== undefined) {
+            // Navigate forward/backward
+            if (offset > 0) {
+              // Go forward in main line
+              let current = moveTree.currentNode;
+              for (let i = 0; i < offset; i++) {
+                if (current.children.length > 0) {
+                  current = current.children[0];
+                } else break;
+              }
+              handleMoveClick(current);
+            } else if (offset < 0) {
+              // Go backward
+              let current = moveTree.currentNode;
+              for (let i = 0; i < Math.abs(offset); i++) {
+                if (current.parent) {
+                  current = current.parent;
+                } else break;
+              }
+              handleMoveClick(current);
+            }
+          }
+        },
+        pushMove: (san: string) => {
+          // Play a move on the board
+          const tempGame = new Chess(fen);
+          const move = tempGame.move(san);
+          if (move) {
+            handleMove(move.from, move.to, move.promotion);
+          }
+        },
+        deleteMove: (ply?: number) => {
+          if (typeof ply === "number") {
+            const node = moveTree.findNodeByPly(ply);
+            if (node) handleDeleteMove(node);
+            return;
+          }
+          handleDeleteMove(moveTree.currentNode);
+        },
+        deleteVariation: (ply?: number) => {
+          if (typeof ply === "number") {
+            const node = moveTree.findNodeByPly(ply);
+            if (node) handleDeleteVariation(node);
+            return;
+          }
+          handleDeleteVariation(moveTree.currentNode);
+        },
+        promoteVariation: (ply?: number) => {
+          if (typeof ply === "number") {
+            const node = moveTree.findNodeByPly(ply);
+            if (node) handlePromoteVariation(node);
+            return;
+          }
+          handlePromoteVariation(moveTree.currentNode);
+        },
+        setAiGame: async (active: boolean, aiSide: 'white' | 'black' | null = null, makeMoveNow: boolean = false) => {
+          console.log(`[setAiGame] Setting AI game: active=${active}, aiSide=${aiSide}, makeMoveNow=${makeMoveNow}`);
+          setAiGameActive(active);
+          if (active) {
+            setMode("PLAY");
+            // If makeMoveNow is true, check if it's the AI's turn and make a move
+            if (makeMoveNow) {
+              const currentTurn = fen.split(' ')[1]; // 'w' or 'b'
+              // Determine if it's the AI's turn
+              // If aiSide is null, AI plays the current turn
+              // Otherwise, check if currentTurn matches aiSide
+              const isAiTurn = aiSide === null || 
+                              (aiSide === 'white' && currentTurn === 'w') || 
+                              (aiSide === 'black' && currentTurn === 'b');
+              
+              if (isAiTurn) {
+                console.log(`[setAiGame] Making AI move (turn: ${currentTurn}, aiSide: ${aiSide})`);
+                try {
+                  // Use playMove endpoint which correctly handles side-to-move
+                  // This ensures the engine chooses the best move for the side to move
+                  const response = await playMove(fen, "", undefined, 1500);
+                  
+                  if (response.legal && response.engine_move_san && response.new_fen) {
+                    console.log(`[setAiGame] Engine recommends: ${response.engine_move_san}`);
+                    
+                    // Apply the engine move using handleMove
+                    const tempGame = new Chess(fen);
+                    const move = tempGame.move(response.engine_move_san);
+                    if (move) {
+                      console.log(`[setAiGame] Applying move: ${move.from}${move.to}`);
+                      // Use handleMove to properly trigger all move handling logic
+                      handleMove(move.from, move.to, move.promotion);
+                    } else {
+                      console.error(`[setAiGame] Invalid move: ${response.engine_move_san}`);
+                    }
+                  } else {
+                    console.error('[setAiGame] Invalid response from playMove:', response);
+                  }
+                } catch (err) {
+                  console.error('[setAiGame] Error making AI move:', err);
+                }
+              } else {
+                console.log(`[setAiGame] Not AI's turn (turn: ${currentTurn}, aiSide: ${aiSide})`);
+              }
+            }
+          } else {
+            // Disable AI game mode
+            setMode("DISCUSS");
+          }
+        },
+        newTab: (params: any) => {
+          if (tabs.length >= MAX_BOARD_TABS) return; // Limit tabs
+          
+          const newTabId =
+            typeof crypto !== "undefined" && "randomUUID" in crypto
+              ? `tab-${crypto.randomUUID()}`
+              : `tab-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+          let newMoveTree = new MoveTree();
+          const newTab: BoardTabState = {
+            ...createDefaultTab(tabs.length + 1),
+            id: newTabId,
+            name: params.title || (params.type === 'lesson' ? 'Lesson' : 'Review'),
+            tabType: params.type || 'review',
+            fen: params.fen || INITIAL_FEN,
+            pgn: params.pgn || '',
+            game: new Chess(params.fen || INITIAL_FEN),
+            moveTree: newMoveTree,
+            isAnalyzing: false,
+            hasUnread: false,
+            isModified: false,
+            messages: [],
+            annotations: {
+              fen: params.fen || INITIAL_FEN,
+              pgn: params.pgn || '',
+              arrows: [],
+              highlights: [],
+              comments: [],
+              nags: []
+            },
+            analysisCache: {},
+            moveHistory: []
+          };
+          
+          if (params.pgn) {
+            try {
+              console.log(`[newTab] Loading PGN into new tab. PGN length: ${params.pgn.length}, preview: ${params.pgn.substring(0, 100)}...`);
+              newMoveTree = MoveTree.fromPGN(params.pgn);
+              newTab.moveTree = newMoveTree;
+              // Recreate game from PGN to ensure board state matches
+              const gameFromPgn = new Chess();
+              gameFromPgn.loadPgn(params.pgn);
+              newTab.game = gameFromPgn;
+              newTab.fen = gameFromPgn.fen();
+              // Update annotations to match
+              newTab.annotations.fen = gameFromPgn.fen();
+              newTab.annotations.pgn = params.pgn;
+              // Also update the tab's pgn field
+              newTab.pgn = params.pgn;
+              console.log(`[newTab] Successfully loaded PGN. Final FEN: ${newTab.fen}, moveTree length: ${newTab.moveTree.getMainLine().length}`);
+            } catch (e) {
+              console.error("[newTab] Failed to load PGN into new tab:", e);
+              console.error("[newTab] PGN that failed:", params.pgn?.substring(0, 200));
+              // Still set the PGN even if parsing fails, so it's available
+              newTab.pgn = params.pgn;
+              newTab.annotations.pgn = params.pgn;
+            }
+          } else {
+            console.warn("[newTab] No PGN provided in params:", params);
+          }
+          
+          setTabs(prev => (prev.some(t => t.id === newTabId) ? prev : [...prev, newTab]));
+          setActiveTabId(newTabId);
+          
+          // Update global state
+          setFen(newTab.fen);
+          setPgn(newTab.pgn);
+          setGame(newTab.game);
+          setMoveTree(newTab.moveTree);
+          
+          // If initialMessage is provided, send it after a short delay to ensure tab is active
+          if (params.initialMessage && sendMessageFn) {
+            const messageToSend = params.initialMessage;
+            const tabIdToCheck = newTabId;
+            setTimeout(() => {
+              // Check if this tab is still active by reading current state
+              setTabs(currentTabs => {
+                const tabStillExists = currentTabs.some(t => t.id === tabIdToCheck);
+                if (tabStillExists) {
+                  sendMessageFn(messageToSend);
+                }
+                return currentTabs;
+              });
+            }, 100);
+          }
+        }
+      });
+    } catch (err) {
+      console.error("[executeUICommands] Error executing UI commands:", err);
+    }
+  }, [tabs, activeTabId, fen, moveTree, handleMove, handleMoveClick]);
   
   // Get active tab
   const activeTab = tabs.find(t => t.id === activeTabId) || tabs[0];
@@ -298,11 +595,26 @@ export default function Home() {
         return prevTabs;
       }
       
-      // Update tabs: sync current tab, mark new tab as read
+      // Handle game mode state on tab switch
+      // Store game state in current tab before switching
+      const currentTabGameState = {
+        aiGameActive: aiGameActive,
+        aiGameElo: aiGameElo,
+        aiGameUserSide: aiGameUserSide
+      };
+      
+      // Update tabs: sync current tab with game state, mark new tab as read
       const updatedTabs = prevTabs.map(tab => {
         if (tab.id === activeTabId) {
           // Always update with latest global state (even if it looks the same, use refs)
-          return { ...tab, fen: currentFen, pgn: currentPgn, game: new Chess(currentFen), isModified: currentFen !== INITIAL_FEN };
+          return { 
+            ...tab, 
+            fen: currentFen, 
+            pgn: currentPgn, 
+            game: new Chess(currentFen), 
+            isModified: currentFen !== INITIAL_FEN,
+            ...currentTabGameState
+          };
         }
         if (tab.id === tabId) {
           return { ...tab, hasUnread: false };
@@ -330,6 +642,12 @@ export default function Home() {
         }
       });
       
+      // Check if the tab we're entering has game state
+      const enteringTabGameState = newTab.aiGameActive === true;
+      const leavingTabGameState = currentTabGameState.aiGameActive === true;
+      
+      // Note: Game mode pause/resume will be handled inside setTimeout after tab data loads
+      
       // Load the new tab's state into global (use setTimeout to ensure setTabs completes)
       setTimeout(() => {
         console.log('📥 Loading new tab state into global:', {
@@ -342,6 +660,12 @@ export default function Home() {
         setActiveTabId(tabId);
         setFen(newTabData.fen);
         setPgn(newTabData.pgn);
+        setLessonMode(newTab.tabType === 'lesson');
+        
+        // CRITICAL: Load the tab's messages into global state
+        const tabMessages = newTab.messages || [];
+        console.log('💬 Loading tab messages into global state:', { tabId, messageCount: tabMessages.length });
+        setMessages(tabMessages);
         
         const newGame = new Chess();
         let loadedMoveTree = newTabData.moveTree;
@@ -420,6 +744,51 @@ export default function Home() {
         setGame(newGame);
         setMoveTree(loadedMoveTree);
         
+        // Handle game mode pause/resume after tab data is loaded
+        // Use the captured variables from the outer scope
+        const shouldPause = leavingTabGameState && !enteringTabGameState;
+        const shouldResume = !leavingTabGameState && enteringTabGameState;
+        
+        if (shouldPause) {
+          // Leaving game tab - pause game mode
+          setAiGameActive(false);
+          // Add system message (only once)
+          const filteredContent = stripEmojis("Game mode is paused. Return to the previous tab to resume.");
+          setMessages((prev) => {
+            // Check if message already exists to prevent duplicates
+            const lastMessage = prev[prev.length - 1];
+            if (lastMessage?.role === "system" && lastMessage?.content === filteredContent) {
+              return prev;
+            }
+            return [...prev, { 
+              role: "system", 
+              content: filteredContent, 
+              fen: newTabData.fen, 
+              tabId: tabId 
+            }];
+          });
+        } else if (shouldResume) {
+          // Returning to game tab - resume game mode
+          setAiGameActive(true);
+          setAiGameElo(newTab.aiGameElo || 1500);
+          setAiGameUserSide(newTab.aiGameUserSide || null);
+          // Add system message (only once)
+          const filteredContent = stripEmojis("Game resumed.");
+          setMessages((prev) => {
+            // Check if message already exists to prevent duplicates
+            const lastMessage = prev[prev.length - 1];
+            if (lastMessage?.role === "system" && lastMessage?.content === filteredContent) {
+              return prev;
+            }
+            return [...prev, { 
+              role: "system", 
+              content: filteredContent, 
+              fen: newTabData.fen, 
+              tabId: tabId 
+            }];
+          });
+        }
+        
         // Verify the PGN was set correctly
         setTimeout(() => {
           console.log('✅ Tab switch complete. PGN length:', pgnRef.current.length);
@@ -430,7 +799,7 @@ export default function Home() {
       
       return updatedTabs;
     });
-  }, [activeTabId]); // Removed fen, pgn from deps - use refs instead
+  }, [activeTabId, aiGameActive, aiGameElo, aiGameUserSide]); // Added game state to deps
   
   const handleTabClose = useCallback((tabId: string) => {
     setTabs(prevTabs => {
@@ -552,17 +921,16 @@ export default function Home() {
     result?: string;
     timeControl?: string;
     opening?: string;
-  }) => {
+  }, options?: { forceNewTab?: boolean }) => {
+    const { forceNewTab = false } = options || {};
     const isCurrentTabEmpty = activeTab.pgn === '' && activeTab.fen === INITIAL_FEN;
     
-    if (isCurrentTabEmpty) {
-      // Load into current tab
+    const loadIntoCurrentTab = () => {
       if (!gameData.pgn) {
         console.warn('No PGN provided to loadGameIntoTab');
         return;
       }
       
-      // Rebuild moveTree from PGN
       let finalGame: Chess;
       let finalFen: string;
       let tree: MoveTree;
@@ -574,7 +942,6 @@ export default function Home() {
         tree = rebuiltTree;
       } catch (e) {
         console.warn('Failed to rebuild moveTree from PGN:', e);
-        // Fallback: just load the game
         const newGame = new Chess();
         try {
           newGame.loadPgn(gameData.pgn);
@@ -590,20 +957,17 @@ export default function Home() {
         tree = emptyTree;
       }
       
-      // Ensure currentNode is at the end of the main line to show full game
       let endNode = tree.root;
       while (endNode.children.length > 0) {
-        endNode = endNode.children[0]; // Follow main line
+        endNode = endNode.children[0];
       }
       tree.currentNode = endNode;
       
-      // Update global state FIRST (so PGN box shows the PGN)
       setPgn(gameData.pgn);
       setFen(finalFen);
       setGame(finalGame);
       setMoveTree(tree);
       
-      // Then update tab state
       updateActiveTab({
         pgn: gameData.pgn,
         fen: finalFen,
@@ -630,8 +994,14 @@ export default function Home() {
         },
         isModified: false,
       });
-    } else if (tabs.length < 5) {
-      // Create new tab
+    };
+    
+    if (isCurrentTabEmpty && !forceNewTab) {
+      loadIntoCurrentTab();
+      return;
+    }
+    
+    if (tabs.length < MAX_BOARD_TABS) {
       const newTab = createTabFromGame(gameData) as BoardTabState;
       const newGame = new Chess();
       if (gameData.pgn) {
@@ -660,9 +1030,13 @@ export default function Home() {
       newTab.hasUnread = false;
       newTab.isModified = false;
       
-      setTabs(prevTabs => [...prevTabs, newTab]);
+      setTabs(prevTabs => (prevTabs.some(t => t.id === newTab.id) ? prevTabs : [...prevTabs, newTab]));
       setActiveTabId(newTab.id);
+      return;
     }
+    
+    console.warn('⚠️ Maximum board tabs reached; loading into active tab instead.');
+    loadIntoCurrentTab();
   }, [activeTab, tabs.length, updateActiveTab]);
   
   // Mark tab as analyzing
@@ -721,7 +1095,28 @@ export default function Home() {
     try {
       const saved = localStorage.getItem(TABS_STORAGE_KEY);
       if (saved) {
-        const { tabs: savedTabs, activeTabId: savedActiveId, savedAt } = JSON.parse(saved);
+        const parsed = JSON.parse(saved);
+        const { tabs: savedTabs, activeTabId: savedActiveId, savedAt } = parsed;
+        
+        console.log(`🔍 [TAB RESTORE] Loading from localStorage:`, {
+          tabCount: savedTabs?.length || 0,
+          savedAt: new Date(savedAt).toISOString(),
+          activeTabId: savedActiveId,
+        });
+        
+        // Log what's in each saved tab
+        if (savedTabs && savedTabs.length > 0) {
+          savedTabs.forEach((t: any, idx: number) => {
+            console.log(`🔍 [TAB RESTORE] Tab ${idx}:`, {
+              id: t.id,
+              name: t.name,
+              pgnLength: (t.pgn || '').length,
+              pgnPreview: (t.pgn || '').substring(0, 100),
+              fen: t.fen?.substring(0, 30),
+              hasPgn: !!(t.pgn && t.pgn.trim()),
+            });
+          });
+        }
         
         // Check if data is too old
         if (Date.now() - savedAt > MAX_STORAGE_AGE_MS) {
@@ -732,31 +1127,141 @@ export default function Home() {
         
         // Restore tabs (need to recreate Chess and MoveTree objects)
         if (savedTabs && savedTabs.length > 0) {
-          const restoredTabs: BoardTabState[] = savedTabs.map((t: any) => ({
-            ...t,
-            game: new Chess(t.fen || INITIAL_FEN),
-            moveTree: new MoveTree(),
-            annotations: t.annotations || {
-              fen: t.fen || INITIAL_FEN,
-              pgn: t.pgn || '',
-              comments: [],
-              nags: [],
-              arrows: [],
-              highlights: [],
-            },
-          }));
+          // De-dupe tab ids (React keys) and re-id collisions to prevent "duplicate key" crashes.
+          const seen = new Set<string>();
+          const restoredTabs: BoardTabState[] = savedTabs.map((t: any, idx: number) => {
+            const rawId = typeof t?.id === "string" ? t.id : "";
+            const needsNewId = !rawId || seen.has(rawId);
+            const safeId = needsNewId
+              ? (typeof crypto !== "undefined" && "randomUUID" in crypto
+                  ? `tab-${crypto.randomUUID()}`
+                  : `tab-${Date.now()}-${idx}-${Math.random().toString(16).slice(2)}`)
+              : rawId;
+            seen.add(safeId);
+            
+            // Load PGN into moveTree if available
+            let moveTree = new MoveTree();
+            let game = new Chess(t.fen || INITIAL_FEN);
+            const tabPgn = t.pgn || '';
+            
+            console.log(`🔍 [TAB RESTORE] Processing tab ${safeId}:`, {
+              originalId: rawId,
+              pgnLength: tabPgn.length,
+              pgnPreview: tabPgn.substring(0, 50),
+              hasPgn: !!(tabPgn && tabPgn.trim()),
+              savedFen: t.fen?.substring(0, 30),
+            });
+            
+            if (tabPgn && tabPgn.trim()) {
+              try {
+                // Load PGN into Chess game
+                game.loadPgn(tabPgn);
+                
+                // Build moveTree from PGN
+                moveTree = MoveTree.fromPGN(tabPgn);
+                
+                // Navigate to the end of the game to show all moves
+                let node = moveTree.root;
+                while (node.children.length > 0) {
+                  node = node.children[0]; // Follow main line
+                }
+                moveTree.currentNode = node;
+                
+                // Update FEN to match the final position from PGN
+                const finalFen = game.fen();
+                console.log(`✅ [TAB RESTORE] Tab ${safeId}: PGN loaded successfully`, {
+                  pgnLength: tabPgn.length,
+                  finalFen: finalFen.substring(0, 30),
+                  moveTreeNodes: moveTree.getMainLine().length,
+                });
+              } catch (e) {
+                console.warn(`⚠️ [TAB RESTORE] Failed to load PGN for tab ${safeId}:`, e);
+                console.warn(`⚠️ [TAB RESTORE] PGN that failed:`, tabPgn.substring(0, 200));
+                // Fallback to FEN-only
+                game = new Chess(t.fen || INITIAL_FEN);
+                moveTree = new MoveTree();
+              }
+            } else {
+              console.log(`⚠️ [TAB RESTORE] Tab ${safeId}: No PGN found, using FEN only`);
+              // No PGN, just use FEN
+              game = new Chess(t.fen || INITIAL_FEN);
+              moveTree = new MoveTree();
+            }
+            
+            const restoredTab = {
+              ...t,
+              id: safeId,
+              game,
+              moveTree,
+              fen: game.fen(), // Ensure FEN matches the loaded game
+              pgn: tabPgn, // Preserve the PGN string
+              annotations: t.annotations || {
+                fen: game.fen(),
+                pgn: tabPgn,
+                comments: [],
+                nags: [],
+                arrows: [],
+                highlights: [],
+              },
+            };
+            
+            console.log(`📂 [TAB RESTORE] Restored tab ${safeId}:`, {
+              name: restoredTab.name,
+              pgnLength: restoredTab.pgn.length,
+              fen: restoredTab.fen.substring(0, 30),
+            });
+            
+            return restoredTab;
+          });
           setTabs(restoredTabs);
           
-          // Restore active tab
-          if (savedActiveId && restoredTabs.some((t: BoardTabState) => t.id === savedActiveId)) {
-            setActiveTabId(savedActiveId);
+          // Restore active tab and immediately set global state to prevent sync from overwriting
+          const firstId = restoredTabs[0]?.id;
+          const activeId = (savedActiveId && restoredTabs.some((t: BoardTabState) => t.id === savedActiveId)) 
+            ? savedActiveId 
+            : firstId;
+          
+          if (activeId) {
+            const activeTab = restoredTabs.find((t: BoardTabState) => t.id === activeId);
+            if (activeTab) {
+              console.log(`📂 [TAB RESTORE] Restoring active tab ${activeId}:`, {
+                name: activeTab.name,
+                pgnLength: activeTab.pgn.length,
+                fen: activeTab.fen.substring(0, 30),
+              });
+              
+              // CRITICAL: Prevent sync useEffect from overwriting during restore
+              isSwitchingTabRef.current = true;
+              
+              // Set the refs first to ensure they're available
+              fenRef.current = activeTab.fen;
+              pgnRef.current = activeTab.pgn;
+              
+              // Then set the state
+              setFen(activeTab.fen);
+              setPgn(activeTab.pgn);
+              setGame(activeTab.game);
+              setMoveTree(activeTab.moveTree);
+              setLessonMode(activeTab.tabType === 'lesson');
+              
+              // Set active tab ID last
+              setActiveTabId(activeId);
+              
+              // Clear the flag after a short delay to allow state to settle
+              setTimeout(() => {
+                isSwitchingTabRef.current = false;
+                console.log(`✅ [TAB RESTORE] Restore complete for tab ${activeId}`);
+              }, 100);
+            }
           }
           
-          console.log(`📂 Restored ${restoredTabs.length} tabs from session`);
+          console.log(`📂 [TAB RESTORE] Restored ${restoredTabs.length} tabs from session`);
         }
+      } else {
+        console.log(`🔍 [TAB RESTORE] No saved tabs found in localStorage`);
       }
     } catch (e) {
-      console.warn('Failed to load tabs from localStorage:', e);
+      console.warn('❌ [TAB RESTORE] Failed to load tabs from localStorage:', e);
     }
   }, []); // Only run on mount
   
@@ -765,30 +1270,44 @@ export default function Home() {
     const saveTimeout = setTimeout(() => {
       try {
         // Serialize tabs (excluding non-serializable objects)
-        const serializableTabs = tabs.map(t => ({
-          id: t.id,
-          name: t.name,
-          fen: t.fen,
-          pgn: t.pgn,
-          moveHistory: t.moveHistory,
-          analysisCache: Object.keys(t.analysisCache || {}).length > 50 
-            ? {} // Clear if too large
-            : t.analysisCache,
-          messages: t.messages.slice(-50), // Keep last 50 messages per tab
-          metadata: t.metadata,
-          isAnalyzing: false, // Reset
-          hasUnread: false, // Reset
-          isModified: t.isModified,
-          createdAt: t.createdAt,
-        }));
+        const serializableTabs = tabs.map(t => {
+          const serialized = {
+            id: t.id,
+            name: t.name,
+            fen: t.fen,
+            pgn: t.pgn,
+            moveHistory: t.moveHistory,
+            analysisCache: Object.keys(t.analysisCache || {}).length > 50 
+              ? {} // Clear if too large
+              : t.analysisCache,
+            messages: t.messages.slice(-50), // Keep last 50 messages per tab
+            metadata: t.metadata,
+            isAnalyzing: false, // Reset
+            hasUnread: false, // Reset
+            isModified: t.isModified,
+            createdAt: t.createdAt,
+          };
+          
+          console.log(`💾 [TAB SAVE] Saving tab ${t.id}:`, {
+            name: serialized.name,
+            pgnLength: (serialized.pgn || '').length,
+            pgnPreview: (serialized.pgn || '').substring(0, 50),
+            fen: serialized.fen?.substring(0, 30),
+          });
+          
+          return serialized;
+        });
         
-        localStorage.setItem(TABS_STORAGE_KEY, JSON.stringify({
+        const saveData = {
           tabs: serializableTabs,
           activeTabId,
           savedAt: Date.now(),
-        }));
+        };
+        
+        console.log(`💾 [TAB SAVE] Saving ${serializableTabs.length} tabs to localStorage`);
+        localStorage.setItem(TABS_STORAGE_KEY, JSON.stringify(saveData));
       } catch (e) {
-        console.warn('Failed to save tabs to localStorage:', e);
+        console.warn('❌ [TAB SAVE] Failed to save tabs to localStorage:', e);
       }
     }, 1000); // Debounce 1 second
     
@@ -805,9 +1324,46 @@ export default function Home() {
   const [showLoadGame, setShowLoadGame] = useState(false);
   const [boardDockOpen, setBoardDockOpen] = useState(false);
   const [showRequestOptions, setShowRequestOptions] = useState(false);
+  const [showGameSetup, setShowGameSetup] = useState(false);
   const [isLegacyReviewing, setIsLegacyReviewing] = useState(false);
   const [showAuthModal, setShowAuthModal] = useState(false);
   const pendingOpeningLessonQueryRef = useRef<string | undefined>(undefined);
+
+  const handleShowBoardFromMessage = useCallback((payload?: {
+    finalPgn?: string;
+    fen?: string;
+    showBoardLink?: string;
+  }) => {
+    if (!payload) return;
+    
+    let finalPgn = payload.finalPgn;
+    let fenOverride = payload.fen;
+    
+    if (!finalPgn && payload.showBoardLink) {
+      try {
+        const base = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000';
+        const url = new URL(payload.showBoardLink, base);
+        finalPgn = url.searchParams.get('pgn') || undefined;
+        fenOverride = fenOverride || url.searchParams.get('fen') || undefined;
+      } catch (err) {
+        console.warn('Failed to parse show_board_link:', err);
+      }
+    }
+    
+    if (!finalPgn) {
+      console.warn('Show Board requested but no PGN available');
+      return;
+    }
+    
+    setBoardDockOpen(true);
+    loadGameIntoTab(
+      {
+        pgn: finalPgn,
+        fen: fenOverride,
+      },
+      { forceNewTab: true }
+    );
+  }, [loadGameIntoTab]);
 
   const describeCandidateSource = (candidate: any) => {
     if (!candidate) return "master database sample";
@@ -1356,10 +1912,10 @@ export default function Home() {
       setShowAuthModal(true);
     }
   };
-  const theme = "day" as const;
+  const theme = "night" as const;
   const [currentThreadId, setCurrentThreadId] = useState<string | null>(null);
   type LayoutSizes = { board: number; load: number; chat: number };
-  const defaultLayoutSizes: LayoutSizes = { board: 0.45, load: 0.2, chat: 0.35 };
+  const defaultLayoutSizes: LayoutSizes = { board: 0.275, load: 0.2, chat: 0.525 };
   const [layoutSizes, setLayoutSizes] = useState<LayoutSizes>(() => {
     if (typeof window !== "undefined") {
       try {
@@ -1395,6 +1951,7 @@ export default function Home() {
   const [profileStats, setProfileStats] = useState<ProfileStatsResponse["stats"] | null>(null);
   const [profileOverview, setProfileOverview] = useState<ProfileOverviewResponse | null>(null);
   const [showProfileSetupModal, setShowProfileSetupModal] = useState(false);
+  const isRefreshingRef = useRef(false); // Prevent concurrent refreshes
 
   useEffect(() => {
     if (typeof window !== "undefined") {
@@ -1403,21 +1960,122 @@ export default function Home() {
   }, [layoutSizes]);
 
   const normalizeProfilePreferences = (raw?: { accounts?: Array<{ platform: "chesscom" | "lichess"; username: string }>; time_controls?: string[] | null; timeControls?: string[] | null; }): ProfilePreferences | null => {
-    if (!raw) return null;
+    if (!raw) {
+      return null;
+    }
+    
+    // Handle both array and object formats
+    let accountsArray = raw.accounts;
+    if (!Array.isArray(accountsArray)) {
+      accountsArray = [];
+    }
+    
     const allowed = new Set(["bullet", "blitz", "rapid"]);
-    const accounts = (raw.accounts ?? []).map((acc, index) => ({
-      id: `${acc.platform}-${acc.username || index}-${index}`,
-      platform: acc.platform,
-      username: acc.username || "",
-    }));
+    const accounts = accountsArray.map((acc, index) => {
+      // Handle both object and string formats
+      const platform = typeof acc === 'string' ? acc : (acc?.platform || 'chesscom');
+      const username = typeof acc === 'string' ? '' : (acc?.username || '');
+      
+      return {
+        id: `${platform}-${username || index}-${index}`,
+        platform: platform as "chesscom" | "lichess",
+        username: username,
+      };
+    });
+    
     const timeControls = (raw.time_controls ?? raw.timeControls ?? [])
-      .map((tc) => tc.toLowerCase())
+      .map((tc) => String(tc).toLowerCase())
       .filter((tc): tc is "bullet" | "blitz" | "rapid" => allowed.has(tc));
-    return {
+    
+    const result: ProfilePreferences = {
       accounts,
-      timeControls: timeControls.length ? timeControls : ["blitz", "rapid"],
+      timeControls: timeControls.length ? timeControls : (["blitz", "rapid"] as Array<"bullet" | "blitz" | "rapid">),
     };
+    
+    // Return result even if accounts is empty (user might not have set up yet)
+    return result;
   };
+
+  // Reusable function to refresh profile data
+  const refreshProfileData = useCallback(async () => {
+    if (!user) {
+      console.warn("🔄 Refresh skipped: no user");
+      return;
+    }
+    
+    // Prevent concurrent refreshes
+    if (isRefreshingRef.current) {
+      console.log("🔄 Refresh already in progress, skipping...");
+      return;
+    }
+    
+    isRefreshingRef.current = true;
+    const startTime = Date.now();
+    
+    try {
+      console.log("🔄 Refreshing profile data...");
+      
+      // fetchWithRetry now has built-in timeout (8s)
+      const data = await fetchProfileOverview(user.id);
+      
+      // Update state with new data (don't clear first - causes re-render loops)
+      setProfileOverview(data);
+      if (data.status) {
+        setProfileStatus(data.status);
+      }
+      
+      const normalized = normalizeProfilePreferences(data.preferences as any);
+      
+      if (normalized && normalized.accounts.length > 0) {
+        // Create new object to force React update
+        setProfilePreferences({
+          accounts: [...normalized.accounts],
+          timeControls: [...normalized.timeControls]
+        });
+        setShowProfileSetupModal(false);
+      } else {
+        console.warn("⚠️ No normalized preferences or empty accounts");
+        // Don't set to null if we have data, just keep existing
+        if (!normalized) {
+          setProfilePreferences(null);
+          setShowProfileSetupModal(true);
+        }
+      }
+      
+      // Also refresh stats (don't wait for it)
+      fetchProfileStats(user.id)
+        .then(statsResponse => {
+          console.log("📈 Stats received:", !!statsResponse.stats);
+          setProfileStats(statsResponse.stats || null);
+        })
+        .catch(statsErr => {
+          console.warn("⚠️ Stats refresh failed (optional):", statsErr);
+        });
+      
+      const duration = Date.now() - startTime;
+      console.log(`✅ Profile data refreshed successfully in ${duration}ms`);
+    } catch (err) {
+      const duration = Date.now() - startTime;
+      // Don't show error for aborted requests (timeout) - they're expected for slow requests
+      const isAbortError = err instanceof Error && 
+        (err.name === 'AbortError' || err.message.includes('aborted'));
+      
+      if (isAbortError) {
+        console.warn(`⚠️ Profile refresh timed out after ${duration}ms (request aborted)`);
+        // Don't show error message to user for timeouts
+      } else {
+        console.error(`❌ Failed to refresh profile after ${duration}ms:`, err);
+        // Only show error to user for non-timeout errors
+        if (err instanceof Error) {
+          addSystemMessage(`Failed to refresh profile: ${err.message}`);
+        }
+      }
+    } finally {
+      // Always clear the flag
+      isRefreshingRef.current = false;
+      console.log("🔄 Refresh completed, flag cleared");
+    }
+  }, [user]); // addSystemMessage is stable, doesn't need to be in deps
 
   useEffect(() => {
     if (!user) {
@@ -1433,6 +2091,7 @@ export default function Home() {
 
     const loadProfileOverview = async () => {
       try {
+        if (analysisInProgress) return;
         const data = await fetchProfileOverview(user.id);
         if (cancelled) return;
         setProfileOverview(data);
@@ -1458,7 +2117,7 @@ export default function Home() {
       cancelled = true;
       clearInterval(interval);
     };
-  }, [user]);
+  }, [user, analysisInProgress]);
 
   useEffect(() => {
     if (!user) return;
@@ -1466,6 +2125,7 @@ export default function Home() {
 
     const loadStats = async () => {
       try {
+        if (analysisInProgress) return;
         const response = await fetchProfileStats(user.id);
         if (!cancelled) {
           setProfileStats(response.stats || null);
@@ -1483,7 +2143,7 @@ export default function Home() {
       cancelled = true;
       clearInterval(interval);
     };
-  }, [user]);
+  }, [user, analysisInProgress]);
 
   useEffect(() => {
     if (user && showAuthModal) {
@@ -1545,15 +2205,13 @@ export default function Home() {
     };
   }, [dragState]);
 
-  const loadPanelVisible = boardDockOpen && showLoadGame;
   const totalLayout = layoutSizes.board + layoutSizes.load + layoutSizes.chat || 1;
   const boardFractionAll = layoutSizes.board / totalLayout;
   const loadFractionAll = layoutSizes.load / totalLayout;
   const chatFractionAll = layoutSizes.chat / totalLayout;
   const boardChatTotal = layoutSizes.board + layoutSizes.chat || 1;
-  const boardFraction = boardDockOpen ? (loadPanelVisible ? boardFractionAll : layoutSizes.board / boardChatTotal) : 0;
-  const loadFraction = loadPanelVisible ? loadFractionAll : 0;
-  const chatFraction = boardDockOpen ? (loadPanelVisible ? chatFractionAll : layoutSizes.chat / boardChatTotal) : 1;
+  const boardFraction = boardDockOpen ? (layoutSizes.board / boardChatTotal) : 0;
+  const chatFraction = boardDockOpen ? (layoutSizes.chat / boardChatTotal) : 1;
   const beginDrag = (type: DragType, event: ReactMouseEvent<HTMLDivElement>) => {
     event.preventDefault();
     event.stopPropagation();
@@ -1562,16 +2220,12 @@ export default function Home() {
   const layoutStyle: CSSProperties | undefined = boardDockOpen
     ? ({
         "--board-column-width": `${(boardFraction * 100).toFixed(2)}%`,
-        "--load-column-width": `${(loadPanelVisible ? loadFraction * 100 : 0).toFixed(2)}%`,
         "--chat-column-width": `${(chatFraction * 100).toFixed(2)}%`,
-        "--composer-offset": `${((boardFraction + (loadPanelVisible ? loadFraction : 0)) * 100).toFixed(2)}%`,
+        "--composer-offset": `${(boardFraction * 100).toFixed(2)}%`,
       } as CSSProperties)
     : undefined;
   const boardColumnStyle = boardDockOpen
     ? { flexBasis: `${(boardFraction * 100).toFixed(2)}%` }
-    : undefined;
-  const loadColumnStyle = loadPanelVisible
-    ? { flexBasis: `${(loadFraction * 100).toFixed(2)}%` }
     : undefined;
   const chatColumnStyle = boardDockOpen
     ? { flexBasis: `${(chatFraction * 100).toFixed(2)}%` }
@@ -1681,12 +2335,12 @@ export default function Home() {
     
     try {
       // SINGLE Stockfish call - analyze the new position only
-      // Add timeout to prevent hanging
+      // Add timeout to prevent hanging (increased to 90s for complex positions)
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
+      const timeoutId = setTimeout(() => controller.abort(), 90000); // 90 second timeout
       
       const positionResponse = await fetch(
-        `http://localhost:8000/analyze_position?fen=${encodeURIComponent(currentFen)}&depth=18&lines=3`,
+        `${BACKEND_BASE}/analyze_position?fen=${encodeURIComponent(currentFen)}&depth=18&lines=3`,
         { signal: controller.signal }
       );
       
@@ -1738,8 +2392,8 @@ export default function Home() {
       
       console.log('✅ Analysis cached (optimized - no duplicate Stockfish)');
     } catch (error: any) {
-      if (error.name === 'AbortError') {
-        console.error('⏱️ Position analysis timed out after 30 seconds');
+      if (error.name === 'AbortError' || error.message?.includes('timed out')) {
+        console.error('⏱️ Position analysis timed out');
         addSystemMessage('Position analysis timed out. The engine may be busy.');
       } else {
         console.error('Auto-analysis error:', error);
@@ -1750,6 +2404,73 @@ export default function Home() {
       setIsAnalyzing(false);
     }
   }
+
+  // Prefetch baseline intuition (single-pass Scan A) in the background so the user can send a message while it runs.
+  const prefetchBaselineIntuition = useCallback(async (targetFen: string) => {
+    try {
+      if (!targetFen) return;
+      if (!(mode === "DISCUSS" || mode === "ANALYZE")) return;
+      // Avoid extra load during lessons / explicit play loops
+      if (lessonMode || aiGameActive) return;
+
+      const { buildLearningHeaders } = await import("@/lib/learningClient");
+      const { headers } = await buildLearningHeaders();
+      await fetch(`${BACKEND_BASE}/board/baseline_intuition_start`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...headers },
+        body: JSON.stringify({ start_fen: targetFen, thread_id: activeTab?.id || sessionId || null })
+      });
+    } catch (e) {
+      // Non-fatal prefetch; chat will still await baseline server-side if needed.
+      console.warn("Baseline intuition prefetch failed:", e);
+    }
+  }, [BACKEND_BASE, mode, lessonMode, aiGameActive, activeTab?.id, sessionId]);
+
+  // Ensure backend D2/D16 tree exists for this tab in DISCUSS/ANALYZE.
+  const ensureBackendTreeForTab = useCallback(async (tabId: string, startFen: string) => {
+    try {
+      if (!tabId || !startFen) return;
+      // Fast path: if we already have a node pointer, assume tree exists.
+      if (backendTreeNodeByTabRef.current[tabId]) return;
+
+      const getResp = await fetch(
+        `${BACKEND_BASE}/board/tree/get?thread_id=${encodeURIComponent(tabId)}&include_scan=false`
+      );
+      if (getResp.ok) {
+        const data = await getResp.json().catch(() => null);
+        // Backend returns { success: false, tree: null } when tree doesn't exist yet.
+        if (data?.success && data?.tree) {
+          const currentId = data?.tree?.current_id || "root";
+          backendTreeNodeByTabRef.current[tabId] = currentId;
+          return;
+        }
+      }
+
+      await fetch(`${BACKEND_BASE}/board/tree/init`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ thread_id: tabId, start_fen: startFen }),
+      });
+      backendTreeNodeByTabRef.current[tabId] = "root";
+    } catch (e) {
+      console.warn("ensureBackendTreeForTab failed:", e);
+    }
+  }, [BACKEND_BASE]);
+
+  // Auto-prefetch baseline intuition whenever the board position changes in DISCUSS/ANALYZE.
+  useEffect(() => {
+    if (fen && (mode === "DISCUSS" || mode === "ANALYZE")) {
+      prefetchBaselineIntuition(fen);
+    }
+  }, [fen, mode, prefetchBaselineIntuition]);
+
+  // Initialize backend tree (tab-scoped) for DISCUSS/ANALYZE so later moves can extend it.
+  useEffect(() => {
+    if (fen && (mode === "DISCUSS" || mode === "ANALYZE")) {
+      const tabId = activeTab?.id || activeTabId || sessionId;
+      ensureBackendTreeForTab(tabId, fen);
+    }
+  }, [fen, mode, activeTab?.id, activeTabId, sessionId, ensureBackendTreeForTab]);
 
   async function callLLM(
     messages: { role: string; content: string }[], 
@@ -1781,7 +2502,9 @@ export default function Home() {
       } as any;
       const finalMessages = [toolInstr, ...messages];
       // Build context for tools - include cached analysis if available
-      const cachedAnalysis = analysisCache[fen];
+      // In DISCUSS/ANALYZE, raw cached analysis is redundant with baseline intuition.
+      // Keep cached_analysis only for PLAY/lesson loops where move-quality depends on it.
+      const cachedAnalysis = (mode === "PLAY" || aiGameActive || lessonMode) ? analysisCache[fen] : null;
       
       // Extract last move and FEN before it from PGN (for "rate that move" requests)
       let lastMoveInfo = null;
@@ -1966,7 +2689,7 @@ export default function Home() {
       }
       console.log('='.repeat(80) + '\n');
       
-      const response = await fetch("http://localhost:8000/llm_chat", {
+      const response = await fetch(`${BACKEND_BASE}/llm_chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
@@ -2196,7 +2919,8 @@ export default function Home() {
         setTimeout(() => startWalkthroughWithData(transformedData), 200);
         
         return {
-          content: "",  // Empty - suppress LLM response
+          // Always keep some LLM text available for the chat UI, even when we auto-start walkthrough.
+          content: typeof data.content === "string" ? data.content : "",
           tool_calls: data.tool_calls || [],
           context: context,
           raw_data: {
@@ -2236,26 +2960,28 @@ export default function Home() {
             addSystemMessage(`⚙️ Analyzed ${gamesAnalyzed} games with Stockfish`);
           }
           
-          // Display narrative
+          // Display narrative if available
           if (result.narrative) {
             console.log('📊 [Personal Review] Displaying narrative and charts');
             addAssistantMessage(result.narrative);
+          }
+          
+          // Auto-load first game into tab (ALWAYS create new tab since user asked for their Chess.com game)
+          // Load game even if there's no narrative (short-circuit pathway may not have narrative)
+          if (result.first_game && result.first_game.pgn) {
+            console.log('🎯 [Personal Review] Auto-loading game into NEW tab');
+            loadGameIntoTab({
+              pgn: result.first_game.pgn,
+              white: result.first_game.white,
+              black: result.first_game.black,
+              date: result.first_game.date,
+              result: result.first_game.result,
+              timeControl: result.first_game.time_control,
+              opening: result.first_game.opening,
+            }, { forceNewTab: true });
             
-            // Auto-load first game into tab (ALWAYS create new tab since user asked for their Chess.com game)
-            if (result.first_game && result.first_game.pgn) {
-              console.log('🎯 [Personal Review] Auto-loading game into NEW tab');
-              loadGameIntoTab({
-                pgn: result.first_game.pgn,
-                white: result.first_game.white,
-                black: result.first_game.black,
-                date: result.first_game.date,
-                result: result.first_game.result,
-                timeControl: result.first_game.time_control,
-                opening: result.first_game.opening,
-              });
-              
-              // Trigger walkthrough if we have review data
-              if (result.first_game_review) {
+            // Trigger walkthrough if we have review data
+            if (result.first_game_review) {
                 console.log('🎬 [Personal Review] Triggering walkthrough with review data');
                 const reviewData = result.first_game_review;
                 
@@ -2314,31 +3040,31 @@ export default function Home() {
                   startWalkthroughWithData(walkthroughDataTransformed);
                 }, 500);
               }
-            }
-            
-            // Add single chart message with complete data
-            if (result.charts) {
-              setMessages(prev => [...prev, {
-                role: 'assistant',
-                content: '📊 **Visual Analysis**\n\nInteractive charts showing your performance breakdown.',
-                meta: {
-                  personalReviewChart: {
-                    data: result.charts  // Full object with all chart types
-                  }
-                }
-              }]);
-            }
-            
-            return {
-              content: "",  // Suppress LLM response
-              tool_calls: data.tool_calls || [],
-              context: context,
-              raw_data: {
-                tool_calls: data.tool_calls,
-                personal_review: result
-              }
-            };
           }
+          
+          // Add single chart message with complete data (only if narrative was shown)
+          if (result.narrative && result.charts) {
+            setMessages(prev => [...prev, {
+              role: 'assistant',
+              content: '📊 **Visual Analysis**\n\nInteractive charts showing your performance breakdown.',
+              meta: {
+                personalReviewChart: {
+                  data: result.charts  // Full object with all chart types
+                }
+              }
+            }]);
+          }
+          
+          return {
+            // Keep backend content available (frontend may still want to show a message).
+            content: typeof data.content === "string" ? data.content : "",
+            tool_calls: data.tool_calls || [],
+            context: context,
+            raw_data: {
+              tool_calls: data.tool_calls,
+              personal_review: result
+            }
+          };
         }
       }
       
@@ -2429,7 +3155,12 @@ export default function Home() {
     detected_intent?: string | null,
     tools_used?: string[],
     orchestration?: any,
-    frontend_commands?: any[]
+    narrative_decision?: any,
+    baseline_intuition?: any,
+    frontend_commands?: any[],
+    final_pgn?: any,
+    show_board_link?: any,
+    buttons?: any[]
   }> {
     return new Promise((resolve, reject) => {
       // Prepend strict tool-usage system guidance
@@ -2487,20 +3218,37 @@ export default function Home() {
         temperature,
         model,
         use_tools: useTools,
+        session_id: sessionId,
+        task_id: activeTab?.id || null,
         context
       });
       
-      // Use fetch with ReadableStream for SSE
-      fetch("http://localhost:8000/llm_chat_stream", {
+      // Use fetch with ReadableStream for SSE (learning-first logging headers + passive next-action flush)
+      Promise.resolve()
+        .then(async () => {
+          const { buildLearningHeaders, flushNextActionForLastInteraction } = await import("@/lib/learningClient");
+          await flushNextActionForLastInteraction("asked_followup");
+          return buildLearningHeaders();
+        })
+        .then(({ interactionId, headers }) => {
+          return fetch(`${BACKEND_BASE}/llm_chat_stream`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+            headers: { "Content-Type": "application/json", ...headers },
         body: requestBody
-      }).then(async response => {
+          }).then(async (response) => ({ response, interactionId }));
+        })
+        .then(async ({ response, interactionId }) => {
         if (!response.ok) {
           const errorData = await response.json();
           reject(new Error(errorData.detail || "SSE connection failed"));
           return;
         }
+
+        // Mark completion at stream start (approx) to enable time-to-next-action.
+        try {
+          const { noteInteractionCompleted } = await import("@/lib/learningClient");
+          noteInteractionCompleted(interactionId);
+        } catch {}
         
         const reader = response.body?.getReader();
         if (!reader) {
@@ -2547,6 +3295,204 @@ export default function Home() {
                 
                 if (eventType === "status") {
                   onStatus(data);
+                } else if (eventType === "milestone") {
+                  const name = String(data?.name || "");
+                  const kind = String(data?.kind || "");
+                  const phase =
+                    name === "task_started" ? "loading" :
+                    name === "fast_classify_done" ? "interpreting" :
+                    name === "plan_ready" ? "planning" :
+                    name === "goal_built" ? "interpreting" :
+                    name === "fast_path_taken" ? "loading" :
+                    name === "engine_light_done" ? "investigating" :
+                    name === "engine_deep_done" ? "investigating" :
+                    name === "claims_ready" ? "summarising" :
+                    name === "draft_ready" ? "explaining" :
+                    name === "final_ready" ? "explaining" :
+                    name === "stopped" ? "explaining" :
+                    "loading";
+                  const message =
+                    name === "task_started" ? "Task started…" :
+                    name === "fast_classify_done" ? "Intent classified…" :
+                    name === "plan_ready" ? "Plan ready…" :
+                    name === "goal_built" ? "Goal built…" :
+                    name === "fast_path_taken" ? `Fast path${kind ? ` (${kind})` : ""}…` :
+                    name === "engine_light_done" ? "Engine (light) done…" :
+                    name === "engine_deep_done" ? "Engine (deep) done…" :
+                    name === "claims_ready" ? "Claims ready…" :
+                    name === "draft_ready" ? "Draft ready…" :
+                    name === "final_ready" ? "Finalizing…" :
+                    name === "stopped" ? "Stopped…" :
+                    `Milestone: ${name || "unknown"}`;
+                  onStatus({ phase, message, timestamp: Date.now(), replace: true });
+                } else if (eventType === "facts_ready") {
+                  // Cursor-like: commit small, grounded facts early (eval + candidates) before prose.
+                  const evalCp = typeof data?.eval_cp === "number" ? data.eval_cp : undefined;
+                  const recommended = typeof data?.recommended_move === "string" ? data.recommended_move : undefined;
+                  const topMoves = Array.isArray(data?.top_moves) ? data.top_moves : [];
+                  const brief = topMoves
+                    .slice(0, 3)
+                    .map((m: any) => `${m?.move ?? "?"}${typeof m?.eval_cp === "number" ? ` (${m.eval_cp}cp)` : ""}`)
+                    .join(", ");
+                  const msg =
+                    `Facts ready${evalCp !== undefined ? `: eval ${evalCp}cp` : ""}` +
+                    `${recommended ? `, candidate: ${recommended}` : ""}` +
+                    `${brief ? `, top: ${brief}` : ""}`;
+                  onStatus({ phase: "investigating", message: msg.slice(0, 180), timestamp: Date.now() });
+                  // Store for rendering (per task/thread)
+                  try {
+                    const taskKey = activeTab?.id || "default";
+                    setFactsByTask(prev => ({
+                      ...prev,
+                      [taskKey]: {
+                        eval_cp: evalCp,
+                        recommended_move: recommended,
+                        recommended_reason: typeof data?.recommended_reason === "string" ? data.recommended_reason : undefined,
+                        top_moves: topMoves,
+                        source: "facts_ready",
+                        _ts: Date.now()
+                      }
+                    }));
+                  } catch (e) {
+                    // ignore
+                  }
+                } else if (eventType === "summariser_start") {
+                  onStatus({ phase: "summarising", message: "Summariser started…", timestamp: Date.now(), replace: true });
+                } else if (eventType === "summariser_progress") {
+                  const step = data.step || "progress";
+                  const dur = typeof data.duration_s === "number" ? ` ${data.duration_s.toFixed(2)}s` : "";
+                  onStatus({ phase: "summarising", message: `Summariser ${step}${dur}`, timestamp: Date.now(), replace: true });
+                } else if (eventType === "summariser_claim_chunk") {
+                  const idx = (typeof data.index === "number" ? data.index : 0) + 1;
+                  const total = typeof data.total === "number" ? data.total : undefined;
+                  const summary = data?.claim?.summary || "";
+                  onStatus({
+                    phase: "summarising",
+                    message: `Claim ${idx}${total ? `/${total}` : ""}: ${summary}`.slice(0, 160),
+                    timestamp: Date.now()
+                  });
+                } else if (eventType === "summariser_done") {
+                  const n = typeof data.claims_count === "number" ? data.claims_count : undefined;
+                  onStatus({ phase: "summarising", message: `Summariser done${n !== undefined ? ` (${n} claims)` : ""}`, timestamp: Date.now(), replace: true });
+                } else if (eventType === "explainer_start") {
+                  onStatus({ phase: "explaining", message: "Explainer started…", timestamp: Date.now(), replace: true });
+                } else if (eventType === "explainer_prompt_audit") {
+                  // Useful for debugging token bloat in the UI logs.
+                  const approx = typeof data.approx_total_tokens === "number" ? data.approx_total_tokens : undefined;
+                  onStatus({
+                    phase: "explaining",
+                    message: `Explainer prompt ~${approx ?? "?"} tok`,
+                    timestamp: Date.now()
+                  });
+                } else if (eventType === "explainer_progress") {
+                  const step = data.step || "progress";
+                  const dur = typeof data.duration_s === "number" ? ` ${data.duration_s.toFixed(2)}s` : "";
+                  onStatus({ phase: "explaining", message: `Explainer ${step}${dur}`, timestamp: Date.now(), replace: true });
+                } else if (eventType === "explainer_chunk") {
+                  const idx = (typeof data.index === "number" ? data.index : 0) + 1;
+                  const total = typeof data.total === "number" ? data.total : undefined;
+                  onStatus({
+                    phase: "explaining",
+                    message: `Explanation chunk ${idx}${total ? `/${total}` : ""}…`,
+                    timestamp: Date.now()
+                  });
+                } else if (eventType === "plan_created") {
+                  // Execution plan created by Planner
+                  console.log("📋 SSE plan_created received:", data);
+                  setAnalysisInProgress(true);
+                  setExecutionPlan({ ...data, startTime: Date.now() });
+                } else if (eventType === "step_update") {
+                  // Step status update from Executor
+                  console.log("📝 SSE step_update received:", data);
+                  setExecutionPlan((prev: any) => {
+                    if (!prev) return prev;
+                    // Plans can expand at runtime (executor may inject additional steps).
+                    const incomingStepNum = typeof data.step_number === "number" ? data.step_number : 0;
+                    const prevMaxStep = Array.isArray(prev.steps)
+                      ? prev.steps.reduce((m: number, s: any) => Math.max(m, Number(s?.step_number || 0)), 0)
+                      : 0;
+                    const maxStepNum = Math.max(prevMaxStep, incomingStepNum);
+                    const hasStep = Array.isArray(prev.steps) && prev.steps.some((s: any) => s?.step_number === incomingStepNum);
+                    const nextSteps = hasStep
+                      ? prev.steps.map((step: any) =>
+                          step.step_number === data.step_number ? { ...step, status: data.status } : step
+                        )
+                      : [
+                          ...(Array.isArray(prev.steps) ? prev.steps : []),
+                          {
+                            step_number: incomingStepNum,
+                            action_type: data.action_type || "unknown",
+                            purpose: data.purpose || "",
+                            status: data.status || "in_progress",
+                          },
+                        ].sort((a: any, b: any) => (a.step_number || 0) - (b.step_number || 0));
+                    return {
+                      ...prev,
+                      steps: nextSteps,
+                      total_steps: typeof prev.total_steps === "number" ? Math.max(prev.total_steps, maxStepNum) : maxStepNum,
+                    };
+                  });
+                } else if (eventType === "thinking_started") {
+                  // Thinking stage started during investigation
+                  console.log("🧠 SSE thinking_started received:", data);
+                  setThinkingStage({ ...data, startTime: Date.now() });
+                } else if (eventType === "plan_progress") {
+                  // Overall plan progress update
+                  console.log("📊 SSE plan_progress received:", data);
+                  // Keep plan totals in sync (executor-injected steps can change total).
+                  if (typeof data.total === "number") {
+                    setExecutionPlan((prev: any) => {
+                      if (!prev) return prev;
+                      return { ...prev, total_steps: Math.max(Number(prev.total_steps || 0), data.total) };
+                    });
+                  }
+                  // Mark as complete when 100%
+                  if (data.percentage === 100) {
+                    setExecutionPlan((prev: any) => {
+                      if (!prev) return prev;
+                      const startTime = prev.startTime || Date.now();
+                      const thinkingTimeSeconds = Math.round((Date.now() - startTime) / 1000);
+                      return {
+                        ...prev,
+                        isComplete: true,
+                        thinkingTimeSeconds
+                      };
+                    });
+                    setThinkingStage((prev: any) => {
+                      if (!prev) return prev;
+                      const startTime = prev.startTime || Date.now();
+                      const thinkingTimeSeconds = Math.round((Date.now() - startTime) / 1000);
+                      return {
+                        ...prev,
+                        isComplete: true,
+                        thinkingTimeSeconds
+                      };
+                    });
+                  }
+                } else if (eventType === "pgn_update") {
+                  // PGN update during investigation (for live board view)
+                  console.log("♟️ SSE pgn_update received:", data);
+                  // Handle status messages from pgn_update
+                  if (data.type === "status" && data.message) {
+                    onStatus({ phase: "investigating", message: data.message, timestamp: Date.now() });
+                  } else if (data.move_san) {
+                    onStatus({ phase: "investigating", message: `Exploring move ${data.move_san}...`, timestamp: Date.now() });
+                  }
+                } else if (eventType === "board_state") {
+                  // NEW: FEN updates during investigation (for board preview)
+                  console.log("♟️ SSE board_state received:", data);
+                  if (data.type === "move_investigation_start" || data.type === "move_played") {
+                    // Show FEN preview during investigation
+                    if (data.fen) {
+                      setPreviewFEN(data.fen);
+                      if (data.move_san) {
+                        onStatus({ phase: "investigating", message: `Investigating ${data.move_san}...`, timestamp: Date.now() });
+                      }
+                    }
+                  } else if (data.type === "investigation_complete" && data.is_reverting) {
+                    // Revert to original FEN
+                    setPreviewFEN(null);
+                  }
                 } else if (eventType === "game_loaded") {
                   // Chunked SSE: Game data for tab loading
                   console.log("📦 SSE game_loaded received");
@@ -2568,7 +3514,8 @@ export default function Home() {
                   chunkedWalkthroughData = data;
                   onStatus({ phase: "loading", message: "Walkthrough ready...", progress: 0.98, timestamp: Date.now() });
                 } else if (eventType === "complete") {
-                  console.log("🎉 SSE complete received:", data.content?.slice(0, 100));
+                  console.log("🎉 SSE complete received:", data.response?.slice(0, 100) || data.content?.slice(0, 100));
+                  setAnalysisInProgress(false);
                   
                   // Merge chunked data into tool_calls if available
                   let mergedToolCalls = data.tool_calls || [];
@@ -2604,19 +3551,113 @@ export default function Home() {
                     });
                   }
                   
+                  // Use response field if available, otherwise fallback to content
+                  const finalContent = data.response || data.content || "";
+
+                  // If backend provides a v2 envelope, store FactsCard for this task
+                  try {
+                    const taskKey = activeTab?.id || "default";
+                    const env = data?.envelope;
+                    const fc = env?.facts_card;
+                    if (fc) {
+                      const topMoves =
+                        Array.isArray(fc?.top_moves)
+                          ? fc.top_moves.slice(0, 5).map((m: any) => ({
+                              move: m?.san,
+                              eval_cp: typeof m?.eval_cp === "number" ? m.eval_cp : undefined
+                            }))
+                          : [];
+                      setFactsByTask(prev => ({
+                        ...prev,
+                        [taskKey]: {
+                          eval_cp: typeof fc?.eval_cp === "number" ? fc.eval_cp : undefined,
+                          recommended_move: typeof env?.recommended_move === "string" ? env.recommended_move : undefined,
+                          recommended_reason: typeof env?.stop_reason === "string" ? env.stop_reason : undefined,
+                          top_moves: topMoves,
+                          source: "envelope",
+                          _ts: Date.now()
+                        }
+                      }));
+                    }
+                  } catch (e) {
+                    // ignore
+                  }
+                  
+                  // Mark execution plan and thinking stage as complete with thinking time
+                  setExecutionPlan((prev: any) => {
+                    if (!prev) return prev;
+                    const startTime = prev.startTime || Date.now();
+                    const thinkingTimeSeconds = Math.round((Date.now() - startTime) / 1000);
+                    return {
+                      ...prev,
+                      isComplete: true,
+                      thinkingTimeSeconds
+                    };
+                  });
+                  setThinkingStage((prev: any) => {
+                    if (!prev) return prev;
+                    const startTime = prev.startTime || Date.now();
+                    const thinkingTimeSeconds = Math.round((Date.now() - startTime) / 1000);
+                    return {
+                      ...prev,
+                      isComplete: true,
+                      thinkingTimeSeconds
+                    };
+                  });
+                  
+                  // Handle buttons for play-against-AI side selection
+                  if (Array.isArray(data.buttons) && data.buttons.length > 0) {
+                    // Store buttons to add after the message
+                    resolve({
+                      content: finalContent,
+                      tool_calls: mergedToolCalls,
+                      annotations: data.annotations,
+                      status_messages: data.status_messages,
+                      detected_intent: data.detected_intent,
+                      tools_used: data.tools_used,
+                      orchestration: data.orchestration,
+                      narrative_decision: data.narrative_decision,
+                      baseline_intuition: data.baseline_intuition || data.envelope?.baseline_intuition,
+                      final_pgn: data.final_pgn,
+                      show_board_link: data.show_board_link,
+                      buttons: data.buttons
+                    });
+                    return true;
+                  }
+                  
+                  // Execute UI commands if present
+                  if (Array.isArray(data.ui_commands) && data.ui_commands.length > 0) {
+                    executeUICommands(data.ui_commands, handleSendMessage);
+                  } else if (Array.isArray(data.envelope?.ui_commands) && data.envelope.ui_commands.length > 0) {
+                    executeUICommands(data.envelope.ui_commands, handleSendMessage);
+                  }
+                  
                   resolve({
-                    content: data.content,
+                    content: finalContent,
                     tool_calls: mergedToolCalls,
                     annotations: data.annotations,
                     status_messages: data.status_messages,
                     detected_intent: data.detected_intent,
                     tools_used: data.tools_used,
-                    orchestration: data.orchestration
+                    orchestration: data.orchestration,
+                    narrative_decision: data.narrative_decision,
+                    baseline_intuition: data.baseline_intuition || data.envelope?.baseline_intuition,
+                    final_pgn: data.final_pgn,  // NEW: PGN with all investigated lines
+                    show_board_link: data.show_board_link,  // NEW: Link to chess board page
+                    buttons: data.buttons || []  // Include buttons (empty array if not present)
                   });
                   return true; // Signal completion
                 } else if (eventType === "error") {
+                  setAnalysisInProgress(false);
                   reject(new Error(data.message));
                   return true; // Signal completion
+                } else if (eventType === "summariser_claims" || eventType === "summariser_pre_final") {
+                  // Backend emits these for richer progress/debug; keep UI quiet (no unknown-event spam).
+                  onStatus({ phase: "summarising", message: "Summariser produced narrative…", timestamp: Date.now() });
+                } else if (eventType === "explainer_done") {
+                  // Backend emits a final explainer metrics event; ignore quietly.
+                  const len = typeof data.length === "number" ? data.length : undefined;
+                  onStatus({ phase: "explaining", message: `Explainer done${len !== undefined ? ` (${len} chars)` : ""}`, timestamp: Date.now() });
                 } else if (eventType === "") {
                   // Empty event type - might be a continuation or malformed event
                   console.warn("⚠️ SSE event with empty type, data preview:", JSON.stringify(data).slice(0, 100));
@@ -2749,10 +3790,18 @@ export default function Home() {
           }
       })
       .catch((err) => {
-        console.error("Failed to load meta:", err);
+        // Don't show error for aborted requests (timeout)
+        const isAbortError = err instanceof Error && 
+          (err.name === 'AbortError' || err.message.includes('aborted'));
+        
+        if (!isAbortError) {
+          console.error("Failed to load meta:", err);
           if (messages.length === 0) {
-        addSystemMessage("⚠ Backend not available. Start the backend server.");
+            addSystemMessage("⚠ Backend not available. Start the backend server.");
           }
+        } else {
+          console.warn("Meta request timed out (this is normal for slow requests)");
+        }
       });
   }, []);
 
@@ -3313,12 +4362,40 @@ export default function Home() {
   }, [moveTree, fen]);
 
   function addUserMessage(content: string) {
-    setMessages((prev) => [...prev, { role: "user", content, fen, tabId: activeTabId }]);
+    // Check for duplicates - don't add if the last message is identical
+    setMessages((prev) => {
+      const lastMessage = prev[prev.length - 1];
+      if (lastMessage?.role === "user" && lastMessage?.content === content && lastMessage?.tabId === activeTabId) {
+        console.log('⚠️ Duplicate user message detected, skipping:', content);
+        return prev;
+      }
+      const newMessage = { role: "user" as const, content, fen, tabId: activeTabId };
+      return [...prev, newMessage];
+    });
+    
+    // Also update the active tab's messages (with deduplication)
+    setTabs(prevTabs => prevTabs.map(tab => {
+      if (tab.id === activeTabId) {
+        const tabMessages = tab.messages || [];
+        const lastTabMessage = tabMessages[tabMessages.length - 1];
+        // Skip if duplicate
+        if (lastTabMessage?.role === "user" && lastTabMessage?.content === content) {
+          return tab;
+        }
+        const newMessage = { role: "user" as const, content, fen, tabId: activeTabId };
+        return { ...tab, messages: [...tabMessages, newMessage] };
+      }
+      return tab;
+    }));
   }
 
   function addAssistantMessage(content: string, meta?: any) {
     // Strip all emoji from content (monochrome UI requirement)
     const filteredContent = stripEmojis(content);
+    // Check if we have buttons - if so, allow empty content
+    const hasButtons = Array.isArray(meta?.buttons) && meta.buttons.length > 0;
+    // Don't add empty messages unless we have buttons
+    if ((!filteredContent || !filteredContent.trim()) && !hasButtons) return;
     
     // Ensure meta always includes cached analysis for raw data button
     const enrichedMeta = {
@@ -3328,8 +4405,33 @@ export default function Home() {
                      analysisCache[fen]
     };
     
+    // Handle buttons if provided in meta
+    const buttons = meta?.buttons;
+    let buttonMessages: any[] = [];
+    if (Array.isArray(buttons) && buttons.length > 0) {
+      buttonMessages = buttons.map((btn: any) => ({
+        role: 'button' as const,
+        content: btn.label || btn.action,
+        buttonAction: btn.action,
+        buttonLabel: btn.label,
+        meta: { ...btn.data, buttonId: `btn-${Date.now()}-${Math.random()}` }
+      }));
+    }
+    
     // Include tabId for context scoping
-    setMessages((prev) => [...prev, { role: "assistant", content: filteredContent, meta: enrichedMeta, fen, tabId: activeTabId }]);
+    const assistantMessage = { role: "assistant" as const, content: filteredContent, meta: enrichedMeta, fen, tabId: activeTabId };
+    setMessages((prev) => {
+      const newMessages = [...prev, assistantMessage];
+      // Add button messages after the assistant message
+      if (buttonMessages.length > 0) {
+        newMessages.push(...buttonMessages);
+      }
+      return newMessages;
+    });
+    
+    // Also update the active tab's messages
+    const tabMessages = [...(activeTab?.messages || []), assistantMessage, ...buttonMessages];
+    updateActiveTab({ messages: tabMessages });
     
     // Mark tab as having unread if not the active tab (shouldn't happen, but defensive)
     if (activeTabId !== activeTab?.id) {
@@ -3340,17 +4442,79 @@ export default function Home() {
     setTimeout(() => {
       // PRIORITY 1: Use backend-generated annotations if available
       const backendAnnotations = meta?.backendAnnotations;
-      if (backendAnnotations && (backendAnnotations.arrows?.length || backendAnnotations.highlights?.length)) {
-        console.log('📍 Using backend annotations:', backendAnnotations);
-        setAnnotations(prev => ({
-          ...prev,
-          arrows: backendAnnotations.arrows || [],
-          highlights: backendAnnotations.highlights || []
-        }));
+      if (backendAnnotations) {
+        // Check if we have direct arrows/highlights
         if (backendAnnotations.arrows?.length || backendAnnotations.highlights?.length) {
-          addSystemMessage(`📍 Visual annotations applied: ${backendAnnotations.arrows?.length || 0} arrows, ${backendAnnotations.highlights?.length || 0} highlights`);
+          console.log('📍 Using backend annotations (direct):', backendAnnotations);
+          setAnnotations(prev => ({
+            ...prev,
+            arrows: backendAnnotations.arrows || [],
+            highlights: backendAnnotations.highlights || []
+          }));
+          if (backendAnnotations.arrows?.length || backendAnnotations.highlights?.length) {
+            addSystemMessage(`📍 Visual annotations applied: ${backendAnnotations.arrows?.length || 0} arrows, ${backendAnnotations.highlights?.length || 0} highlights`);
+          }
+          return;
         }
-        return;
+        
+        // Check if we have themes/tactics data to generate annotations from
+        const themes = backendAnnotations.themes || backendAnnotations.themes_identified || [];
+        const tags = backendAnnotations.tags || [];
+        const twoMoveTactics = backendAnnotations.two_move_tactics;
+        
+        if (themes.length > 0 || tags.length > 0 || twoMoveTactics) {
+          console.log('🎨 Generating annotations from backend investigation data:', {
+            themes: themes.slice(0, 5),
+            tags: tags.length,
+            twoMoveTactics: !!twoMoveTactics
+          });
+          
+          try {
+            const { generateThemeAnnotations } = require('@/lib/themeAnnotations');
+            const sideToMove = fen.includes(' w ') ? 'white' : 'black';
+            const engineData = enrichedMeta.rawEngineData || {};
+            
+            // Normalize tags structure if needed (backend uses "tag" field, frontend expects "tag_name")
+            const normalizedTags = tags.map((tag: any) => {
+              if (tag && typeof tag === 'object' && tag.tag && !tag.tag_name) {
+                return {
+                  ...tag,
+                  tag_name: tag.tag,
+                  name: tag.tag
+                };
+              }
+              return tag;
+            });
+            
+            // Generate annotations from themes and tags
+            const themeAnnotations = generateThemeAnnotations(themes, normalizedTags, engineData, fen, sideToMove);
+            
+            // Add tactical annotations if two_move_tactics available
+            if (twoMoveTactics && twoMoveTactics.open_tactics) {
+              const tactics = twoMoveTactics.open_tactics;
+              console.log('   🎯 Found tactical opportunities:', tactics.length);
+              // TODO: Add tactical arrow/highlight annotations based on tactics
+            }
+            
+            console.log('📍 Generated annotations from backend data:', {
+              arrows: themeAnnotations.arrows.length,
+              highlights: themeAnnotations.highlights.length
+            });
+            
+            setAnnotations(prev => ({
+              ...prev,
+              arrows: themeAnnotations.arrows || [],
+              highlights: themeAnnotations.highlights || []
+            }));
+            
+            if (themeAnnotations.arrows?.length || themeAnnotations.highlights?.length) {
+              addSystemMessage(`📍 Visual annotations generated: ${themeAnnotations.arrows?.length || 0} arrows, ${themeAnnotations.highlights?.length || 0} highlights`);
+            }
+            return;
+          } catch (e) {
+            console.warn('   ⚠️ Failed to generate annotations from backend data:', e);
+          }
+        }
       }
       
       // PRIORITY 2: Fallback to frontend parsing
@@ -3365,6 +4529,56 @@ export default function Home() {
     // Strip emoji from system messages too
     const filteredContent = stripEmojis(content);
     setMessages((prev) => [...prev, { role: "system", content: filteredContent, fen, tabId: activeTabId }]);
+  }
+
+  function handleAddBoard() {
+    if (!fen) {
+      console.warn('Cannot add board: no FEN available');
+      return;
+    }
+    
+    // Find existing board message and replace with system notification
+    setMessages((prev) => {
+      const hasExistingBoard = prev.some(msg => msg.role === 'board');
+      const boardMessage = { role: "board" as const, content: "", fen, tabId: activeTabId, meta: { pgn } };
+      
+      if (hasExistingBoard) {
+        // Replace existing board messages with system notification
+        const newMessages = prev.map(msg => {
+          if (msg.role === 'board') {
+            return { role: "system" as const, content: "Board closed", fen, tabId: activeTabId };
+          }
+          return msg;
+        });
+        // Add new board message at the end
+        console.log('Replacing existing board, adding new board message:', boardMessage);
+        return [...newMessages, boardMessage];
+      } else {
+        // Just add board message
+        console.log('Adding first board message:', boardMessage);
+        return [...prev, boardMessage];
+      }
+    });
+    
+    // Also update the active tab's messages
+    const activeTab = tabs.find(t => t.id === activeTabId);
+    if (activeTab) {
+      const tabMessages = activeTab.messages || [];
+      const hasExistingBoard = tabMessages.some(msg => msg.role === 'board');
+      const boardMessage = { role: "board" as const, content: "", fen, tabId: activeTabId, meta: { pgn } };
+      
+      if (hasExistingBoard) {
+        const newTabMessages = tabMessages.map(msg => {
+          if (msg.role === 'board') {
+            return { role: "system" as const, content: "Board closed", fen, tabId: activeTabId };
+          }
+          return msg;
+        });
+        updateActiveTab({ messages: [...newTabMessages, boardMessage] });
+      } else {
+        updateActiveTab({ messages: [...tabMessages, boardMessage] });
+      }
+    }
   }
 
   function addAutomatedMessage(content: string) {
@@ -4395,36 +5609,10 @@ If they ask about the game, refer to this data.
 `;
     }
     
-    // Generate context-aware LLM response
-    const contextPrompt = `
-User sent a general greeting/chat message: "${message}"
-
-Current Board State:
-- FEN: ${fen}
-- Is starting position: ${isStartPosition}
-- Has moves played: ${hasMoves}
-- Move count: ${moveCount}
-- PGN: ${pgn || "Empty"}
-
-Context Analysis:
-${boardContext === "starting_position_empty" ? 
-  "The board is at the starting position with no moves played yet." :
-  boardContext.includes("game_in_progress") ?
-  `There's a game in progress with ${moveCount} moves played.` :
-  boardContext === "custom_position_set" ?
-  "There's a custom chess position set up on the board." :
-  "Unknown board state"}${gameReviewContext}
-
-Instructions:
-1. Respond warmly and naturally to their greeting/message
-2. Based on the board state, offer relevant suggestions:
-   - If starting position: Suggest starting a game, analyzing openings, or solving tactics
-   - If game in progress: Offer to analyze the position, suggest next moves, or review the game
-   - If custom position: Offer to analyze the position or play from here
-   - If game review data is available and they ask about it: Reference the specific statistics and findings
-3. Keep response friendly, concise (2-3 sentences), and helpful
-4. Don't analyze the position unless explicitly asked
-`;
+    // Send the raw user message - the backend interpreter handles classification
+    // Context (FEN, PGN, etc.) is already sent via the context object in callLLMStream
+    // DO NOT wrap the message with "User sent a general greeting/chat message" as this contaminates interpretation
+    const userMessage = message;
 
     // Show loading indicator while LLM processes
     const loaderId = addLoadingMessage('llm', 'Understanding request...');
@@ -4445,6 +5633,7 @@ Instructions:
         }));
       
       // Use streaming endpoint for real-time status updates
+      // Send the raw user message - backend handles all classification and context
       const result = await callLLMStream(
         [
           { 
@@ -4452,7 +5641,7 @@ Instructions:
             content: "You are Chess GPT, a friendly chess assistant. You help users play, analyze, and learn chess. Be warm, encouraging, and concise." 
           },
           ...recentHistory,  // Include recent chat for context
-          { role: "user", content: contextPrompt },
+          { role: "user", content: userMessage },  // Raw message, not wrapped
         ], 
         0.8,
         "gpt-4o-mini",
@@ -4483,6 +5672,8 @@ Instructions:
       console.log('🔍 [Personal Review Check] Full result:', result);
       console.log('🔍 [Personal Review Check] result.tool_calls:', result.tool_calls);
       const personalReviewTool = result.tool_calls?.find((tc: any) => tc.tool === 'fetch_and_review_games');
+      const hasSelectGamesTool = Array.isArray(result.tool_calls) && result.tool_calls.some((tc: any) => tc?.tool === "select_games");
+      const isGameReviewIntent = result.detected_intent === "game_review";
       console.log('🔍 [Personal Review Check] personalReviewTool:', personalReviewTool);
       if (personalReviewTool) {
         console.log('🔍 [Personal Review Check] result object:', personalReviewTool.result);
@@ -4496,7 +5687,9 @@ Instructions:
       const hasPgn = personalReviewTool?.result?.first_game?.pgn && personalReviewTool.result.first_game.pgn.length > 0;
       console.log('🔍 [Personal Review Check] hasPersonalReviewResult:', hasPersonalReviewResult, 'hasPgn:', hasPgn);
       
-      if (hasPersonalReviewResult && hasPgn) {
+      // Only auto-open review tabs when backend says we're actually doing a game review.
+      // This prevents game LIST/SELECT requests from opening walkthrough tabs if the wrong tool was called.
+      if (hasPersonalReviewResult && hasPgn && isGameReviewIntent && !hasSelectGamesTool) {
         const reviewResult = personalReviewTool.result;
         console.log('🎯 [Personal Review] Loading game into tab');
         
@@ -4509,7 +5702,7 @@ Instructions:
           result: reviewResult.first_game.result,
           timeControl: reviewResult.first_game.time_control,
           opening: reviewResult.first_game.opening,
-        });
+        }, { forceNewTab: true });
         
         // Trigger walkthrough if we have review data
         if (reviewResult.first_game_review?.ply_records) {
@@ -4597,6 +5790,13 @@ Instructions:
             addAssistantMessage(reviewResult.narrative);
           }
         }
+
+        // Always show the backend's LLM message if present (even if tab/walkthrough fails or is skipped).
+        if (typeof result.content === "string" && result.content.trim()) {
+          addAssistantMessage(result.content);
+        } else if (!reviewResult.narrative) {
+          addAssistantMessage("I fetched your game review data, but couldn’t render the walkthrough. You can ask about specific moves or moments and I’ll answer from the review.");
+        }
         
         removeLoadingMessage(loaderId);
         setIsLLMProcessing(false);
@@ -4645,9 +5845,14 @@ Instructions:
       
       // Store minimal meta for general chat with cached analysis
       const meta = {
+        // NEW: Include final_pgn and show_board_link if available
+        final_pgn: result.final_pgn,
+        show_board_link: result.show_board_link,
         type: "general_chat",
         boardContext,
         fen,
+        // Include buttons if present
+        buttons: result.buttons,
         moveCount,
         rawEngineData: analysisCache[fen], // Include cached analysis for annotations
         backendAnnotations: result.annotations, // Backend-generated annotations
@@ -4655,7 +5860,8 @@ Instructions:
         statusMessages: result.status_messages || [],
         detectedIntent: result.detected_intent,
         toolsUsed: result.tools_used || [],
-        orchestration: result.orchestration
+        orchestration: result.orchestration,
+        narrativeDecision: result.narrative_decision
       };
       
       addAssistantMessage(reply, meta);
@@ -4999,6 +6205,32 @@ Examples:
       const newPgn = newTree.toPGN();
       
       setFen(newFen);
+
+      // Tree-first (DISCUSS/ANALYZE): extend backend D2/D16 tree from current node
+      if (mode === "DISCUSS" || mode === "ANALYZE") {
+        try {
+          const tabId = activeTab?.id || activeTabId || sessionId;
+          await ensureBackendTreeForTab(tabId, fenBeforeMove);
+          const parentNodeId = backendTreeNodeByTabRef.current[tabId] || "root";
+          const resp = await fetch(`${BACKEND_BASE}/board/tree/add_move`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              thread_id: tabId,
+              parent_node_id: parentNodeId,
+              move_san: moveSan.san,
+            }),
+          });
+          if (resp.ok) {
+            const data = await resp.json();
+            if (data?.node_id) {
+              backendTreeNodeByTabRef.current[tabId] = data.node_id;
+            }
+          }
+        } catch (e) {
+          console.warn("Backend tree add_move failed:", e);
+        }
+      }
       setPgn(newPgn);
       // Push a mini-board snapshot message into chat
       setMessages(prev => [...prev, {
@@ -5033,8 +6265,13 @@ Examples:
         return; // Don't continue with engine response
       }
 
-      // Auto-analyze the new position AND the move in background (don't await)
+      // Auto-analyze (engine raw) only for PLAY/lesson loops.
+      // For DISCUSS/ANALYZE, we prefetch baseline intuition instead (cheaper than redundant raw analysis).
+      if (mode === "PLAY" || aiGameActive || lessonMode) {
       autoAnalyzePositionAndMove(newFen, moveSan.san, fenBeforeMove).catch(err => console.error('Auto-analysis failed:', err));
+      } else {
+        prefetchBaselineIntuition(newFen);
+      }
 
       const shouldCallAi = llmEnabled && aiGameActive && !lessonMode;
       console.log("[LESSON DEBUG] handleMove state", {
@@ -5076,8 +6313,13 @@ Examples:
             setGame(gameAfterEngine);
             setFen(response.new_fen);
             
-            // Auto-analyze the new position AND engine's move (don't await)
+            // Auto-analyze (engine raw) only for PLAY/lesson loops.
+            // For DISCUSS/ANALYZE, we prefetch baseline intuition instead.
+            if (mode === "PLAY" || aiGameActive || lessonMode) {
             autoAnalyzePositionAndMove(response.new_fen, response.engine_move_san, newFen).catch(err => console.error('Auto-analysis failed:', err));
+            } else {
+              prefetchBaselineIntuition(response.new_fen);
+            }
             
             // Add engine move to tree with comment
             const treeAfterEngine = newTree.clone();
@@ -5262,7 +6504,7 @@ Examples:
     
     try {
       const response = await fetch(
-        `http://localhost:8000/analyze_move?fen=${encodeURIComponent(fenBeforeLastMove)}&move_san=${encodeURIComponent(lastMoveSan)}&depth=18`,
+        `${BACKEND_BASE}/analyze_move?fen=${encodeURIComponent(fenBeforeLastMove)}&move_san=${encodeURIComponent(lastMoveSan)}&depth=18`,
         {method: "POST"}
       );
       
@@ -5986,7 +7228,7 @@ Answer style:
     
     try {
       // First check status
-      const statusRes = await fetch('http://localhost:8000/engine_pool/status');
+      const statusRes = await fetch(`${BACKEND_BASE}/engine_pool/status`);
       const status = await statusRes.json();
       console.log('Engine pool status:', status);
       
@@ -5999,7 +7241,7 @@ Answer style:
       
       // Run full test
       addSystemMessage('Running test game review (20 moves)...');
-      const testRes = await fetch('http://localhost:8000/engine_pool/test', { method: 'POST' });
+      const testRes = await fetch(`${BACKEND_BASE}/engine_pool/test`, { method: 'POST' });
       const testResult = await testRes.json();
       console.log('Engine pool test result:', testResult);
       
@@ -6221,12 +7463,45 @@ Instructions: Respond naturally and conversationally. Use themes to justify any 
         detectedIntent: result.detected_intent,
         toolsUsed: result.tools_used || [],
         orchestration: result.orchestration,
-        backendAnnotations: result.annotations
+        backendAnnotations: result.annotations,
+        baselineIntuition: result.baseline_intuition
       };
       
-      addAssistantMessage(result.content, meta);
+      // Add assistant message - ensure content is not empty
+      const hasContent = result.content && result.content.trim();
+      if (hasContent) {
+        addAssistantMessage(result.content, meta);
+      } else {
+        console.warn("⚠️ [generateLLMResponse] Empty content received, not adding message. Result:", result);
+      }
+      
+      // Add buttons after the message if present (always add buttons, even if no message)
+      if (Array.isArray(result.buttons) && result.buttons.length > 0) {
+        const buttonIdBase = Date.now();
+        const buttonMessages = result.buttons.map((btn: any, idx: number) => {
+          const buttonMsg: ChatMessage = {
+            id: `btn-msg-${buttonIdBase}-${idx}`,  // Add unique ID for React key
+            role: 'button' as const,
+            content: btn.label || btn.action || 'Button',  // Ensure content is never empty
+            buttonAction: btn.action,
+            buttonLabel: btn.label,
+            meta: { ...(btn.data || {}), buttonId: `btn-${buttonIdBase}-${idx}` },
+            fen: fen,
+            tabId: activeTabId
+          };
+          return buttonMsg;
+        });
+        // Add buttons immediately - React will batch the state updates
+        setMessages((prev) => [...prev, ...buttonMessages]);
+      } else {
+      }
+      
+      // Don't hide - they'll be collapsed automatically when marked as complete
     } catch (err: any) {
       addSystemMessage(`LLM error: ${err.message}`);
+      // Hide execution plan and thinking stage on error too
+      setExecutionPlan(null);
+      setThinkingStage(null);
     } finally {
       removeLoadingMessage(loaderId);
       setIsLLMProcessing(false);
@@ -6262,7 +7537,7 @@ Instructions: Respond naturally and conversationally. Use themes to justify any 
         const fenBefore = mainLine.length > 1 ? mainLine[mainLine.length - 2].fen : "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
         
         // Call analyze_move endpoint
-        const response = await fetch(`http://localhost:8000/analyze_move?fen=${encodeURIComponent(fenBefore)}&move_san=${encodeURIComponent(moveToAnalyze)}&depth=18`, {
+        const response = await fetch(`${BACKEND_BASE}/analyze_move?fen=${encodeURIComponent(fenBefore)}&move_san=${encodeURIComponent(moveToAnalyze)}&depth=18`, {
           method: 'POST'
         });
         
@@ -6336,7 +7611,7 @@ ${formatAnalysisCard(analysis.bestMoveReport.analysisAfter)}
         addSystemMessage(statusMsg);
         
         // Call analyze_move endpoint with current position
-        const response = await fetch(`http://localhost:8000/analyze_move?fen=${encodeURIComponent(fenToAnalyze)}&move_san=${encodeURIComponent(moveToAnalyze)}&depth=18`, {
+        const response = await fetch(`${BACKEND_BASE}/analyze_move?fen=${encodeURIComponent(fenToAnalyze)}&move_san=${encodeURIComponent(moveToAnalyze)}&depth=18`, {
           method: 'POST'
         });
         
@@ -6494,7 +7769,7 @@ ${formatAnalysisCard(analysis.bestMoveReport.analysisAfter)}
       const structuredPrompt = "Analyze this position with full technical details.";
       
       // Use callLLM with force_structured context flag
-      const result = await fetch("http://localhost:8000/llm_chat", {
+      const result = await fetch(`${BACKEND_BASE}/llm_chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -6532,9 +7807,6 @@ ${formatAnalysisCard(analysis.bestMoveReport.analysisAfter)}
   }
 
   async function handleSendMessage(message: string) {
-    // Ensure the board is visible whenever the user engages in chat
-    setBoardDockOpen(true);
-
     // Check for pending confirmations or clarifying questions first
     if (pendingConfirmation) {
       const lower = message.toLowerCase().trim();
@@ -6661,9 +7933,138 @@ ${formatAnalysisCard(analysis.bestMoveReport.analysisAfter)}
       } else if (action === 'SHOW_SOLUTION') {
         await showRetrySolution();
         return;
+      } else if (action === 'start_game_white') {
+        // User wants to play as White (AI plays Black)
+        setBoardOrientation('white');
+        // Use the setAiGame from executeUICommands context
+        const setAiGameFn = (async (active: boolean, aiSide: 'white' | 'black' | null = null, makeMoveNow: boolean = false) => {
+          console.log(`[setAiGame] Setting AI game: active=${active}, aiSide=${aiSide}, makeMoveNow=${makeMoveNow}`);
+          setAiGameActive(active);
+          if (active) {
+            setMode("PLAY");
+            if (makeMoveNow) {
+              const currentTurn = fen.split(' ')[1];
+              const isAiTurn = aiSide === null || 
+                              (aiSide === 'white' && currentTurn === 'w') || 
+                              (aiSide === 'black' && currentTurn === 'b');
+              if (isAiTurn) {
+                try {
+                  const response = await playMove(fen, "", undefined, 1500);
+                  if (response.legal && response.engine_move_san && response.new_fen) {
+                    const tempGame = new Chess(fen);
+                    const move = tempGame.move(response.engine_move_san);
+                    if (move) {
+                      handleMove(move.from, move.to, move.promotion);
+                    }
+                  }
+                } catch (err) {
+                  console.error('[setAiGame] Error making AI move:', err);
+                }
+              }
+            }
+          }
+        });
+        await setAiGameFn(true, 'black', false);
+        addSystemMessage('Starting game - you are playing as White. Make your first move!');
+        return;
+      } else if (action === 'start_game_black') {
+        // User wants to play as Black (AI plays White)
+        setBoardOrientation('black');
+        // Determine if AI should make first move (if it's White's turn)
+        const currentGame = new Chess(fen);
+        const isWhiteTurn = currentGame.turn() === 'w';
+        // Use the setAiGame from executeUICommands context
+        const setAiGameFn = (async (active: boolean, aiSide: 'white' | 'black' | null = null, makeMoveNow: boolean = false) => {
+          console.log(`[setAiGame] Setting AI game: active=${active}, aiSide=${aiSide}, makeMoveNow=${makeMoveNow}`);
+          setAiGameActive(active);
+          if (active) {
+            setMode("PLAY");
+            if (makeMoveNow) {
+              const currentTurn = fen.split(' ')[1];
+              const isAiTurn = aiSide === null || 
+                              (aiSide === 'white' && currentTurn === 'w') || 
+                              (aiSide === 'black' && currentTurn === 'b');
+              if (isAiTurn) {
+                try {
+                  const response = await playMove(fen, "", undefined, 1500);
+                  if (response.legal && response.engine_move_san && response.new_fen) {
+                    const tempGame = new Chess(fen);
+                    const move = tempGame.move(response.engine_move_san);
+                    if (move) {
+                      handleMove(move.from, move.to, move.promotion);
+                    }
+                  }
+                } catch (err) {
+                  console.error('[setAiGame] Error making AI move:', err);
+                }
+              }
+            }
+          }
+        });
+        await setAiGameFn(true, 'white', isWhiteTurn);
+        if (isWhiteTurn) {
+          addSystemMessage('Starting game - you are playing as Black. AI will make the first move...');
+        } else {
+          addSystemMessage('Starting game - you are playing as Black. Make your first move!');
+        }
+        return;
       }
     }
     
+    // Tree search command (client-side UX): /search <query> or /tree-search <query>
+    // Returns a ranked list by deviation depth (mainline first) and ply.
+    if (message.startsWith('/search ') || message.startsWith('/tree-search ')) {
+      const query = message.replace(/^\/(search|tree-search)\s+/i, '').trim();
+      if (!query) {
+        addSystemMessage('Usage: /search <query> (e.g., /search move:\"Nf3\")');
+        return;
+      }
+      try {
+        const tabId = activeTab?.id || activeTabId || sessionId;
+        await ensureBackendTreeForTab(tabId, fen);
+        const resp = await fetch(`${BACKEND_BASE}/board/tree/search`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ thread_id: tabId, query, limit: 25 }),
+        });
+        if (!resp.ok) {
+          const txt = await resp.text();
+          addSystemMessage(`Tree search failed: ${txt}`);
+          return;
+        }
+        const data = await resp.json();
+        const rows = Array.isArray(data?.results) ? data.results : [];
+        const tableLines = [
+          `Query: ${query}`,
+          '',
+          '| Rank | Move | VarDepth | Ply | Node |',
+          '|---:|---|---:|---:|---|',
+          ...rows.map((r: any, i: number) => {
+            const mv = String(r?.move_san || '');
+            const vd = String(r?.variation_depth ?? '');
+            const ply = String(r?.ply ?? '');
+            const nid = String(r?.node_id || '');
+            return `| ${i + 1} | ${mv} | ${vd} | ${ply} | ${nid} |`;
+          }),
+        ].join('\n');
+
+        setMessages(prev => [
+          ...prev,
+          { role: 'user', content: message },
+          {
+            role: 'expandable_table',
+            content: '',
+            tableTitle: `Tree search results (${rows.length})`,
+            tableContent: tableLines,
+          } as any,
+        ]);
+        return;
+      } catch (e: any) {
+        addSystemMessage(`Tree search error: ${e instanceof Error ? e.message : String(e)}`);
+        return;
+      }
+    }
+
     addUserMessage(message);
 
     let lower = message.toLowerCase().trim();
@@ -8441,7 +9842,6 @@ Be conversational and educational. Avoid restating move lists; focus on ideas.`;
   }
 
   async function analyzeMoveAtPosition(move: any) {
-    // OPTIMIZED FLOW: Start LLM request first, then setup board in parallel
     const fenBefore = move.fenBefore || move.fen_before || move._fullRecord?.fen_before;
     const fenAfter = move.fen;
     if (!fenBefore) {
@@ -8454,13 +9854,8 @@ Be conversational and educational. Avoid restating move lists; focus on ideas.`;
       addSystemMessage("Unable to analyze this move because the resulting position is unavailable.");
       return;
     }
-    
-    // Start LLM request immediately (don't await yet)
-    const llmRequestPromise = fetch(`http://localhost:8000/analyze_move?fen=${encodeURIComponent(fenBefore)}&move_san=${encodeURIComponent(move.move)}&depth=18`, {
-      method: 'POST'
-    });
-    
-    // While LLM is processing, setup board and visuals
+
+    // Setup board and visuals (no analyze_move call; we already have review metadata for this move)
     try {
       // Setup board to position AFTER the move
       const newGame = new Chess(fenAfter);
@@ -8486,114 +9881,72 @@ Be conversational and educational. Avoid restating move lists; focus on ideas.`;
     } catch (error) {
       console.error("Failed to set board position:", error);
     }
-    
-    // Add system message after board is setup
-    addSystemMessage("Analyzing move...");
-    
-    // Now await the LLM response
+
+    // Route straight to LLM for a natural coach note (skip analyze_move + structured templates)
     try {
-      const response = await llmRequestPromise;
-      
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Backend returned ${response.status}: ${errorText}`);
-      }
-      
-      const data = await response.json();
-      
-      // Adapt new backend format (with af_starting, af_best, etc.) to old frontend format
-      const isBest = data.is_best_move || false;
-      const evalBefore = data.eval_before || data.eval_after_move || 0;
-      const evalAfter = data.eval_after_move || 0;
-      const evalChange = Math.abs(evalBefore - evalAfter);
-      const evalChangeStr = evalChange > 0 ? `+${(evalChange / 100).toFixed(2)}` : `${(evalChange / 100).toFixed(2)}`;
-      const bestMove = data.best_move || move.move;
-      const cpLoss = data.cp_loss || 0;
-      
-      // Extract tag changes from analysis if available
-      let themesGained: string[] = [];
-      let themesLost: string[] = [];
-      
-      if (data.analysis) {
-        const afBefore = data.analysis.af_starting;
-        const afAfter = isBest ? data.analysis.af_best : data.analysis.af_played;
-        
-        if (afBefore && afAfter) {
-          const tagsBefore = new Set((afBefore.tags || []).map((t: any) => t.tag_name));
-          const tagsAfter = new Set((afAfter.tags || []).map((t: any) => t.tag_name));
-          
-          themesGained = Array.from(tagsAfter).filter(t => !tagsBefore.has(t as string)).slice(0, 5) as string[];
-          themesLost = Array.from(tagsBefore).filter(t => !tagsAfter.has(t as string)).slice(0, 5) as string[];
-        }
-      }
-      
-      // Build structured analysis
-      let structuredAnalysis = `**Move Analysis: ${move.move}**\n\n`;
-      structuredAnalysis += `Evaluation: ${(evalBefore / 100).toFixed(2)} → ${(evalAfter / 100).toFixed(2)} (${evalChangeStr})\n`;
-      structuredAnalysis += `CP Loss: ${cpLoss}cp\n\n`;
-      
-      if (isBest) {
-        structuredAnalysis += `✓ This was the best move!\n\n`;
-      } else {
-        const bestEval = data.eval_after_best || evalAfter;
-        structuredAnalysis += `The engine preferred: ${bestMove} (${(bestEval / 100).toFixed(2)})\n`;
-        structuredAnalysis += `Difference: ${(cpLoss / 100).toFixed(2)} pawns\n\n`;
-      }
-      
-      // Add themes
-      if (themesGained.length > 0) {
-        structuredAnalysis += `Themes gained: ${themesGained.join(", ")}\n`;
-      }
-      if (themesLost.length > 0) {
-        structuredAnalysis += `Themes lost: ${themesLost.join(", ")}\n`;
-      }
-      
-      // Generate LLM response (CONCISE)
-      const llmPrompt = `Analyze move ${move.moveNumber}. ${move.move}.
+      const side = move.color === 'w' ? 'White' : move.color === 'b' ? 'Black' : 'Side';
+      const moveSan = move.move || move.san || '?';
+      const cpLoss = Math.round(move.cpLoss ?? move.cp_loss ?? 0);
+      const accuracyRaw = move.accuracy ?? move.accuracy_pct ?? null;
+      const accuracyPct = typeof accuracyRaw === 'number' ? accuracyRaw : null;
+      const evalBefore = move.evalBefore ?? move.eval_before ?? null;
+      const evalAfter = move.evalAfter ?? move.eval_after ?? null;
 
-Eval: ${(evalBefore / 100).toFixed(2)} → ${(evalAfter / 100).toFixed(2)} (${evalChangeStr}, ${cpLoss}cp loss)
-Best move: ${isBest ? "Yes" : bestMove}
-${themesGained.length > 0 ? `Gained: ${themesGained.slice(0, 2).join(", ")}` : ""}
-${themesLost.length > 0 ? `Lost: ${themesLost.slice(0, 2).join(", ")}` : ""}
+      const evalText =
+        (typeof evalBefore === 'number' && typeof evalAfter === 'number')
+          ? `Eval: ${(evalBefore / 100).toFixed(2)} → ${(evalAfter / 100).toFixed(2)}`
+          : '';
 
-In 1-2 sentences: What did this move accomplish strategically?`;
+      const detailParts: string[] = [];
+      if (Number.isFinite(cpLoss) && cpLoss > 0) detailParts.push(`swing ${cpLoss}cp`);
+      if (typeof accuracyPct === 'number') detailParts.push(`accuracy ${accuracyPct.toFixed(1)}%`);
+      const detail = detailParts.length ? `(${detailParts.join(', ')})` : '';
 
-      try {
-        // Get recent chat context (last 3 messages)
-        const chatContext = getRecentChatContext(3);
-        
-        const llmResponse = await callLLM([
-          { role: "system", content: "You are a chess coach. Answer in 1-2 sentences maximum. Focus on strategic impact only." },
+      const chatContext = getRecentChatContext(3);
+      const prompt = `Review this move: ${moveSan} (move ${move.moveNumber || '?'}, ${side} to move played it).\n\nPosition BEFORE the move (FEN): ${fenBefore}\nPosition AFTER the move (FEN): ${fenAfter}\n${evalText}\n${detail}\n\nWrite a short coach note (2–3 sentences): what was the idea, why it was passive/active, and what general improvement to look for next. Do NOT use rigid templates (no “Verdict:” / “Candidate Moves:” / “Critical Line:”). Do NOT reveal or name the engine’s best move in SAN.`;
+
+      const llmResponse = await callLLM(
+        [
+          { role: "system", content: "You are a chess coach. Be concise, specific, and natural. No templates. No move spoilers." },
           ...chatContext,
-          { role: "user", content: llmPrompt }
-        ], 0.5, "gpt-4o-mini");
-        
-        // Add the LLM response with raw data metadata
-        const {content: llmContent} = llmResponse;
-        setMessages(prev => [...prev, {
+          { role: "user", content: prompt },
+        ],
+        0.6,
+        "gpt-4o-mini"
+      );
+
+      const llmContent = (llmResponse?.content || "").trim();
+      if (!llmContent) {
+        throw new Error("Empty LLM response for move review");
+      }
+
+      setMessages(prev => [
+        ...prev,
+        {
           role: 'assistant',
           content: llmContent,
           meta: {
-            structuredAnalysis: structuredAnalysis,
-            rawEngineData: data
+            reviewMove: {
+              moveNumber: move.moveNumber,
+              move: moveSan,
+              fenBefore,
+              fenAfter,
+              cpLoss,
+              accuracy: accuracyPct
+            }
           }
-        }]);
-      } catch (err) {
-        console.error("LLM call failed:", err);
-        // Fallback to structured analysis
-        addAssistantMessage(structuredAnalysis);
-      }
-      
+        }
+      ]);
     } catch (err: any) {
       console.error("Move analysis failed:", err);
-      addSystemMessage(`Move analysis failed: ${err instanceof Error ? err.message : String(err)}`);
+      addSystemMessage(`Move review failed: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 
   async function analyzeCurrentPosition() {
     // Analyze the current position
     try {
-      const response = await fetch(`http://localhost:8000/analyze_position?fen=${encodeURIComponent(fen)}&lines=3&depth=12`);
+      const response = await fetch(`${BACKEND_BASE}/analyze_position?fen=${encodeURIComponent(fen)}&lines=3&depth=12`);
       
       if (!response.ok) {
         throw new Error(`Backend returned ${response.status}`);
@@ -8814,7 +10167,7 @@ ${keyPoints.slice(0, 15).map((kp: any) => {
       // Call analyze_move API to get analysis data
       try {
         const response = await fetch(
-          `http://localhost:8000/analyze_move?fen=${encodeURIComponent(retryMoveData.fenBefore)}&move_san=${encodeURIComponent(moveSan)}&depth=18`,
+          `${BACKEND_BASE}/analyze_move?fen=${encodeURIComponent(retryMoveData.fenBefore)}&move_san=${encodeURIComponent(moveSan)}&depth=18`,
           { method: 'POST' }
         );
         
@@ -8946,61 +10299,34 @@ ${keyPoints.slice(0, 15).map((kp: any) => {
         : msg
     ));
     
-    // Call analyze_move API to get analysis data for the best move
     try {
-      const response = await fetch(
-        `http://localhost:8000/analyze_move?fen=${encodeURIComponent(retryMoveData.fenBefore)}&move_san=${encodeURIComponent(retryMoveData.bestMove)}&depth=18`,
-        { method: 'POST' }
-      );
-      
-      if (response.ok) {
-        const analyzeResult = await response.json();
-        
-        // Format the tool result manually (since we're not using tools)
-        // Extract key information for the hint
-        const playedDesc = analyzeResult.played_move_description || {};
-        const uniqueTags = analyzeResult.unique_best_tag_descriptions || [];
-        const neglectedTags = analyzeResult.neglected_tag_descriptions || [];
-        
-        // Build a description of what the best move does
-        let bestMoveDescription = "";
-        if (typeof playedDesc === 'object' && playedDesc.tags_gained && playedDesc.tags_gained.length > 0) {
-          bestMoveDescription = playedDesc.tags_gained[0];
-        } else if (uniqueTags.length > 0) {
-          bestMoveDescription = uniqueTags[0];
-        } else {
-          bestMoveDescription = "improves the position strategically";
+      const fenBefore = retryMoveData.fenBefore;
+      const bestMove = retryMoveData.bestMove; // provided by review pipeline; MUST NOT be revealed
+      const side = retryMoveData.color === 'w' ? 'White' : 'Black';
+
+      const llmMessages: any[] = [
+        {
+          role: 'system',
+          content: "You are a chess coach providing hints. Write 1–2 sentences. Never output SAN/uci. Never name the best move. Avoid lists."
+        },
+        {
+          role: 'user',
+          content:
+            `Give me a hint for the best move in this position.\n\n` +
+            `Position FEN (before the best move): ${fenBefore}\n` +
+            `Side to move: ${side}\n\n` +
+            `Hidden (DO NOT REVEAL): the best move is ${bestMove}\n\n` +
+            `Hint goal: describe the key idea/pattern (development, tactics, pressure, prophylaxis, etc.) without telling the move.`
         }
-        
-        // Call LLM to generate a hint about the best move without revealing it
-        const llmMessages: any[] = [
-          {
-            role: 'system',
-            content: 'You are a chess coach providing hints. Give a helpful hint about what the best move accomplishes strategically, but DO NOT reveal the actual move name. Focus on the key idea, pattern, or strategic concept. Be concise (1-2 sentences).'
-          },
-          {
-            role: 'user',
-            content: `I'm trying to find the best move in this position. Based on the analysis, the best move ${bestMoveDescription}. Give me a helpful hint about what to look for, but don't tell me the actual move name.`
-          }
-        ];
-        
-        // Call LLM to generate hint (without tools)
-        const llmResponse = await callLLM(llmMessages, 0.7, "gpt-4o-mini", false);
-        
-        if (llmResponse.content) {
-          addAssistantMessage(`💡 **Hint:** ${llmResponse.content}`);
-        } else {
-          // Fallback if LLM fails
-          addAssistantMessage(`💡 **Hint:** Look for a move that improves your position strategically.`);
-        }
-      } else {
-        // Fallback if API call fails
-        addAssistantMessage(`💡 **Hint:** Look for a move that improves your position strategically.`);
-      }
+      ];
+
+      const llmResponse = await callLLM(llmMessages, 0.7, "gpt-4o-mini", false);
+      const hint = (llmResponse.content || "").trim();
+      if (!hint) throw new Error("Empty hint from LLM");
+      addAssistantMessage(`💡 **Hint:** ${hint}`);
     } catch (error) {
       console.error("Failed to get hint:", error);
-      // Fallback if API call fails
-      addAssistantMessage(`💡 **Hint:** Look for a move that improves your position strategically.`);
+      addSystemMessage(`Hint failed: ${error instanceof Error ? error.message : String(error)}`);
     }
     
     // Disable the hint button and restore original text
@@ -9298,7 +10624,7 @@ ${keyPoints.slice(0, 15).map((kp: any) => {
     }, 1000);
 
     try {
-      const response = await fetch(`http://localhost:8000/review_game?pgn_string=${encodeURIComponent(cleanPgn)}&side_focus=${reviewSideFocus}&include_timestamps=true`, {
+      const response = await fetch(`${BACKEND_BASE}/review_game?pgn_string=${encodeURIComponent(cleanPgn)}&side_focus=${reviewSideFocus}&include_timestamps=true`, {
         method: 'POST'
       });
       
@@ -9747,7 +11073,7 @@ Be conversational and natural. Don't use bullet points. Don't ask questions at t
     
     try {
       // Generate lesson plan
-      const response = await fetch("http://localhost:8000/generate_lesson", {
+      const response = await fetch(`${BACKEND_BASE}/generate_lesson`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ description, target_level: level, count: 5 })
@@ -9769,7 +11095,7 @@ Be conversational and natural. Don't use bullet points. Don't ask questions at t
         
         for (const topicCode of section.topics) {
           try {
-            const posResponse = await fetch(`http://localhost:8000/generate_positions?topic_code=${topicCode}&count=${positionsPerTopic}`, {
+            const posResponse = await fetch(`${BACKEND_BASE}/generate_positions?topic_code=${topicCode}&count=${positionsPerTopic}`, {
               method: "POST"
             });
             
@@ -10344,7 +11670,7 @@ Give very brief, encouraging feedback (1-2 sentences) about why this move is goo
           attemptNumber,
           wasCorrect: false,
         });
-        const response = await fetch(`http://localhost:8000/check_lesson_move?fen=${encodeURIComponent(currentFen)}&move_san=${encodeURIComponent(moveSan)}`, {
+        const response = await fetch(`${BACKEND_BASE}/check_lesson_move?fen=${encodeURIComponent(currentFen)}&move_san=${encodeURIComponent(moveSan)}`, {
           method: "POST"
         });
         
@@ -10363,7 +11689,7 @@ Give very brief, encouraging feedback (1-2 sentences) about why this move is goo
         // Run full analyze_move on the deviation
         addSystemMessage("Analyzing your move...");
         const analyzeMoveResponse = await fetch(
-          `http://localhost:8000/analyze_move?fen=${encodeURIComponent(currentFen)}&move_san=${encodeURIComponent(moveSan)}&depth=18`,
+          `${BACKEND_BASE}/analyze_move?fen=${encodeURIComponent(currentFen)}&move_san=${encodeURIComponent(moveSan)}&depth=18`,
           { method: "POST" }
         );
         
@@ -10510,7 +11836,7 @@ Provide 2-3 sentences of natural language commentary explaining why this deviati
             
             if (isOpponentTurn) {
               // Get engine's best response using Stockfish
-              const engineResponse = await fetch(`http://localhost:8000/analyze_position?fen=${encodeURIComponent(currentPosition)}&lines=1&depth=16`);
+              const engineResponse = await fetch(`${BACKEND_BASE}/analyze_position?fen=${encodeURIComponent(currentPosition)}&lines=1&depth=16`);
               
               if (engineResponse.ok) {
                 const analysis = await engineResponse.json();
@@ -10810,7 +12136,76 @@ Provide 2-3 sentences of natural language commentary explaining why this deviati
     }
   }
 
-  const handleButtonAction = async (action: string) => {
+  const handleButtonAction = async (action: string, buttonId?: string) => {
+    // Handle play-against-AI side selection
+    if (action === "start_game_white" || action === "start_game_black") {
+      // Disable the clicked button
+      if (buttonId) {
+        setMessages((prev) => 
+          prev.map((msg) => 
+            msg.meta?.buttonId === buttonId 
+              ? { ...msg, meta: { ...msg.meta, disabled: true } }
+              : msg
+          )
+        );
+      }
+      
+      // Disable all play buttons
+      setMessages((prev) =>
+        prev.map((msg) =>
+          (msg.buttonAction === "start_game_white" || msg.buttonAction === "start_game_black")
+            ? { ...msg, meta: { ...msg.meta, disabled: true } }
+            : msg
+        )
+      );
+      
+      const aiSide = action === "start_game_white" ? "black" : "white";
+      const userSide = action === "start_game_white" ? "white" : "black";
+      
+      // Set board orientation so playing side is at bottom
+      setBoardOrientation(userSide);
+      
+      // Activate AI game mode and make first move if it's AI's turn
+      setAiGameActive(true);
+      setMode("PLAY");
+      
+      const currentTurn = fen.split(' ')[1]; // 'w' or 'b'
+      const isAiTurn = (aiSide === 'white' && currentTurn === 'w') || 
+                       (aiSide === 'black' && currentTurn === 'b');
+      
+      // Make first move if it's AI's turn
+      if (isAiTurn) {
+        try {
+          // Call playMove with null user_move_san to indicate it's AI's turn
+          const response = await playMove(fen, null, undefined, 1500);
+          
+          if (response.legal && response.engine_move_san && response.new_fen) {
+            // Print "I played [best move]"
+            addSystemMessage(`I played ${response.engine_move_san}`);
+            
+            // Apply the move to the board
+            const tempGame = new Chess(fen);
+            const move = tempGame.move(response.engine_move_san);
+            if (move) {
+              // Use handleMove to properly trigger all move handling logic
+              // This will update the board, PGN, and trigger any LLM analysis if enabled
+              handleMove(move.from, move.to, move.promotion);
+            } else {
+              addSystemMessage(`Error: Invalid move ${response.engine_move_san} from engine`);
+            }
+          } else {
+            const errorMsg = response.error || 'Unknown error';
+            addSystemMessage(`Error making AI move: ${errorMsg}`);
+          }
+        } catch (err: any) {
+          const errorMsg = err?.message || 'Failed to get engine move';
+          addSystemMessage(`Error: ${errorMsg}`);
+        }
+      }
+      
+      return;
+    }
+    
     if (action === "SHOW_LESSON_DATA") {
       setShowLessonDataPanel(true);
       return;
@@ -10822,6 +12217,97 @@ Provide 2-3 sentences of natural language commentary explaining why this deviati
     }
     await handleSendMessage(`__BUTTON_ACTION__${action}`);
   };
+
+  // Handler for starting game from setup modal
+  const handleStartGame = useCallback(async (config: {
+    userSide: "white" | "black";
+    aiElo: number;
+    startFromCurrent: boolean;
+    newTab: boolean;
+  }) => {
+    const { userSide, aiElo, startFromCurrent, newTab } = config;
+    
+    // If new tab, create one and switch to it
+    if (newTab) {
+      handleNewTab();
+      // Wait a bit for tab to be created, then reset to starting position
+      setTimeout(() => {
+        const newGame = new Chess();
+        setFen(INITIAL_FEN);
+        setPgn("");
+        setGame(newGame);
+        setMoveTree(new MoveTree());
+      }, 100);
+    }
+    
+    // Store game config
+    setAiGameElo(aiElo);
+    setAiGameUserSide(userSide);
+    
+    // Store game state in current tab
+    setTabs(prevTabs => prevTabs.map(tab => 
+      tab.id === activeTabId 
+        ? { ...tab, aiGameActive: true, aiGameElo: aiElo, aiGameUserSide: userSide }
+        : tab
+    ));
+    
+    // Set board orientation
+    setBoardOrientation(userSide);
+    
+    // Activate game mode
+    setAiGameActive(true);
+    setMode("PLAY");
+    
+    // Add system notification
+    addSystemMessage(`Game started! You're playing as ${userSide === "white" ? "White" : "Black"} against Chesster (ELO ${aiElo}).`);
+    
+    // Get current position - use state directly since we're in a callback
+    const currentFen = fen;
+    const currentTurn = currentFen.split(' ')[1]; // 'w' or 'b'
+    const aiSide = userSide === "white" ? "black" : "white";
+    const isAiTurn = (aiSide === 'white' && currentTurn === 'w') || 
+                     (aiSide === 'black' && currentTurn === 'b');
+    
+    // If it's AI's turn, make the best move first
+    if (isAiTurn) {
+      try {
+        const response = await playMove(currentFen, undefined, aiElo, 1500);
+        
+        if (response.legal && response.engine_move_san && response.new_fen) {
+          addSystemMessage(`I played ${response.engine_move_san}`);
+          
+          const tempGame = new Chess(currentFen);
+          const move = tempGame.move(response.engine_move_san);
+          if (move) {
+            handleMove(move.from, move.to, move.promotion);
+          } else {
+            addSystemMessage(`Error: Invalid move ${response.engine_move_san} from engine`);
+          }
+        } else {
+          const errorMsg = response.error || 'Unknown error';
+          addSystemMessage(`Error making AI move: ${errorMsg}`);
+        }
+      } catch (err: any) {
+        const errorMsg = err?.message || 'Failed to get engine move';
+        addSystemMessage(`Error: ${errorMsg}`);
+      }
+    }
+  }, [activeTabId, handleMove, handleNewTab]);
+
+  // Handler for exiting game mode
+  const handleExitGameMode = useCallback(() => {
+    // Clear game state from current tab
+    setTabs(prevTabs => prevTabs.map(tab => 
+      tab.id === activeTabId 
+        ? { ...tab, aiGameActive: false, aiGameElo: undefined, aiGameUserSide: undefined }
+        : tab
+    ));
+    
+    setAiGameActive(false);
+    setAiGameUserSide(null);
+    setMode("DISCUSS");
+    addSystemMessage("Game mode left. You can resume back through the options menu.");
+  }, [activeTabId]);
 
   const boardArrows = lessonMode ? lessonArrows : annotations.arrows;
   const boardHighlights = lessonMode ? [] : annotations.highlights;
@@ -10894,12 +12380,6 @@ Provide 2-3 sentences of natural language commentary explaining why this deviati
                 onPromoteVariation={handlePromoteVariation}
                 onAddComment={handleAddComment}
               />
-              {showLoadGame && (
-                <LoadGamePanel
-                  onLoad={handleLoadedGame}
-                  onClose={() => setShowLoadGame(false)}
-                />
-              )}
             </div>
           )}
         </main>
@@ -10907,7 +12387,7 @@ Provide 2-3 sentences of natural language commentary explaining why this deviati
         // CHAT STATE: Conversation with optional board
         <main
           ref={layoutRef}
-          className={`chat-layout ${boardDockOpen ? 'with-board' : ''}`}
+          className={`chat-layout ${boardDockOpen ? 'with-board' : ''} ${isMobileMode ? 'mobile-mode' : ''}`}
           style={layoutStyle}
         >
           {boardDockOpen ? (
@@ -10921,6 +12401,7 @@ Provide 2-3 sentences of natural language commentary explaining why this deviati
                   onTabRename={handleTabRename}
                   onTabDuplicate={handleTabDuplicate}
                   onNewTab={handleNewTab}
+                  onHideBoard={() => setBoardDockOpen(false)}
                 />
                 <BoardDock
                   fen={previewFEN || fen}
@@ -10941,26 +12422,47 @@ Provide 2-3 sentences of natural language commentary explaining why this deviati
                   onAddComment={handleAddComment}
                 />
               </div>
-              {loadPanelVisible && (
-                <>
-                  <div className="column-resizer" onMouseDown={(e) => beginDrag("board-load", e)} />
-                  <div className="layout-column load-column" style={loadColumnStyle}>
-                    <div className="load-panel-wrapper">
-                      <LoadGamePanel
-                        onLoad={handleLoadedGame}
-                        onClose={() => setShowLoadGame(false)}
-                      />
-                    </div>
-                  </div>
-                </>
-              )}
               <div
                 className="column-resizer"
-                onMouseDown={(e) => beginDrag(loadPanelVisible ? "load-chat" : "board-chat", e)}
+                onMouseDown={(e) => beginDrag("board-chat", e)}
               />
               <div className="layout-column chat-column" style={chatColumnStyle}>
+              {activeTab?.tabType === 'training' && activeTab?.trainingSession ? (
+                <TrainingSession
+                  session={activeTab.trainingSession}
+                  username={user?.id || ''}
+                  onComplete={(results) => {
+                    console.log("Training session complete:", results);
+                    // Update tab to remove training session and switch to discuss mode
+                    setTabs(prev => prev.map(t => 
+                      t.id === activeTabId 
+                        ? { ...t, trainingSession: undefined, tabType: 'discuss' }
+                        : t
+                    ));
+                    addSystemMessage("Training session completed! Great work!");
+                  }}
+                  onClose={() => {
+                    // Switch tab back to discuss mode
+                    setTabs(prev => prev.map(t => 
+                      t.id === activeTabId 
+                        ? { ...t, trainingSession: undefined, tabType: 'discuss' }
+                        : t
+                    ));
+                  }}
+                  onSwitchToChat={() => {
+                    // Switch tab to chat mode but keep training session
+                    setTabs(prev => prev.map(t => 
+                      t.id === activeTabId 
+                        ? { ...t, tabType: 'discuss' }
+                        : t
+                    ));
+                  }}
+                />
+              ) : (
                 <Conversation 
                   messages={messages}
+                  executionPlan={executionPlan}
+                  thinkingStage={thinkingStage}
                   onToggleBoard={!boardDockOpen ? handleToggleBoard : undefined}
                   isBoardOpen={boardDockOpen}
                   onLoadGame={!boardDockOpen ? handleShowLoadGame : undefined}
@@ -10973,35 +12475,177 @@ Provide 2-3 sentences of natural language commentary explaining why this deviati
                   isLLMProcessing={isLLMProcessing}
                   liveStatusMessages={liveStatusMessages}
                   onRunFullAnalysis={handleRunFullAnalysis}
+                  factsCard={factsByTask[activeTab?.id || "default"]}
+                  isMobileMode={isMobileMode}
+                  fen={previewFEN || fen}
+                  pgn={pgn}
+                  arrows={boardArrows}
+                  highlights={boardHighlights}
+                  boardOrientation={boardOrientation}
+                  moveTree={moveTree}
+                  currentNode={moveTree.currentNode}
+                  rootNode={moveTree.root}
+                  onMoveClick={handleMoveClick}
+                  onDeleteMove={handleDeleteMove}
+                  onDeleteVariation={handleDeleteVariation}
+                  onPromoteVariation={handlePromoteVariation}
+                  onAddComment={handleAddComment}
                 />
+              )}
               </div>
             </>
           ) : (
             <>
-              <Conversation 
-                messages={messages}
-                onToggleBoard={!boardDockOpen ? handleToggleBoard : undefined}
-                isBoardOpen={boardDockOpen}
-                onLoadGame={!boardDockOpen ? handleShowLoadGame : undefined}
-                currentFEN={fen}
-                onApplyPGN={handleApplyPGNSequence}
-                onPreviewFEN={handlePreviewFEN}
-                onButtonAction={handleButtonAction}
-                isProcessingButton={isProcessingStep}
-                loadingIndicators={activeLoaders}
-                isLLMProcessing={isLLMProcessing}
-                liveStatusMessages={liveStatusMessages}
-                onRunFullAnalysis={handleRunFullAnalysis}
-              />
+              {activeTab?.tabType === 'training' && activeTab?.trainingSession ? (
+                <TrainingSession
+                  session={activeTab.trainingSession}
+                  username={user?.id || ''}
+                  onComplete={(results) => {
+                    console.log("Training session complete:", results);
+                    // Update tab to remove training session and switch to discuss mode
+                    setTabs(prev => prev.map(t => 
+                      t.id === activeTabId 
+                        ? { ...t, trainingSession: undefined, tabType: 'discuss' }
+                        : t
+                    ));
+                    addSystemMessage("Training session completed! Great work!");
+                  }}
+                  onClose={() => {
+                    // Switch tab back to discuss mode
+                    setTabs(prev => prev.map(t => 
+                      t.id === activeTabId 
+                        ? { ...t, trainingSession: undefined, tabType: 'discuss' }
+                        : t
+                    ));
+                  }}
+                />
+              ) : (
+                <Conversation 
+                  messages={messages}
+                  executionPlan={executionPlan}
+                  thinkingStage={thinkingStage}
+                  onToggleBoard={!boardDockOpen ? handleToggleBoard : undefined}
+                  isBoardOpen={boardDockOpen}
+                  onLoadGame={!boardDockOpen ? handleShowLoadGame : undefined}
+                  currentFEN={fen}
+                  onApplyPGN={handleApplyPGNSequence}
+                  onPreviewFEN={handlePreviewFEN}
+                  onButtonAction={handleButtonAction}
+                  isProcessingButton={isProcessingStep}
+                  loadingIndicators={activeLoaders}
+                  isLLMProcessing={isLLMProcessing}
+                  liveStatusMessages={liveStatusMessages}
+                  onRunFullAnalysis={handleRunFullAnalysis}
+                  onShowBoardTab={handleShowBoardFromMessage}
+                  factsCard={factsByTask[activeTab?.id || "default"]}
+                  isMobileMode={isMobileMode}
+                  fen={previewFEN || fen}
+                  pgn={pgn}
+                  arrows={boardArrows}
+                  highlights={boardHighlights}
+                  boardOrientation={boardOrientation}
+                  moveTree={moveTree}
+                  currentNode={moveTree.currentNode}
+                  rootNode={moveTree.root}
+                  onMoveClick={handleMoveClick}
+                  onDeleteMove={handleDeleteMove}
+                  onDeleteVariation={handleDeleteVariation}
+                  onPromoteVariation={handlePromoteVariation}
+                  onAddComment={handleAddComment}
+                />
+              )}
             </>
           )}
           
-          <BottomComposer
-            onSend={handleSendMessage}
-            disabled={isAnalyzing}
-            placeholder={isAnalyzing ? "Analyzing position..." : "Ask about the position..."}
-            onOpenOptions={() => setShowRequestOptions(true)}
-            optionsDisabled={isAnalyzing || isLegacyReviewing || isGeneratingLesson}
+          {!(activeTab?.tabType === 'training' && activeTab?.trainingSession) && (
+            <BottomComposer
+              onSend={handleSendMessage}
+              disabled={isAnalyzing}
+              placeholder={isAnalyzing ? "Analyzing position..." : "Ask about the position..."}
+              onOpenOptions={() => setShowRequestOptions(true)}
+              optionsDisabled={isAnalyzing || isLegacyReviewing || isGeneratingLesson}
+            />
+          )}
+
+          <GameSetupModal
+            open={showGameSetup}
+            onClose={() => setShowGameSetup(false)}
+            currentFen={fen}
+            onStartGame={handleStartGame}
+          />
+
+          <OpeningLessonModal
+            open={showOpeningModal}
+            onClose={() => setShowOpeningModal(false)}
+            currentFen={fen}
+            onStartLesson={async (config) => {
+              if (!user?.id) {
+                addSystemMessage("Sign in to generate personalized opening lessons.");
+                return;
+              }
+              if (isGeneratingLesson) {
+                addSystemMessage("An opening lesson is already being prepared.");
+                return;
+              }
+
+              setShowOpeningModal(false);
+              setIsGeneratingLesson(true);
+
+              try {
+                const lessonFen = config.startFromCurrent ? fen : undefined; // undefined = let backend resolve opening
+                const displayName = config.openingQuery || "this opening";
+                const announcement = `Generating opening lesson for ${displayName}...`;
+                addAutomatedMessage(announcement);
+
+                // Generate lesson - backend will resolve opening if fen is null
+                const lessonResponse = await generateOpeningLesson({
+                  userId: user.id,
+                  chatId: currentThreadId,
+                  openingQuery: config.openingQuery,
+                  fen: lessonFen,
+                  eco: undefined,
+                  orientation: config.orientation,
+                });
+
+                // If starting from starting position, check if we need to push a move
+                if (!config.startFromCurrent && lessonResponse.practice_positions && lessonResponse.practice_positions.length > 0) {
+                  const firstPosition = lessonResponse.practice_positions[0];
+                  const positionFen = firstPosition.fen || firstPosition.position?.fen;
+                  
+                  if (positionFen) {
+                    const tempGame = new Chess(positionFen);
+                    const sideToPlay = tempGame.turn() === "w" ? "white" : "black";
+                    
+                    // If chosen side doesn't match side to play, push best move
+                    if (config.orientation !== sideToPlay) {
+                      try {
+                        const moveResult = await playMove(positionFen, null, 1500, 1500);
+                        if (moveResult.legal && moveResult.best_move_san) {
+                          tempGame.move(moveResult.best_move_san);
+                          const adjustedFen = tempGame.fen();
+                          
+                          // Update the first practice position with adjusted FEN
+                          lessonResponse.practice_positions[0].fen = adjustedFen;
+                          if (lessonResponse.practice_positions[0].position) {
+                            lessonResponse.practice_positions[0].position.fen = adjustedFen;
+                          }
+                          
+                          addSystemMessage(`I played ${moveResult.best_move_san} to reach your chosen side.`);
+                        }
+                      } catch (moveErr) {
+                        console.warn("Failed to push move for side adjustment:", moveErr);
+                      }
+                    }
+                  }
+                }
+
+                handleOpeningLessonResult(lessonResponse);
+              } catch (err: any) {
+                addSystemMessage(`Opening lesson failed: ${err?.message || String(err)}`);
+              } finally {
+                setIsGeneratingLesson(false);
+              }
+            }}
           />
 
           {showRequestOptions && (
@@ -11025,32 +12669,54 @@ Provide 2-3 sentences of natural language commentary explaining why this deviati
                     }}
                     disabled={!llmEnabled}
                     title={!llmEnabled ? "Enable LLM to use this feature" : "Get structured analysis"}
-                  >
-                    📋 Analyze Move
-                  </button>
+                    >
+                      Analyze Move
+                    </button>
+                  {aiGameActive ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowRequestOptions(false);
+                        handleExitGameMode();
+                      }}
+                      title="Exit game mode"
+                    >
+                      Exit Game Mode
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowRequestOptions(false);
+                        setShowGameSetup(true);
+                      }}
+                      disabled={!llmEnabled}
+                      title={!llmEnabled ? "Enable LLM to play with AI" : "Start playing a game with the AI"}
+                    >
+                      Play with AI
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={() => {
                       setShowRequestOptions(false);
-                      setAiGameActive(true);
-                      setMode("PLAY");
-                      addSystemMessage("🎮 AI Game Started! Make a move on the board to begin playing.");
-                    }}
-                    disabled={!llmEnabled || aiGameActive}
-                    title={aiGameActive ? "AI game already active" : !llmEnabled ? "Enable LLM to play with AI" : "Start playing a game with the AI"}
-                  >
-                    {aiGameActive ? '✅ AI Game Active' : '🎮 Play with AI'}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShowRequestOptions(false);
-                      handleGenerateOpeningLesson('button');
+                      setShowOpeningModal(true);
                     }}
                     disabled={!user || isGeneratingLesson}
                     title={!user ? "Sign in to generate personalized lessons" : undefined}
                   >
-                    {isGeneratingLesson ? 'Preparing Lesson...' : '📚 Opening Lesson'}
+                    {isGeneratingLesson ? 'Preparing Lesson...' : 'Opening Lesson'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowRequestOptions(false);
+                      handleAddBoard();
+                    }}
+                    disabled={!fen}
+                    title={!fen ? "No position available" : "Add board to chat"}
+                  >
+                    Add Board
                   </button>
                   <button 
                     type="button"
@@ -11063,7 +12729,7 @@ Provide 2-3 sentences of natural language commentary explaining why this deviati
         </div>
       )}
           
-          {!boardDockOpen && showLoadGame && (
+          {showLoadGame && (
             <LoadGamePanel
               onLoad={handleLoadedGame}
               onClose={() => setShowLoadGame(false)}
@@ -11086,13 +12752,127 @@ Provide 2-3 sentences of natural language commentary explaining why this deviati
         profileGames={profileOverview?.games}
         profileStats={profileStats}
         onEditProfileSetup={() => setShowProfileSetupModal(true)}
+        onRefreshProfile={refreshProfileData}
+        onOpenProfileDashboard={() => setShowProfileDashboard(true)}
+        onOpenPersonalReview={() => setShowPersonalReview(true)}
+        userId={user?.id}
       />
+      {showPersonalReview && (
+        <PersonalReview onClose={() => setShowPersonalReview(false)} />
+      )}
       {user && (
         <ProfileSetupModal
           open={showProfileSetupModal}
           onClose={() => setShowProfileSetupModal(false)}
           onSave={handleSaveProfilePreferences}
           initialData={profilePreferences}
+        />
+      )}
+      {showProfileDashboard && (
+        <ProfileDashboard
+          onClose={() => setShowProfileDashboard(false)}
+          onCreateNewTab={(params: any) => {
+            setShowProfileDashboard(false);
+            // Create new tab using the newTab handler from executeUICommands
+            const newTabId =
+              typeof crypto !== "undefined" && "randomUUID" in crypto
+                ? `tab-${crypto.randomUUID()}`
+                : `tab-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+            
+            // Track if initial message has been sent (using a closure variable)
+            let initialMessageSent = false;
+            
+            let newMoveTree = new MoveTree();
+            const newTab: BoardTabState = {
+              ...createDefaultTab(tabs.length + 1),
+              id: newTabId,
+              name: params.title || (params.type === 'training' ? 'Training' : params.type === 'lesson' ? 'Lesson' : 'Review'),
+              tabType: params.type || 'review',
+              fen: params.fen || INITIAL_FEN,
+              pgn: params.pgn || '',
+              game: new Chess(params.fen || INITIAL_FEN),
+              moveTree: newMoveTree,
+              isAnalyzing: false,
+              hasUnread: false,
+              isModified: false,
+              messages: [], // Don't add initial message here - let handleSendMessage add it to prevent duplicates
+              annotations: {
+                fen: params.fen || INITIAL_FEN,
+                pgn: params.pgn || '',
+                arrows: [],
+                highlights: [],
+                comments: [],
+                nags: []
+              },
+              analysisCache: {},
+              moveHistory: [],
+              trainingSession: params.trainingSession || undefined // Store training session if provided
+            };
+            
+            if (params.pgn) {
+              try {
+                newMoveTree = MoveTree.fromPGN(params.pgn);
+                newTab.moveTree = newMoveTree;
+                const gameFromPgn = new Chess();
+                gameFromPgn.loadPgn(params.pgn);
+                newTab.game = gameFromPgn;
+                newTab.fen = gameFromPgn.fen();
+                newTab.annotations.fen = gameFromPgn.fen();
+                newTab.annotations.pgn = params.pgn;
+                newTab.pgn = params.pgn;
+              } catch (e) {
+                console.error("[newTab] Failed to load PGN:", e);
+                newTab.pgn = params.pgn;
+                newTab.annotations.pgn = params.pgn;
+              }
+            }
+            
+            // CRITICAL: Initialize messages as empty - handleSendMessage will add the initial message
+            // This prevents duplicate messages
+            setMessages([]);
+            
+            // Create and activate the new tab
+            setTabs(prev => {
+              const updated = prev.some(t => t.id === newTabId) ? prev : [...prev, newTab];
+              return updated;
+            });
+            
+            // Set active tab and global state
+            setActiveTabId(newTabId);
+            setFen(newTab.fen);
+            setPgn(newTab.pgn);
+            setGame(newTab.game);
+            setMoveTree(newTab.moveTree);
+            
+            // If there's an initial message AND it's NOT a training session, send it after tab is created and active
+            // Training sessions should render TrainingSession component directly, not send messages to LLM
+            if (params.initialMessage && !params.trainingSession) {
+              const messageToSend = params.initialMessage;
+              const targetTabId = newTabId;
+              setTimeout(async () => {
+                // Use functional update to check current state
+                setActiveTabId(currentId => {
+                  if (currentId === targetTabId && !initialMessageSent) {
+                    initialMessageSent = true; // Mark as sent (closure variable)
+                    console.log('📤 Sending initial message to new tab:', messageToSend);
+                    // Send the message asynchronously
+                    handleSendMessage(messageToSend).catch(err => {
+                      console.error('Failed to send initial message:', err);
+                      initialMessageSent = false; // Reset on error so it can be retried
+                    });
+                  } else if (currentId !== targetTabId) {
+                    console.warn('⚠️ Tab changed before initial message could be sent', { 
+                      expectedTab: targetTabId,
+                      actualTab: currentId
+                    });
+                  } else if (initialMessageSent) {
+                    console.log('⚠️ Initial message already sent, skipping duplicate');
+                  }
+                  return currentId; // No change
+                });
+              }, 1000);
+            }
+          }}
         />
       )}
       {lessonDataSections && lessonDataSections.length > 0 && (
@@ -11134,3 +12914,10 @@ Provide 2-3 sentences of natural language commentary explaining why this deviati
   );
 }
 
+export default function HomePage() {
+  return (
+    <Suspense fallback={<div>Loading...</div>}>
+      <HomeInner />
+    </Suspense>
+  );
+}

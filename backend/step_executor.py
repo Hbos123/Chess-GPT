@@ -66,7 +66,8 @@ class StepExecutor:
         tool_executor = None,
         openai_client = None,
         engine_queue = None,
-        status_callback: Callable[[str, str], None] = None
+        status_callback: Callable[[str, str], None] = None,
+        llm_router = None,
     ):
         """
         Initialize step executor.
@@ -79,6 +80,7 @@ class StepExecutor:
         """
         self.tool_executor = tool_executor
         self.client = openai_client
+        self.llm_router = llm_router
         self.engine_queue = engine_queue
         self.status_callback = status_callback
         
@@ -399,7 +401,7 @@ class StepExecutor:
         synthesis_prompt: str
     ) -> str:
         """Use LLM to synthesize all results"""
-        if not self.client:
+        if not self.client and not self.llm_router:
             return None
         
         try:
@@ -423,8 +425,19 @@ class StepExecutor:
 
 {synthesis_prompt}"""
 
+            if self.llm_router:
+                return self.llm_router.complete(
+                    session_id="default",
+                    stage="step_synthesizer",
+                    system_prompt="You are an expert chess analyst synthesizing investigation findings. Be thorough, balanced, and cite specific evidence from the results.",
+                    user_text=user_prompt,
+                    temperature=0.5,
+                    model="gpt-5",
+                    max_tokens=2000,
+                ).strip()
+            
             response = self.client.chat.completions.create(
-                model="gpt-4o-mini",
+                model="gpt-5",
                 messages=[
                     {
                         "role": "system",

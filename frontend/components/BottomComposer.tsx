@@ -42,7 +42,7 @@ export default function BottomComposer({
           onKeyDown={handleKeyDown}
           placeholder={placeholder}
           className="bottom-input"
-          rows={2}
+          rows={1}
           disabled={disabled}
         />
         <div className="composer-side">

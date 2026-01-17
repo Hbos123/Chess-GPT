@@ -185,7 +185,10 @@ def test_concurrent_requests(client):
 def test_vision_board_endpoint(client, monkeypatch):
     """Ensure /vision/board returns a placeholder FEN when vision model is unavailable."""
     monkeypatch.setenv("CG_FAKE_VISION", "1")
-    from PIL import Image
+    try:
+        from PIL import Image  # type: ignore
+    except Exception:
+        pytest.skip("Pillow (PIL) not installed; skipping vision board upload test.")
     from io import BytesIO
 
     image = Image.new("RGB", (80, 80), (255, 255, 255))

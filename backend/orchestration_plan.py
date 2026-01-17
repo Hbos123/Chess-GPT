@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from typing import List, Dict, Any, Optional, Literal
 from enum import Enum
 import json
+import uuid
 
 
 class Mode(str, Enum):
@@ -17,6 +18,148 @@ class Mode(str, Enum):
     TRAINING = "training"
     CHAT = "chat"
     FETCH = "fetch"  # Multi-pass data fetching mode
+
+
+@dataclass
+class InvestigationRequest:
+    """A single investigation request from the interpreter"""
+    investigation_type: str  # "position" | "move" | "game"
+    focus: Optional[str] = None  # What to focus on: "knight", "bishop", "Nf3", "doubled_pawns", etc.
+    parameters: Dict[str, Any] = field(default_factory=dict)  # Investigation-specific params (depth, etc.)
+    purpose: str = ""  # Why this investigation is needed (for debugging/logging)
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary for serialization"""
+        return {
+            "investigation_type": self.investigation_type,
+            "focus": self.focus,
+            "parameters": self.parameters,
+            "purpose": self.purpose
+        }
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'InvestigationRequest':
+        """Create from dictionary"""
+        return cls(
+            investigation_type=data.get("investigation_type", "position"),
+            focus=data.get("focus"),
+            parameters=data.get("parameters", {}),
+            purpose=data.get("purpose", "")
+        )
+
+
+@dataclass
+class IntentPlan:
+    """
+    Simplified intent plan from Interpreter layer.
+    Contains only intent classification - NO chess reasoning.
+    """
+    intent: str  # "discuss_position" | "game_review" | "general_chat" | "play_against_ai" | "opening_explorer"
+    scope: Optional[str] = None  # "last_game" | "current_position" | "specific_move" | null
+    goal: str = ""  # "explain why user lost" | "find best move" | "evaluate move quality" | "explain concept" | "play chess" | "explore opening"
+    constraints: Dict[str, str] = field(default_factory=dict)  # {"depth": "standard", "tone": "coach", "verbosity": "medium"}
+    investigation_required: bool = False
+    investigation_requests: List[InvestigationRequest] = field(default_factory=list)  # NEW: Multiple investigation requests
+    investigation_type: Optional[str] = None  # DEPRECATED: Keep for backward compatibility, use investigation_requests instead
+    mode: Mode = Mode.CHAT  # For compatibility with existing code
+    mode_confidence: float = 0.5
+    user_intent_summary: str = ""
+    # NEW: Game review support
+    needs_game_fetch: bool = False  # True if games need to be fetched from platform
+    game_review_params: Optional[Dict[str, Any]] = None  # username, platform, count, etc. for game_review intent
+    # NEW: Game selection/listing (non-analytic)
+    game_select_params: Optional[Dict[str, Any]] = None  # username, platform, months_back/date window, candidate_fetch_count, etc.
+    game_select_requests: Optional[List[Dict[str, Any]]] = None  # list of selection requests for select_games tool
+    # NEW: Connected-ideas graph (LLM-extracted). Domain-agnostic relations (prerequisite/enables/blocks/sequence/etc.)
+    connected_ideas: Optional[Dict[str, Any]] = None
+    
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "intent": self.intent,
+            "scope": self.scope,
+            "goal": self.goal,
+            "constraints": self.constraints,
+            "investigation_required": self.investigation_required,
+            "investigation_requests": [ir.to_dict() for ir in self.investigation_requests],
+            "investigation_type": self.investigation_type,  # Keep for backward compatibility
+            "mode": self.mode.value,
+            "mode_confidence": self.mode_confidence,
+            "user_intent_summary": self.user_intent_summary,
+            "needs_game_fetch": self.needs_game_fetch,
+            "game_review_params": self.game_review_params,
+            "game_select_params": self.game_select_params,
+            "game_select_requests": self.game_select_requests,
+            "connected_ideas": self.connected_ideas
+        }
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'IntentPlan':
+        # Parse investigation_requests (new format)
+        investigation_requests = []
+        if "investigation_requests" in data and data["investigation_requests"]:
+            for ir_data in data["investigation_requests"]:
+                # Handle case where LLM returns strings instead of dicts
+                if isinstance(ir_data, str):
+                    # If it's a string, the model often means a "purpose"/label, not a valid investigation_type.
+                    # Normalize: keep the string as purpose and default to position investigation.
+                    s = ir_data.strip()
+                    canonical = s.lower()
+                    if canonical in ("position", "move", "game"):
+                        investigation_type = canonical
+                        purpose = data.get("goal", "General investigation")
+                    else:
+                        investigation_type = "position"
+                        purpose = s
+                    investigation_requests.append(
+                        InvestigationRequest(
+                            investigation_type=investigation_type,
+                        focus=None,
+                        parameters={},
+                            purpose=purpose or "",
+                        )
+                    )
+                elif isinstance(ir_data, dict):
+                    investigation_requests.append(InvestigationRequest.from_dict(ir_data))
+                else:
+                    print(f"   ⚠️ [CHAIN] [ORCHESTRATION] Invalid investigation_request type: {type(ir_data)}, skipping")
+        
+        # Backward compatibility: if no investigation_requests but investigation_type exists, create one
+        if not investigation_requests and data.get("investigation_type"):
+            investigation_requests.append(InvestigationRequest(
+                investigation_type=data["investigation_type"],
+                focus=None,
+                parameters={},
+                purpose=data.get("goal", "General investigation")
+            ))
+        
+        # Map old intent types to new ones for backward compatibility
+        intent = data.get("intent", "general_chat")
+        intent_mapping = {
+            "position_analysis": "discuss_position",
+            "move_evaluation": "discuss_position",
+            "game_analysis": "game_review"
+        }
+        if intent in intent_mapping:
+            intent = intent_mapping[intent]
+            print(f"   🔄 Mapped old intent '{data.get('intent')}' to new intent '{intent}'")
+        
+        return cls(
+            intent=intent,
+            scope=data.get("scope"),
+            goal=data.get("goal", ""),
+            constraints=data.get("constraints", {}),
+            investigation_required=data.get("investigation_required", False),
+            investigation_requests=investigation_requests,
+            investigation_type=data.get("investigation_type"),  # Keep for backward compatibility
+            mode=Mode(data.get("mode", "chat")),
+            mode_confidence=data.get("mode_confidence", 0.5),
+            user_intent_summary=data.get("user_intent_summary", ""),
+            needs_game_fetch=data.get("needs_game_fetch", False),
+            game_review_params=data.get("game_review_params"),
+            game_select_params=data.get("game_select_params"),
+            game_select_requests=data.get("game_select_requests"),
+            connected_ideas=data.get("connected_ideas")
+        )
 
 
 class ResponseStyle(str, Enum):
@@ -184,6 +327,194 @@ class StatusMessage:
 
 
 @dataclass
+class MessageComponent:
+    """A component of the user's message"""
+    component_type: str  # "main_request", "uncertainty", "constraint", "context"
+    text: str  # The actual text from the message
+    intent: str  # What the user wants for this component
+    requires_investigation: bool = False
+    investigation_method: Optional[str] = None  # "position_analysis", "move_testing", etc.
+    investigation_id: Optional[str] = None  # Unique ID linking to investigation steps
+    sub_components: List['MessageComponent'] = field(default_factory=list)
+    
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "component_type": self.component_type,
+            "text": self.text,
+            "intent": self.intent,
+            "requires_investigation": self.requires_investigation,
+            "investigation_method": self.investigation_method,
+            "investigation_id": self.investigation_id,
+            "sub_components": [sc.to_dict() for sc in self.sub_components]
+        }
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'MessageComponent':
+        sub_components = [
+            MessageComponent.from_dict(sc) for sc in data.get("sub_components", [])
+        ]
+        return cls(
+            component_type=data["component_type"],
+            text=data["text"],
+            intent=data["intent"],
+            requires_investigation=data.get("requires_investigation", False),
+            investigation_method=data.get("investigation_method"),
+            investigation_id=data.get("investigation_id"),
+            sub_components=sub_components
+        )
+
+
+@dataclass
+class MessageDecomposition:
+    """Structured breakdown of user message into components"""
+    original_message: str
+    components: List[MessageComponent] = field(default_factory=list)
+    main_request: Optional[MessageComponent] = None
+    uncertainties: List[MessageComponent] = field(default_factory=list)
+    constraints: List[MessageComponent] = field(default_factory=list)
+    
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "original_message": self.original_message,
+            "components": [c.to_dict() for c in self.components],
+            "main_request": self.main_request.to_dict() if self.main_request else None,
+            "uncertainties": [u.to_dict() for u in self.uncertainties],
+            "constraints": [c.to_dict() for c in self.constraints]
+        }
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'MessageDecomposition':
+        components = [MessageComponent.from_dict(c) for c in data.get("components", [])]
+        main_request = MessageComponent.from_dict(data["main_request"]) if data.get("main_request") else None
+        uncertainties = [MessageComponent.from_dict(u) for u in data.get("uncertainties", [])]
+        constraints = [MessageComponent.from_dict(c) for c in data.get("constraints", [])]
+        
+        return cls(
+            original_message=data["original_message"],
+            components=components,
+            main_request=main_request,
+            uncertainties=uncertainties,
+            constraints=constraints
+        )
+
+
+@dataclass
+class InvestigationStep:
+    """A single investigation step"""
+    step_id: str  # Unique ID
+    step_number: int
+    action_type: str  # "analyze", "test_move", "examine_pv", "check_consequence", etc.
+    target: Optional[str] = None  # Move to test, piece to examine, etc.
+    purpose: str = ""
+    addresses_component: Optional[str] = None  # Links to MessageComponent.investigation_id
+    depends_on: List[str] = field(default_factory=list)  # Step IDs this depends on
+    status: str = "pending"  # "pending", "in_progress", "completed", "failed"
+    result: Optional[Dict[str, Any]] = None
+    insights: List[str] = field(default_factory=list)
+    board_state_before: Optional[str] = None  # FEN before this step
+    board_state_after: Optional[str] = None  # FEN after this step
+    
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "step_id": self.step_id,
+            "step_number": self.step_number,
+            "action_type": self.action_type,
+            "target": self.target,
+            "purpose": self.purpose,
+            "addresses_component": self.addresses_component,
+            "depends_on": self.depends_on,
+            "status": self.status,
+            "result": self.result,
+            "insights": self.insights,
+            "board_state_before": self.board_state_before,
+            "board_state_after": self.board_state_after
+        }
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'InvestigationStep':
+        return cls(
+            step_id=data["step_id"],
+            step_number=data["step_number"],
+            action_type=data["action_type"],
+            target=data.get("target"),
+            purpose=data.get("purpose", ""),
+            addresses_component=data.get("addresses_component"),
+            depends_on=data.get("depends_on", []),
+            status=data.get("status", "pending"),
+            result=data.get("result"),
+            insights=data.get("insights", []),
+            board_state_before=data.get("board_state_before"),
+            board_state_after=data.get("board_state_after")
+        )
+    
+    def mark_completed(self, result: Dict[str, Any] = None, insights: List[str] = None):
+        """Mark this step as completed"""
+        self.status = "completed"
+        if result is not None:
+            self.result = result
+        if insights:
+            self.insights = insights
+
+
+@dataclass
+class InvestigationPlan:
+    """Complete investigation plan with steps"""
+    plan_id: str
+    question: str
+    key_questions: List[str] = field(default_factory=list)
+    steps: List[InvestigationStep] = field(default_factory=list)
+    completed_steps: List[str] = field(default_factory=list)  # Step IDs
+    accumulated_insights: List[str] = field(default_factory=list)
+    ready_to_answer: bool = False
+    
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "plan_id": self.plan_id,
+            "question": self.question,
+            "key_questions": self.key_questions,
+            "steps": [s.to_dict() for s in self.steps],
+            "completed_steps": self.completed_steps,
+            "accumulated_insights": self.accumulated_insights,
+            "ready_to_answer": self.ready_to_answer
+        }
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'InvestigationPlan':
+        steps = [InvestigationStep.from_dict(s) for s in data.get("steps", [])]
+        return cls(
+            plan_id=data["plan_id"],
+            question=data["question"],
+            key_questions=data.get("key_questions", []),
+            steps=steps,
+            completed_steps=data.get("completed_steps", []),
+            accumulated_insights=data.get("accumulated_insights", []),
+            ready_to_answer=data.get("ready_to_answer", False)
+        )
+    
+    def get_next_step(self) -> Optional[InvestigationStep]:
+        """Get the next pending step that has its dependencies met"""
+        for step in self.steps:
+            if step.status == "pending":
+                # Check if dependencies are met
+                if not step.depends_on:
+                    return step
+                if all(dep_id in self.completed_steps for dep_id in step.depends_on):
+                    return step
+        return None
+    
+    def mark_step_completed(self, step_id: str, result: Dict[str, Any] = None, insights: List[str] = None):
+        """Mark a step as completed"""
+        for step in self.steps:
+            if step.step_id == step_id:
+                step.mark_completed(result, insights)
+                if step_id not in self.completed_steps:
+                    self.completed_steps.append(step_id)
+                if insights:
+                    self.accumulated_insights.extend(insights)
+                break
+
+
+@dataclass
 class ResponseGuidelines:
     """Guidelines for how the main LLM should respond"""
     style: ResponseStyle = ResponseStyle.CONVERSATIONAL
@@ -257,7 +588,7 @@ class OrchestrationPlan:
     # Interpreter-driven prompt control (what data to include, how to respond)
     include_context: Dict[str, bool] = field(default_factory=lambda: {
         "board_state": True,
-        "pgn": True,
+        "pgn": False,  # PGN is too verbose - only include if explicitly needed for game review
         "recent_messages": True,
         "connected_accounts": True,
         "last_move": True,
@@ -283,6 +614,12 @@ class OrchestrationPlan:
     tool_result_format: Dict[str, str] = field(default_factory=dict)
     # e.g., {"fetch_and_review_games": "summary_only"} vs "full_details"
     
+    # Investigation planning (NEW)
+    message_decomposition: Optional[MessageDecomposition] = None
+    investigation_plan: Optional[InvestigationPlan] = None
+    investigation_summary: str = ""  # Summary of all investigations
+    evidence_links: Dict[str, List[str]] = field(default_factory=dict)  # component_id -> step_ids
+    
     def to_dict(self) -> Dict[str, Any]:
         return {
             "mode": self.mode.value,
@@ -306,7 +643,11 @@ class OrchestrationPlan:
             "selected_data": self.selected_data,
             "response_strategy": self.response_strategy,
             "exclude_from_response": self.exclude_from_response,
-            "tool_result_format": self.tool_result_format
+            "tool_result_format": self.tool_result_format,
+            "message_decomposition": self.message_decomposition.to_dict() if self.message_decomposition else None,
+            "investigation_plan": self.investigation_plan.to_dict() if self.investigation_plan else None,
+            "investigation_summary": self.investigation_summary,
+            "evidence_links": self.evidence_links
         }
     
     def add_status(self, action: str, description: str, target: str = None, phase: str = "planning"):
@@ -450,7 +791,33 @@ class OrchestrationPlan:
         if "tool_result_format" in data:
             plan.tool_result_format = data["tool_result_format"]
         
+        # Investigation planning fields
+        if "message_decomposition" in data and data["message_decomposition"]:
+            plan.message_decomposition = MessageDecomposition.from_dict(data["message_decomposition"])
+        if "investigation_plan" in data and data["investigation_plan"]:
+            plan.investigation_plan = InvestigationPlan.from_dict(data["investigation_plan"])
+        if "investigation_summary" in data:
+            plan.investigation_summary = data["investigation_summary"]
+        if "evidence_links" in data:
+            plan.evidence_links = data["evidence_links"]
+        
         return plan
+    
+    def get_evidence_for_component(self, component_id: str) -> List[Dict[str, Any]]:
+        """Get all evidence (step results) for a component"""
+        evidence = []
+        if self.investigation_plan:
+            for step in self.investigation_plan.steps:
+                if step.addresses_component == component_id and step.status == "completed":
+                    evidence.append({
+                        "step_id": step.step_id,
+                        "action": step.action_type,
+                        "result": step.result,
+                        "insights": step.insights,
+                        "board_state_before": step.board_state_before,
+                        "board_state_after": step.board_state_after
+                    })
+        return evidence
 
 
 # ============================================================================
@@ -527,17 +894,21 @@ def build_analyze_plan(
     else:
         plan.add_status("analyzing", "Analyzing position", target=fen[:30], phase="planning")
     
-    # Add analysis request with options
-    plan.analysis_requests.append(
-        AnalysisRequest(
-            fen=fen, 
-            move=move, 
-            depth=depth,
-            include_piece_profiles=include_piece_profiles,
-            include_alternates=include_alternates,
-            compare_before_after=compare_before_after if move else False
+    # Pre-analysis requests (legacy) can bypass the D2/D16 tree-first path.
+    # Default: skip analysis_requests and rely on tool calls (analyze_position/analyze_move),
+    # which are rebased to D2/D16 in backend/main.py.
+    enable_precompute = os.getenv("ENABLE_LEGACY_PRECOMPUTE_ANALYSIS_REQUESTS", "false").lower().strip() in ("1", "true", "yes", "on")
+    if enable_precompute:
+        plan.analysis_requests.append(
+            AnalysisRequest(
+                fen=fen,
+                move=move,
+                depth=depth,
+                include_piece_profiles=include_piece_profiles,
+                include_alternates=include_alternates,
+                compare_before_after=compare_before_after if move else False,
+            )
         )
-    )
     
     # Add frontend command to show analysis
     plan.frontend_commands.append(

@@ -42,13 +42,13 @@ STOCKFISH_PATH=/path/to/stockfish uvicorn main:app --reload --port 8000
 uvicorn main:app --reload --port 8000
 ```
 
-The API will be available at `http://localhost:8000`
+The API will be available at `http://localhost:8001` (or `BACKEND_PORT`)
 
 ## API Documentation
 
 Once running, visit:
-- Interactive docs: http://localhost:8000/docs
-- Alternative docs: http://localhost:8000/redoc
+- Interactive docs: http://localhost:8001/docs
+- Alternative docs: http://localhost:8001/redoc
 
 ## Endpoints
 

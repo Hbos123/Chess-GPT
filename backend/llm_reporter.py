@@ -3,22 +3,30 @@ LLM Reporter for Personal Review
 Generates narrative reports from aggregated data
 """
 
-from typing import Dict, Any
+from typing import Dict, Any, Union
 from openai import OpenAI
 import json
+import os
+import sys
+
+# Add parent directory to path for imports
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from models.personal_review import AggregatedStats, AnalysisPlan
 
 
 class LLMReporter:
     """Generates natural language reports from analysis data"""
     
-    def __init__(self, openai_client: OpenAI):
+    def __init__(self, openai_client: OpenAI, llm_router=None):
         self.client = openai_client
+        self.llm_router = llm_router
+        self.model = os.getenv("PERSONAL_REVIEW_REPORTER_MODEL", "gpt-5")
     
     def generate_report(
         self, 
         query: str, 
-        plan: Dict, 
-        data: Dict[str, Any]
+        plan: Union[Dict[str, Any], AnalysisPlan], 
+        data: Union[Dict[str, Any], AggregatedStats]
     ) -> str:
         """
         Generate natural language report from aggregated data
@@ -78,8 +86,19 @@ Analysis data:
 Generate the personalized report:"""
 
         try:
+            response = None
+            if self.llm_router:
+                return self.llm_router.complete(
+                    session_id="default",
+                    stage="personal_review_reporter",
+                    system_prompt=system_prompt,
+                    user_text=user_message,
+                    temperature=0.7,
+                    model=self.model,
+                )
+
             response = self.client.chat.completions.create(
-                model="gpt-4o",
+                model=self.model,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_message}

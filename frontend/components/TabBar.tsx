@@ -19,6 +19,11 @@ export interface BoardTab {
     opening?: string;
   };
   createdAt: number;
+  // Game mode state (optional)
+  aiGameActive?: boolean;
+  aiGameElo?: number;
+  // Note: stored state may use null when "not set" (e.g. from UI/game setup flows)
+  aiGameUserSide?: "white" | "black" | null;
 }
 
 interface TabBarProps {
@@ -29,6 +34,7 @@ interface TabBarProps {
   onTabRename: (tabId: string, newName: string) => void;
   onTabDuplicate: (tabId: string) => void;
   onNewTab: () => void;
+  onHideBoard?: () => void;
   maxTabs?: number;
 }
 
@@ -40,6 +46,7 @@ export default function TabBar({
   onTabRename,
   onTabDuplicate,
   onNewTab,
+  onHideBoard,
   maxTabs = 5,
 }: TabBarProps) {
   const [editingTabId, setEditingTabId] = useState<string | null>(null);
@@ -202,11 +209,6 @@ export default function TabBar({
               </span>
             )}
 
-            {/* Keyboard hint */}
-            {index < 5 && (
-              <span className="tab-shortcut">{index + 1}</span>
-            )}
-
             {/* Close button */}
             {tabs.length > 1 && (
               <button
@@ -231,6 +233,17 @@ export default function TabBar({
             title="New tab (Cmd+T)"
           >
             +
+          </button>
+        )}
+
+        {/* Hide board button */}
+        {onHideBoard && (
+          <button
+            className="tab-hide"
+            onClick={onHideBoard}
+            title="Hide board"
+          >
+            Hide
           </button>
         )}
       </div>
@@ -277,20 +290,23 @@ export default function TabBar({
         .tab-bar {
           display: flex;
           align-items: center;
-          background: rgba(30, 30, 35, 0.95);
-          border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-          padding: 0 8px;
-          height: 36px;
+          background: transparent;
+          padding: 0 var(--shell-gutter);
+          padding-right: 0;
+          height: 44px;
           position: relative;
           z-index: 100;
+          margin-bottom: 0;
         }
 
         .tab-bar-tabs {
           display: flex;
           align-items: center;
-          gap: 2px;
+          gap: 10px;
           overflow-x: auto;
           scrollbar-width: none;
+          padding: 0;
+          width: 100%;
         }
 
         .tab-bar-tabs::-webkit-scrollbar {
@@ -300,24 +316,28 @@ export default function TabBar({
         .tab-item {
           display: flex;
           align-items: center;
-          gap: 6px;
-          padding: 6px 12px;
-          background: rgba(255, 255, 255, 0.05);
-          border-radius: 6px 6px 0 0;
+          gap: 8px;
+          padding: 8px 14px;
+          background: transparent;
+          border: none;
+          border-radius: 12px;
           cursor: pointer;
-          min-width: 100px;
-          max-width: 180px;
-          transition: background 0.15s ease;
+          min-width: 120px;
+          max-width: 220px;
+          transition: transform var(--transition-fast, 160ms ease);
           position: relative;
         }
 
         .tab-item:hover {
-          background: rgba(255, 255, 255, 0.1);
+          transform: translateY(-1px);
         }
 
         .tab-item.active {
-          background: rgba(76, 175, 80, 0.2);
-          border-bottom: 2px solid #4caf50;
+          box-shadow: 0 8px 24px rgba(0,0,0,0.25);
+        }
+
+        .tab-item.active .tab-name {
+          font-weight: 700;
         }
 
         .tab-indicators {
@@ -360,74 +380,99 @@ export default function TabBar({
           overflow: hidden;
           text-overflow: ellipsis;
           white-space: nowrap;
-          font-size: 13px;
-          color: rgba(255, 255, 255, 0.9);
+          font-size: 16px;
+          color: var(--text-primary, #e8edf5);
         }
 
         .tab-name-input {
           flex: 1;
-          background: rgba(0, 0, 0, 0.3);
-          border: 1px solid rgba(76, 175, 80, 0.5);
-          border-radius: 3px;
-          padding: 2px 4px;
+          background: rgba(255, 255, 255, 0.04);
+          border: 1px solid var(--accent-color, #7dd3fc);
+          border-radius: 6px;
+          padding: 4px 6px;
           font-size: 13px;
-          color: white;
+          color: var(--text-primary, #e8edf5);
           outline: none;
-          min-width: 60px;
+          min-width: 80px;
         }
 
         .tab-shortcut {
           font-size: 10px;
-          color: rgba(255, 255, 255, 0.3);
-          padding: 1px 4px;
-          background: rgba(255, 255, 255, 0.05);
-          border-radius: 3px;
+          color: var(--text-secondary, #9fb3c8);
+          padding: 2px 6px;
+          background: rgba(255, 255, 255, 0.06);
+          border-radius: 999px;
           flex-shrink: 0;
+          border: 1px solid var(--border-color, #24324a);
         }
 
         .tab-close {
           background: none;
           border: none;
-          color: rgba(255, 255, 255, 0.4);
+          color: var(--text-secondary, #9fb3c8);
           cursor: pointer;
-          padding: 0 2px;
+          padding: 0 4px;
           font-size: 16px;
           line-height: 1;
-          border-radius: 3px;
+          border-radius: 6px;
           flex-shrink: 0;
-          transition: all 0.15s ease;
+          transition: all var(--transition-fast, 160ms ease);
         }
 
         .tab-close:hover {
-          color: #f44336;
-          background: rgba(244, 67, 54, 0.1);
+          color: var(--danger-color, #f87171);
+          background: rgba(248, 113, 113, 0.12);
         }
 
         .tab-new {
-          background: none;
-          border: 1px dashed rgba(255, 255, 255, 0.2);
-          color: rgba(255, 255, 255, 0.5);
+          background: transparent;
+          border: none;
+          color: var(--text-secondary, #9fb3c8);
           cursor: pointer;
-          padding: 4px 12px;
-          font-size: 16px;
-          border-radius: 6px 6px 0 0;
-          transition: all 0.15s ease;
+          padding: 6px 14px;
+          font-size: 15px;
+          border-radius: 12px;
+          transition: all var(--transition-fast, 160ms ease);
         }
 
         .tab-new:hover {
-          color: #4caf50;
-          border-color: rgba(76, 175, 80, 0.5);
-          background: rgba(76, 175, 80, 0.1);
+          color: var(--accent-color, #7dd3fc);
+          background: rgba(125, 211, 252, 0.08);
+        }
+
+        .tab-hide {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          padding: 8px 14px;
+          background: transparent;
+          border: none;
+          border-radius: 12px;
+          cursor: pointer;
+          min-width: 80px;
+          transition: transform var(--transition-fast, 160ms ease);
+          color: var(--text-secondary, #9fb3c8);
+          font-size: 13px;
+          font-weight: 600;
+          letter-spacing: 0.02em;
+          text-transform: uppercase;
+          margin-left: auto;
+          margin-right: 0;
+        }
+
+        .tab-hide:hover {
+          transform: translateY(-1px);
+          color: var(--text-primary, #e8edf5);
         }
 
         .tab-context-menu {
           position: fixed;
-          background: rgba(40, 40, 45, 0.98);
-          border: 1px solid rgba(255, 255, 255, 0.1);
-          border-radius: 6px;
-          padding: 4px 0;
-          min-width: 120px;
-          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+          background: var(--surface-card, #0f1625);
+          border: 1px solid var(--border-color, #24324a);
+          border-radius: 10px;
+          padding: 6px 0;
+          min-width: 140px;
+          box-shadow: 0 16px 40px rgba(0, 0, 0, 0.35);
           z-index: 1000;
         }
 
@@ -437,15 +482,15 @@ export default function TabBar({
           text-align: left;
           background: none;
           border: none;
-          color: rgba(255, 255, 255, 0.9);
-          padding: 8px 12px;
+          color: var(--text-primary, #e8edf5);
+          padding: 10px 14px;
           font-size: 13px;
           cursor: pointer;
-          transition: background 0.15s ease;
+          transition: background var(--transition-fast, 160ms ease);
         }
 
         .tab-context-menu button:hover {
-          background: rgba(76, 175, 80, 0.2);
+          background: rgba(125, 211, 252, 0.12);
         }
       `}</style>
     </div>

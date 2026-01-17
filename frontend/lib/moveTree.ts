@@ -85,6 +85,18 @@ export class MoveTree {
     return this.searchNodeById(this.root, id);
   }
   
+  /**
+   * Find a node by ply index along the main line.
+   * Ply 0 refers to the root position (before any moves).
+   * Ply 1 refers to the first move node in the main line, etc.
+   */
+  findNodeByPly(ply: number): MoveNode | null {
+    const p = Math.max(0, Math.floor(ply));
+    if (p === 0) return this.root;
+    const main = this.getMainLine();
+    return main[p - 1] ?? null;
+  }
+  
   private searchNodeById(node: MoveNode, id: string): MoveNode | null {
     if (node.id === id) return node;
     
@@ -258,10 +270,43 @@ export class MoveTree {
 
   // Parse PGN into move tree
   static fromPGN(pgnString: string): MoveTree {
-    // Simplified PGN parser - handles basic moves, comments, and variations
     const tree = new MoveTree();
-    // TODO: Implement full PGN parsing if needed
-    return tree;
+    if (!pgnString || !pgnString.trim()) {
+      return tree;
+    }
+
+    try {
+      // Use Chess.js to parse the PGN
+      const { Chess } = require('chess.js');
+      const game = new Chess();
+      
+      // Load PGN - this will parse the moves
+      game.loadPgn(pgnString);
+      
+      // Build move tree by replaying the game
+      const history = game.history({ verbose: true });
+      let currentNode = tree.root;
+      
+      // Replay moves one by one to build the tree
+      const replayGame = new Chess();
+      for (const move of history) {
+        const moveResult = replayGame.move(move.san);
+        if (moveResult) {
+          const fen = replayGame.fen();
+          currentNode = tree.addMove(move.san, fen);
+        }
+      }
+      
+      // Set current node to the last move
+      tree.currentNode = currentNode;
+      
+      return tree;
+    } catch (error) {
+      console.error('[MoveTree.fromPGN] Error parsing PGN:', error);
+      console.error('[MoveTree.fromPGN] PGN preview:', pgnString.substring(0, 200));
+      // Return empty tree on error
+      return tree;
+    }
   }
 
   // Get path from root to current node

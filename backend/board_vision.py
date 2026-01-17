@@ -5,7 +5,11 @@ from dataclasses import dataclass
 from io import BytesIO
 from typing import Any, List, Optional
 
-from PIL import Image
+try:
+    # Optional dependency: backend should still boot without Pillow.
+    from PIL import Image  # type: ignore
+except Exception:  # pragma: no cover
+    Image = None  # type: ignore
 
 
 class BoardVisionError(Exception):
@@ -29,6 +33,11 @@ class VisionResult:
 
 
 def _downscale_and_encode(image_bytes: bytes, max_dimension: int = 1280) -> str:
+    if Image is None:
+        raise BoardVisionError(
+            "Board vision requires Pillow (PIL) but it is not installed. "
+            "Install Pillow or set CG_FAKE_VISION=1 to bypass vision."
+        )
     image = Image.open(BytesIO(image_bytes)).convert("RGB")
     image.thumbnail((max_dimension, max_dimension), Image.LANCZOS)
     buffer = BytesIO()
@@ -106,7 +115,7 @@ def analyze_board_image(
     )
 
     response = openai_client.responses.create(
-        model="gpt-4o-mini",
+        model="gpt-5",
         input=[
             {"role": "system", "content": "You are a meticulous chessboard vision assistant."},
             {

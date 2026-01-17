@@ -590,6 +590,128 @@ def detect_king_safety_tags(board: chess.Board) -> List[Dict]:
                         "squares": [chess.square_name(king_sq)],
                         "details": {}
                     })
+    
+    return tags
+
+
+def detect_castling_tags(board: chess.Board) -> List[Dict]:
+    """Detect castling availability and castling rights."""
+    tags = []
+    
+    for color in [chess.WHITE, chess.BLACK]:
+        side = "white" if color == chess.WHITE else "black"
+        
+        # Check if it's this side's turn
+        is_side_to_move = (board.turn == color)
+        
+        # Check castling rights
+        has_kingside_rights = board.has_kingside_castling_rights(color)
+        has_queenside_rights = board.has_queenside_castling_rights(color)
+        
+        if has_kingside_rights:
+            # Always expose RIGHTS when they exist (rights != legal-right-now).
+            # This prevents confusing deltas like "rights lost" when castling merely becomes legal.
+            tags.append({
+                "tag_name": "tag.castling.rights.kingside",
+                "side": side,
+                "squares": [],
+                "details": {"rights": True}
+            })
+
+            # Separately expose availability (legal now / would be legal on this side's turn).
+            can_castle_kingside = False
+            if is_side_to_move:
+                # Check if O-O is a legal move
+                for move in board.legal_moves:
+                    if move.from_square == board.king(color):
+                        try:
+                            san = board.san(move)
+                            if san == "O-O":
+                                can_castle_kingside = True
+                                break
+                        except Exception:
+                            continue
+            else:
+                # Not this side's turn - check if it would be legal on their turn
+                temp_board = board.copy()
+                temp_board.turn = color
+                for move in temp_board.legal_moves:
+                    if move.from_square == temp_board.king(color):
+                        try:
+                            san = temp_board.san(move)
+                            if san == "O-O":
+                                can_castle_kingside = True
+                                break
+                        except Exception:
+                            continue
+            
+            if can_castle_kingside:
+                tags.append({
+                    "tag_name": "tag.castling.available.kingside",
+                    "side": side,
+                    "squares": [],
+                    "details": {"legal": True}
+                })
+        
+        if has_queenside_rights:
+            # Always expose RIGHTS when they exist (rights != legal-right-now).
+            tags.append({
+                "tag_name": "tag.castling.rights.queenside",
+                "side": side,
+                "squares": [],
+                "details": {"rights": True}
+            })
+
+            # Separately expose availability (legal now / would be legal on this side's turn).
+            can_castle_queenside = False
+            if is_side_to_move:
+                # Check if O-O-O is a legal move
+                for move in board.legal_moves:
+                    if move.from_square == board.king(color):
+                        try:
+                            san = board.san(move)
+                            if san == "O-O-O":
+                                can_castle_queenside = True
+                                break
+                        except Exception:
+                            continue
+            else:
+                # Not this side's turn - check if it would be legal on their turn
+                temp_board = board.copy()
+                temp_board.turn = color
+                for move in temp_board.legal_moves:
+                    if move.from_square == temp_board.king(color):
+                        try:
+                            san = temp_board.san(move)
+                            if san == "O-O-O":
+                                can_castle_queenside = True
+                                break
+                        except Exception:
+                            continue
+            
+            if can_castle_queenside:
+                tags.append({
+                    "tag_name": "tag.castling.available.queenside",
+                    "side": side,
+                    "squares": [],
+                    "details": {"legal": True}
+                })
+    
+    return tags
+
+
+def detect_king_safety_tags(board: chess.Board) -> List[Dict]:
+    """Detect king safety factors."""
+    tags = []
+    
+    for color in [chess.WHITE, chess.BLACK]:
+        side = "white" if color == chess.WHITE else "black"
+        king_sq = board.king(color)
+        if not king_sq:
+            continue
+        
+        file_idx = chess.square_file(king_sq)
+        rank_idx = chess.square_rank(king_sq)
         
         # Attackers vs defenders count with piece details
         piece_names = {chess.PAWN: 'Pawn', chess.KNIGHT: 'Knight', chess.BISHOP: 'Bishop',
@@ -662,6 +784,40 @@ def detect_activity_tags(board: chess.Board) -> List[Dict]:
                     "details": {"mobility": total_mobility}
                 })
         
+        # Undeveloped pieces (on starting squares)
+        starting_squares_map = {
+            chess.KNIGHT: ([chess.B1, chess.G1] if color == chess.WHITE else [chess.B8, chess.G8]),
+            chess.BISHOP: ([chess.C1, chess.F1] if color == chess.WHITE else [chess.C8, chess.F8]),
+            chess.ROOK: ([chess.A1, chess.H1] if color == chess.WHITE else [chess.A8, chess.H8]),
+            chess.QUEEN: ([chess.D1] if color == chess.WHITE else [chess.D8])
+        }
+        
+        for piece_type, starting_squares in starting_squares_map.items():
+            # IMPORTANT: emit ONE tag per undeveloped piece-square (not an aggregate list).
+            # Otherwise, when one piece develops (e.g. Ng8->f6), the aggregate tag instance
+            # changes shape (["b8","g8"] -> ["b8"]) and can show up as "gained" + "lost"
+            # in instance-level deltas even though no piece "became undeveloped again".
+            undeveloped_sqs: List[int] = []
+            for sq in board.pieces(piece_type, color):
+                if sq in starting_squares:
+                    undeveloped_sqs.append(sq)
+
+            if undeveloped_sqs:
+                piece_name = {chess.KNIGHT: "knight", chess.BISHOP: "bishop",
+                              chess.ROOK: "rook", chess.QUEEN: "queen"}[piece_type]
+                piece_symbol = {chess.KNIGHT: "N", chess.BISHOP: "B",
+                                chess.ROOK: "R", chess.QUEEN: "Q"}[piece_type]
+                total_count = len(undeveloped_sqs)
+                for sq in sorted(undeveloped_sqs):
+                    sq_name = chess.square_name(sq)
+                    tags.append({
+                        "tag_name": f"tag.undeveloped.{piece_name}",
+                        "side": side,
+                        "squares": [sq_name],
+                        "pieces": [f"{piece_symbol}{sq_name}"],
+                        "details": {"count": 1, "count_total": total_count}
+                    })
+        
         # Trapped pieces
         piece_names_short = {chess.KNIGHT: 'Knight', chess.BISHOP: 'Bishop', chess.ROOK: 'Rook'}
         for piece_type in [chess.KNIGHT, chess.BISHOP, chess.ROOK]:
@@ -722,6 +878,19 @@ def detect_pawn_tags(board: chess.Board) -> List[Dict]:
     for color in [chess.WHITE, chess.BLACK]:
         side = "white" if color == chess.WHITE else "black"
         direction = 1 if color == chess.WHITE else -1
+
+        # Doubled pawns (same-file): generally a structural weakness.
+        for file_idx in range(8):
+            pawns_on_file = [sq for sq in board.pieces(chess.PAWN, color) if chess.square_file(sq) == file_idx]
+            if len(pawns_on_file) >= 2:
+                file_name = chess.FILE_NAMES[file_idx]
+                tags.append({
+                    "tag_name": f"tag.pawn.doubled.{file_name}",
+                    "side": side,
+                    "pieces": [f"P{chess.square_name(sq)}" for sq in pawns_on_file],
+                    "squares": [chess.square_name(sq) for sq in pawns_on_file],
+                    "details": {"file": file_name, "count": len(pawns_on_file)}
+                })
         
         for pawn_sq in board.pieces(chess.PAWN, color):
             file_idx = chess.square_file(pawn_sq)
@@ -766,6 +935,32 @@ def detect_pawn_tags(board: chess.Board) -> List[Dict]:
     return tags
 
 
+def detect_knight_rim_tags(board: chess.Board) -> List[Dict]:
+    """Detect knights on the rim/edge of the board (often positionally inferior)."""
+    tags: List[Dict] = []
+    for color in [chess.WHITE, chess.BLACK]:
+        side = "white" if color == chess.WHITE else "black"
+        for knight_sq in board.pieces(chess.KNIGHT, color):
+            file_idx = chess.square_file(knight_sq)
+            rank_idx = chess.square_rank(knight_sq)
+            # "Knight on the rim" is conventionally an a/h-file knight.
+            # (Avoid tagging starting-position knights on rank 1/8, which would be noisy.)
+            if file_idx in (0, 7):
+                tags.append({
+                    "tag_name": "tag.knight.rim",
+                    "side": side,
+                    "pieces": [f"N{chess.square_name(knight_sq)}"],
+                    "squares": [chess.square_name(knight_sq)],
+                    "details": {
+                        "file": chess.FILE_NAMES[file_idx],
+                        "rank": str(rank_idx + 1),
+                        "is_edge_file": file_idx in (0, 7),
+                        "is_edge_rank": False,
+                    }
+                })
+    return tags
+
+
 async def aggregate_all_tags(board: chess.Board, engine_queue) -> List[Dict]:
     """
     Aggregate all tag detectors and return unified tag list.
@@ -790,6 +985,8 @@ async def aggregate_all_tags(board: chess.Board, engine_queue) -> List[Dict]:
     all_tags.extend(detect_king_safety_tags(board))
     all_tags.extend(detect_activity_tags(board))
     all_tags.extend(detect_pawn_tags(board))
+    all_tags.extend(detect_knight_rim_tags(board))
+    all_tags.extend(detect_castling_tags(board))
     
     # Add threat tags for both sides (with side field added)
     white_threats = detect_all_threats(board, chess.WHITE)
@@ -803,4 +1000,107 @@ async def aggregate_all_tags(board: chess.Board, engine_queue) -> List[Dict]:
     all_tags.extend(black_threats)
     
     return all_tags
+
+
+def detect_overworked_pieces_tags(board: chess.Board) -> List[Dict]:
+    """
+    Detect overworked pieces - pieces defending multiple attacked pieces.
+    A piece is overworked if it defends 2+ attacked pieces and recapturing one
+    leaves the other undefended.
+    """
+    tags = []
+    
+    for color in [chess.WHITE, chess.BLACK]:
+        side = "white" if color == chess.WHITE else "black"
+        opponent = not color
+        
+        # Check all piece types
+        for piece_type in [chess.PAWN, chess.KNIGHT, chess.BISHOP, chess.ROOK, chess.QUEEN]:
+            for defender_sq in board.pieces(piece_type, color):
+                defender_piece = board.piece_at(defender_sq)
+                if not defender_piece:
+                    continue
+                
+                # Find all pieces this defender is protecting that are also attacked
+                defended_pieces = []
+                for target_sq in chess.SQUARES:
+                    target_piece = board.piece_at(target_sq)
+                    if target_piece and target_piece.color == color and target_sq != defender_sq:
+                        # Check if defender attacks this target (defends it)
+                        if target_sq in board.attacks(defender_sq):
+                            # Check if target is attacked by opponent
+                            if board.is_attacked_by(opponent, target_sq):
+                                # Get all defenders of this target
+                                all_defenders = list(board.attackers(color, target_sq))
+                                defended_pieces.append({
+                                    "square": target_sq,
+                                    "piece": target_piece,
+                                    "attackers": list(board.attackers(opponent, target_sq)),
+                                    "all_defenders": all_defenders
+                                })
+                
+                # Check for overworked piece (defending 2+ attacked pieces)
+                if len(defended_pieces) >= 2:
+                    # Check if recapturing one leaves the other undefended
+                    for i, piece1 in enumerate(defended_pieces):
+                        for piece2 in defended_pieces[i+1:]:
+                            # Check if piece1 has other defenders besides this one
+                            piece1_other_defenders = [d for d in piece1["all_defenders"] if d != defender_sq]
+                            
+                            # Check if piece2 has other defenders besides this one  
+                            piece2_other_defenders = [d for d in piece2["all_defenders"] if d != defender_sq]
+                            
+                            # If both pieces have NO other defenders, this piece is overworked
+                            # OR if one has no other defenders and recapturing the other leaves it undefended
+                            is_overworked = False
+                            if len(piece1_other_defenders) == 0 and len(piece2_other_defenders) == 0:
+                                # Both rely solely on this defender
+                                is_overworked = True
+                            elif len(piece1_other_defenders) == 0 or len(piece2_other_defenders) == 0:
+                                # At least one relies solely on this defender
+                                # Check if recapturing the one with other defenders leaves the other undefended
+                                if len(piece1_other_defenders) == 0:
+                                    # piece1 has no other defenders, piece2 might have
+                                    # If we recapture piece2's attacker, piece1 is still undefended
+                                    is_overworked = True
+                                elif len(piece2_other_defenders) == 0:
+                                    # piece2 has no other defenders, piece1 might have
+                                    # If we recapture piece1's attacker, piece2 is still undefended
+                                    is_overworked = True
+                            
+                            if is_overworked:
+                                # Both pieces rely solely on this defender - overworked!
+                                piece1_name = chess.piece_name(piece1["piece"].piece_type).capitalize()
+                                piece2_name = chess.piece_name(piece2["piece"].piece_type).capitalize()
+                                piece_symbol = chess.piece_symbol(defender_piece.piece_type).upper()
+                                
+                                tags.append({
+                                    "tag_name": f"tag.piece.overworked.{chess.square_name(defender_sq)}",
+                                    "side": side,
+                                    "pieces": [f"{piece_symbol}{chess.square_name(defender_sq)}"],
+                                    "squares": [chess.square_name(defender_sq)],
+                                    "defended_pieces": [
+                                        {
+                                            "square": chess.square_name(piece1["square"]),
+                                            "piece_type": piece1_name,
+                                            "attackers": [chess.square_name(sq) for sq in piece1["attackers"]]
+                                        },
+                                        {
+                                            "square": chess.square_name(piece2["square"]),
+                                            "piece_type": piece2_name,
+                                            "attackers": [chess.square_name(sq) for sq in piece2["attackers"]]
+                                        }
+                                    ],
+                                    "details": {
+                                        "defended_count": len(defended_pieces),
+                                        "vulnerable": True,  # Can't recapture both
+                                        "description": f"{piece_symbol} on {chess.square_name(defender_sq)} defends {piece1_name} on {chess.square_name(piece1['square'])} and {piece2_name} on {chess.square_name(piece2['square'])}, but can only recapture one"
+                                    }
+                                })
+                                break
+                        # Break outer loop if we found an overworked piece for this defender
+                        if len(tags) > 0 and tags[-1].get("tag_name", "").endswith(chess.square_name(defender_sq)):
+                            break
+    
+    return tags
 

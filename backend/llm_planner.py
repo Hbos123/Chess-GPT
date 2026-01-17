@@ -7,13 +7,22 @@ from typing import List, Dict, Any
 from openai import OpenAI
 import os
 import json
+import sys
+
+# Add parent directory to path for imports
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from models.personal_review import AnalysisPlan, FilterSpec
 
 
 class LLMPlanner:
     """Converts natural queries to structured analysis plans using LLM"""
     
-    def __init__(self, openai_client: OpenAI):
+    def __init__(self, openai_client: OpenAI, llm_router=None):
         self.client = openai_client
+        self.llm_router = llm_router
+        # This is the "planner" for personal review queries (not the 4-layer executor Planner).
+        # Default to a cheaper model; can be overridden via PERSONAL_REVIEW_PLANNER_MODEL.
+        self.model = os.getenv("PERSONAL_REVIEW_PLANNER_MODEL", "gpt-4o-mini")
     
     def plan_analysis(self, query: str, games: List[Dict]) -> Dict[str, Any]:
         """
@@ -104,17 +113,49 @@ Available games context:
 Create the analysis plan:"""
 
         try:
-            response = self.client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_message}
-                ],
-                temperature=0.3,
-                max_tokens=1000
-            )
-            
-            plan_text = response.choices[0].message.content.strip()
+            import time as _time
+            from pipeline_timer import get_pipeline_timer
+            _timer = get_pipeline_timer()
+            _t0 = _time.perf_counter()
+            response = None
+            if self.llm_router:
+                plan = self.llm_router.complete_json(
+                    session_id="default",
+                    stage="personal_review_planner",
+                    system_prompt=system_prompt,
+                    user_text=user_message,
+                    temperature=0.3,
+                    model=self.model,
+                )
+                plan_text = json.dumps(plan, ensure_ascii=False)
+            else:
+                response = self.client.chat.completions.create(
+                    model=self.model,
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_message}
+                    ],
+                    temperature=0.3,
+                    max_tokens=1000
+                )
+            _dt = _time.perf_counter() - _t0
+            try:
+                usage = getattr(response, "usage", None) if response is not None else None
+                prompt_tokens = getattr(usage, "prompt_tokens", None)
+                completion_tokens = getattr(usage, "completion_tokens", None)
+            except Exception:
+                prompt_tokens = None
+                completion_tokens = None
+            if _timer:
+                _timer.record_llm(
+                    "personal_review_planner",
+                    _dt,
+                    tokens_in=prompt_tokens,
+                    tokens_out=completion_tokens,
+                    model=self.model
+                )
+            if response is not None:
+                plan_text = response.choices[0].message.content.strip()
             
             # Parse JSON
             # Remove markdown code blocks if present
@@ -122,12 +163,28 @@ Create the analysis plan:"""
                 plan_text = plan_text.split("```json")[1].split("```")[0].strip()
             elif "```" in plan_text:
                 plan_text = plan_text.split("```")[1].split("```")[0].strip()
+            if response is not None:
+                plan_dict = json.loads(plan_text)
+            else:
+                plan_dict = plan_text if isinstance(plan_text, dict) else json.loads(plan_text)
             
-            plan = json.loads(plan_text)
+            # Validate using Pydantic model
+            try:
+                plan = AnalysisPlan(**plan_dict)
+                # Override games_to_analyze if needed
+                if plan.games_to_analyze > len(games):
+                    plan.games_to_analyze = min(len(games), 50)
+            except Exception as e:
+                print(f"⚠️ Plan validation failed, using defaults: {e}")
+                # Fall back to manual validation
+                plan = self._validate_plan(plan_dict, len(games))
+                # Convert to dict for return
+                if isinstance(plan, AnalysisPlan):
+                    plan = plan.dict()
             
-            # Validate and set defaults
-            plan = self._validate_plan(plan, len(games))
-            
+            # Return as dict for compatibility
+            if isinstance(plan, AnalysisPlan):
+                return plan.dict()
             return plan
         
         except Exception as e:
@@ -175,19 +232,35 @@ Time controls: {', '.join(f'{k}: {v}' for k, v in time_controls.items())}"""
         return context
     
     def _validate_plan(self, plan: Dict, total_games: int) -> Dict:
-        """Validate and set defaults for plan"""
+        """Validate and set defaults for plan (fallback if Pydantic validation fails)"""
         # Ensure required fields
-        if "intent" not in plan:
+        if "intent" not in plan or plan["intent"] not in ["diagnostic", "comparison", "trend", "focus"]:
             plan["intent"] = "diagnostic"
         
-        if "filters" not in plan:
+        if "filters" not in plan or not isinstance(plan["filters"], dict):
             plan["filters"] = {}
         
-        if "metrics" not in plan:
+        if "metrics" not in plan or not isinstance(plan["metrics"], list):
             plan["metrics"] = ["overall_stats", "phase_breakdown"]
         
-        if "games_to_analyze" not in plan:
+        # Validate metrics
+        valid_metrics = [
+            "overall_stats", "phase_breakdown", "opening_performance",
+            "theme_analysis", "time_management", "mistake_patterns"
+        ]
+        plan["metrics"] = [m for m in plan["metrics"] if m in valid_metrics]
+        if not plan["metrics"]:
+            plan["metrics"] = ["overall_stats", "phase_breakdown"]
+        
+        if "games_to_analyze" not in plan or not isinstance(plan["games_to_analyze"], int):
             plan["games_to_analyze"] = min(total_games, 50)
+        else:
+            plan["games_to_analyze"] = max(1, min(plan["games_to_analyze"], 100, total_games))
+        
+        if "analysis_depth" not in plan or not isinstance(plan["analysis_depth"], int):
+            plan["analysis_depth"] = 15
+        else:
+            plan["analysis_depth"] = max(10, min(plan["analysis_depth"], 25))
         
         return plan
 

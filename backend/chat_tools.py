@@ -137,8 +137,55 @@ TOOL_FETCH_AND_REVIEW_GAMES = {
                 },
                 "result_filter": {
                     "type": "string",
-                    "enum": ["wins", "losses", "draws", "all"],
+                    "enum": ["win", "loss", "draw", "wins", "losses", "draws", "all"],
                     "description": "Filter by game result. Default 'all'."
+                },
+                "months_back": {
+                    "type": "integer",
+                    "description": "Recency window in months when date_from/date_to not provided. Default 6.",
+                    "default": 6
+                },
+                "date_from": {
+                    "type": "string",
+                    "description": "Start date (YYYY-MM-DD). Optional."
+                },
+                "date_to": {
+                    "type": "string",
+                    "description": "End date (YYYY-MM-DD). Optional."
+                },
+                "opponent": {
+                    "type": "string",
+                    "description": "Filter by opponent username (optional)."
+                },
+                "opening_eco": {
+                    "type": "string",
+                    "description": "Filter by ECO prefix (e.g., 'B50', 'C4'). Optional."
+                },
+                "color": {
+                    "type": "string",
+                    "enum": ["white", "black", "both"],
+                    "description": "Filter by the player's color. Optional."
+                },
+                "min_moves": {
+                    "type": "integer",
+                    "description": "Minimum number of full moves (optional)."
+                },
+                "min_opponent_rating": {
+                    "type": "integer",
+                    "description": "Minimum opponent rating (optional)."
+                },
+                "max_opponent_rating": {
+                    "type": "integer",
+                    "description": "Maximum opponent rating (optional)."
+                },
+                "sort": {
+                    "type": "string",
+                    "enum": ["date_desc", "date_asc"],
+                    "description": "Sort order for returned games (optional). Default 'date_desc'."
+                },
+                "offset": {
+                    "type": "integer",
+                    "description": "Skip first N games after filtering (optional). Default 0."
                 },
                 "query": {
                     "type": "string",
@@ -152,6 +199,92 @@ TOOL_FETCH_AND_REVIEW_GAMES = {
                 }
             },
             "required": ["username", "platform"]
+        }
+    }
+}
+
+TOOL_SELECT_GAMES = {
+    "type": "function",
+    "function": {
+        "name": "select_games",
+        "description": "Fetch a candidate set of games and deterministically select specific games (last, second last, a win, a rapid, etc.) using LLM-provided selectors. Returns game references (date/time/result/color/opponent/url) without running Stockfish analysis.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "username": {
+                    "type": "string",
+                    "description": "Chess.com or Lichess username. If omitted, use context.connected_accounts."
+                },
+                "platform": {
+                    "type": "string",
+                    "enum": ["chess.com", "lichess"],
+                    "description": "Which platform to fetch from. If omitted, use context.connected_accounts."
+                },
+                "candidate_fetch_count": {
+                    "type": "integer",
+                    "description": "How many games to fetch as the candidate pool (before selection). Default 50.",
+                    "default": 50
+                },
+                "months_back": {
+                    "type": "integer",
+                    "description": "Recency window in months when date_from/date_to not provided. Default 6.",
+                    "default": 6
+                },
+                "date_from": {
+                    "type": "string",
+                    "description": "Start date (YYYY-MM-DD). Optional."
+                },
+                "date_to": {
+                    "type": "string",
+                    "description": "End date (YYYY-MM-DD). Optional."
+                },
+                "global_unique": {
+                    "type": "boolean",
+                    "description": "If true, never return the same game twice across requests. Default true.",
+                    "default": True
+                },
+                "global_limit": {
+                    "type": "integer",
+                    "description": "Optional cap on total number of selected games across all requests."
+                },
+                "include_pgn": {
+                    "type": "boolean",
+                    "description": "If true, include PGN strings for selected games (useful for opening a game in a new tab). Default false.",
+                    "default": False
+                },
+                "requests": {
+                    "type": "array",
+                    "description": "Selection requests (each can specify filters + count/offset/sort).",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "name": {"type": "string", "description": "Label for this selection (e.g., 'last_game', 'bullet_game')."},
+                            "count": {"type": "integer", "description": "How many games to select for this request (default 1).", "default": 1},
+                            "offset": {"type": "integer", "description": "Skip N eligible games (after sorting + uniqueness). Useful for 'second last'.", "default": 0},
+                            "sort": {"type": "string", "enum": ["date_desc", "date_asc"], "description": "Sort order within this request.", "default": "date_desc"},
+                            "require_unique": {"type": "boolean", "description": "If true, game must be unique vs other selections.", "default": True},
+                            "allow_reuse": {"type": "boolean", "description": "If true, this request may reuse a previously selected game (labels can overlap) without increasing the unique game count.", "default": False},
+                            "filters": {
+                                "type": "object",
+                                "description": "Optional filters for this request.",
+                                "properties": {
+                                    "result": {"type": "string", "enum": ["win", "loss", "draw"], "description": "Result filter."},
+                                    "time_control": {"type": "string", "enum": ["bullet", "blitz", "rapid", "classical", "daily"], "description": "Time-control category filter."},
+                                    "color": {"type": "string", "enum": ["white", "black"], "description": "Color filter."},
+                                    "opening_eco": {"type": "string", "description": "ECO prefix filter (e.g. 'B50')."},
+                                    "opponent": {"type": "string", "description": "Opponent username contains filter."},
+                                    "min_opponent_rating": {"type": "integer", "description": "Minimum opponent rating."},
+                                    "max_opponent_rating": {"type": "integer", "description": "Maximum opponent rating."},
+                                    "min_moves": {"type": "integer", "description": "Minimum full moves (best-effort)."},
+                                    "date_from": {"type": "string", "description": "Per-request start date (YYYY-MM-DD). Optional."},
+                                    "date_to": {"type": "string", "description": "Per-request end date (YYYY-MM-DD). Optional."}
+                                }
+                            }
+                        },
+                        "required": ["name"]
+                    }
+                }
+            }
         }
     }
 }
@@ -306,31 +439,41 @@ TOOL_QUERY_POSITIONS = {
     "type": "function",
     "function": {
         "name": "query_positions",
-        "description": "Search saved positions by tags, phase, or opening. Returns positions matching criteria. Use when user asks about saved positions or specific tactical patterns.",
+        "description": "Search saved positions by tags, themes, phase, or error category. Returns positions matching criteria with FEN and best moves. Use when user asks about saved positions or specific tactical patterns.",
         "parameters": {
             "type": "object",
             "properties": {
-                "username": {
-                    "type": "string",
-                    "description": "Username to query positions for"
-                },
                 "tags": {
                     "type": "array",
                     "items": {"type": "string"},
                     "description": "Filter by tags (e.g., ['tactic.fork', 'endgame.pawn'])"
+                },
+                "themes": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Filter by strategic themes (e.g., ['kingside_attack', 'center_control'])"
+                },
+                "error_categories": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Filter by error types (e.g., ['blunder', 'missed_win'])"
                 },
                 "phase": {
                     "type": "string",
                     "enum": ["opening", "middlegame", "endgame"],
                     "description": "Filter by game phase"
                 },
+                "mover_name": {
+                    "type": "string",
+                    "description": "Filter by side to move (e.g., 'white', 'black')"
+                },
                 "limit": {
                     "type": "integer",
-                    "description": "Maximum positions to return. Default 20.",
-                    "default": 20
+                    "description": "Maximum positions to return. Default 5.",
+                    "default": 5
                 }
             },
-            "required": ["username"]
+            "required": []
         }
     }
 }
@@ -543,6 +686,35 @@ TOOL_ENGINE_CORRELATION = {
     }
 }
 
+# ============================================================================
+# CHESS-GPT INTERNAL LEARNING/INTUITION TOOLS
+# ============================================================================
+
+TOOL_EXTEND_BASELINE_INTUITION = {
+    "type": "function",
+    "function": {
+        "name": "extend_baseline_intuition",
+        "description": "Re-run the baseline D2→D16 exploration (two-pass: from current FEN, then after D16 best move) with larger budgets to extend the PGN/tree deterministically.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "fen": {"type": "string", "description": "FEN to analyze (optional if current board state exists in context)"},
+                "d2_depth": {"type": "integer", "description": "Shallow depth (default 2)"},
+                "d16_depth": {"type": "integer", "description": "Deep depth (default 16)"},
+                "branching_limit": {"type": "integer", "description": "How many overestimated branches to explore (default 6)"},
+                "max_pv_plies": {"type": "integer", "description": "Max PV plies to include in PGN/tree (default 24)"},
+                "pgn_max_chars": {"type": "integer", "description": "Cap PGN size (default 24000; 0 means unlimited)"},
+                "timeout_s": {"type": "number", "description": "Timeout budget for scan (default 30.0)"},
+                "motifs_max_pattern_plies": {"type": "integer", "description": "Max motif pattern length in plies (default 5)"},
+                "motifs_top": {"type": "integer", "description": "Number of motifs returned (default 40)"},
+                "motifs_max_line_plies": {"type": "integer", "description": "Max line length used for motif mining (default 14)"},
+                "motifs_max_branch_lines": {"type": "integer", "description": "Max branch lines considered for motif mining (default 20)"},
+            },
+            "required": [],
+        },
+    },
+}
+
 TOOL_PLAYER_BASELINE = {
     "type": "function",
     "function": {
@@ -616,6 +788,64 @@ TOOL_WEB_SEARCH = {
     }
 }
 
+TOOL_SET_AI_GAME = {
+    "type": "function",
+    "function": {
+        "name": "set_ai_game",
+        "description": "Enable or disable AI game mode. When user wants to play a game with the AI (e.g., 'let's play', 'play together', 'play a game', 'play from this position'), call this tool with active=true. The AI will then play moves automatically when it's their turn. After calling this tool, continue with normal functionality (analysis, explanation, etc.).",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "active": {
+                    "type": "boolean",
+                    "description": "Enable (true) or disable (false) AI game mode. Set to true when user wants to play a game."
+                },
+                "ai_side": {
+                    "type": "string",
+                    "enum": ["white", "black", "auto"],
+                    "description": "Which color the AI should play. 'auto' means detect from current turn. Use 'white' or 'black' if user explicitly says 'you play as white/black'."
+                },
+                "make_move_now": {
+                    "type": "boolean",
+                    "description": "If true, the AI will make a move immediately if it's their turn. Set to true if user says 'play this turn' or 'make a move'."
+                }
+            },
+            "required": ["active"]
+        }
+    }
+}
+
+# ============================================================================
+# TREE-FIRST TOOLS (D2/D16 move tree)
+# ============================================================================
+
+TOOL_TREE_SEARCH = {
+    "type": "function",
+    "function": {
+        "name": "tree_search",
+        "description": "Search the backend D2/D16 move tree (per thread/tab) for moves/tags/text and return ranked matches (mainline first, then deeper deviations).",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "thread_id": {
+                    "type": "string",
+                    "description": "Tab/thread id that owns the tree (use the current conversation thread/tab id)."
+                },
+                "query": {
+                    "type": "string",
+                    "description": "Search query. Supports move:\"SAN\" for exact SAN match, otherwise substring search across scan artifacts."
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Max results to return (default 25).",
+                    "default": 25
+                }
+            },
+            "required": ["thread_id", "query"]
+        }
+    }
+}
+
 # ============================================================================
 # ALL TOOLS LIST
 # ============================================================================
@@ -625,6 +855,7 @@ ALL_TOOLS = [
     # TOOL_ANALYZE_MOVE,      # Removed - handled by auto-analysis cache instead
     TOOL_REVIEW_FULL_GAME,
     TOOL_FETCH_AND_REVIEW_GAMES,
+    TOOL_SELECT_GAMES,
     TOOL_GENERATE_TRAINING,
     TOOL_GET_LESSON,
     TOOL_GENERATE_OPENING_LESSON,
@@ -635,14 +866,15 @@ ALL_TOOLS = [
     TOOL_SAVE_POSITION,
     TOOL_CREATE_COLLECTION,
     TOOL_SETUP_POSITION,
+    TOOL_SET_AI_GAME,
     # Investigation tools
     TOOL_INVESTIGATE,
     TOOL_WEB_SEARCH
 ]
 
 # Tool categories for selective availability
-ANALYSIS_TOOLS = [TOOL_ANALYZE_POSITION, TOOL_ANALYZE_MOVE, TOOL_REVIEW_FULL_GAME]
-WORKFLOW_TOOLS = [TOOL_FETCH_AND_REVIEW_GAMES, TOOL_GENERATE_TRAINING, TOOL_GET_LESSON, TOOL_GENERATE_OPENING_LESSON]
+ANALYSIS_TOOLS = [TOOL_ANALYZE_POSITION, TOOL_ANALYZE_MOVE, TOOL_REVIEW_FULL_GAME, TOOL_EXTEND_BASELINE_INTUITION, TOOL_TREE_SEARCH]
+WORKFLOW_TOOLS = [TOOL_FETCH_AND_REVIEW_GAMES, TOOL_SELECT_GAMES, TOOL_GENERATE_TRAINING, TOOL_GET_LESSON, TOOL_GENERATE_OPENING_LESSON, TOOL_SET_AI_GAME]
 DATA_TOOLS = [TOOL_QUERY_GAMES, TOOL_GET_GAME_DETAILS, TOOL_QUERY_POSITIONS, TOOL_GET_TRAINING_STATS]
 WRITE_TOOLS = [TOOL_SAVE_POSITION, TOOL_CREATE_COLLECTION]
 INVESTIGATION_TOOLS = [

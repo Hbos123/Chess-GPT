@@ -80,6 +80,8 @@ export interface PlayMoveResponse {
   legal: boolean;
   user_move_san: string;
   engine_move_san?: string;
+  // Some flows (e.g. opening lesson side-adjust) use the engine's best move SAN.
+  best_move_san?: string;
   new_fen?: string;
   eval_cp_after?: number;
   commentary_points?: string[];
@@ -139,7 +141,7 @@ export type Mode = "PLAY" | "ANALYZE" | "TACTICS" | "DISCUSS";
 
 export interface ChatMessage {
   id?: string;
-  role: "user" | "assistant" | "system" | "graph" | "button" | "expandable_table";
+  role: "user" | "assistant" | "system" | "graph" | "button" | "expandable_table" | "board";
   content: string;
   meta?: any;
   graphData?: any[];
@@ -149,6 +151,7 @@ export interface ChatMessage {
   tableContent?: string;
   timestamp?: Date;
   fen?: string;  // Track which position this message was sent from
+  tabId?: string; // Scope messages to a specific board tab
 }
 
 export interface AppState {

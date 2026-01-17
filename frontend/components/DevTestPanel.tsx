@@ -8,6 +8,7 @@
 'use client';
 
 import { useState } from 'react';
+import { getBackendBase } from '@/lib/backendBase';
 
 interface TestResult {
   name: string;
@@ -20,12 +21,13 @@ export default function DevTestPanel() {
   const [isOpen, setIsOpen] = useState(false);
   const [results, setResults] = useState<TestResult[]>([]);
   const [isRunning, setIsRunning] = useState(false);
+  const BACKEND_URL = getBackendBase();
 
   const tests = [
     {
       name: 'Engine Health',
       run: async () => {
-        const response = await fetch('http://localhost:8000/meta');
+        const response = await fetch(`${BACKEND_URL}/meta`);
         const data = await response.json();
         if (data.name === 'Chess GPT') {
           return { passed: true, message: `Version ${data.version}` };
@@ -36,7 +38,7 @@ export default function DevTestPanel() {
     {
       name: 'Engine Metrics',
       run: async () => {
-        const response = await fetch('http://localhost:8000/engine/metrics');
+        const response = await fetch(`${BACKEND_URL}/engine/metrics`);
         const data = await response.json();
         return { 
           passed: true, 
@@ -49,7 +51,7 @@ export default function DevTestPanel() {
       run: async () => {
         const fen = 'rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1';
         const response = await fetch(
-          `http://localhost:8000/analyze_position?fen=${encodeURIComponent(fen)}&depth=10&lines=2`
+          `${BACKEND_URL}/analyze_position?fen=${encodeURIComponent(fen)}&depth=10&lines=2`
         );
         const data = await response.json();
         if ('eval_cp' in data && 'candidate_moves' in data) {
@@ -61,7 +63,7 @@ export default function DevTestPanel() {
     {
       name: 'Play Move',
       run: async () => {
-        const response = await fetch('http://localhost:8000/play_move', {
+        const response = await fetch(`${BACKEND_URL}/play_move`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -81,7 +83,7 @@ export default function DevTestPanel() {
     {
       name: 'Confidence Tree',
       run: async () => {
-        const response = await fetch('http://localhost:8000/confidence/raise_move', {
+        const response = await fetch(`${BACKEND_URL}/confidence/raise_move`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({

@@ -180,6 +180,24 @@ def summarize_analysis_data(data: Dict[str, Any], max_chars: int) -> str:
                 eval_str = f"+{eval_val/100:.2f}" if eval_val >= 0 else f"{eval_val/100:.2f}"
                 analysis_parts.append(f"eval: {eval_str}")
         
+        # CRITICAL: Extract candidate moves for move testing
+        candidate_moves = []
+        if "candidate_moves" in value:
+            candidate_moves = value["candidate_moves"]
+        elif "endpoint_response" in value and isinstance(value["endpoint_response"], dict):
+            candidate_moves = value["endpoint_response"].get("candidate_moves", [])
+        
+        if candidate_moves:
+            # Extract top 5 candidate moves with their evals
+            moves_list = []
+            for i, cand in enumerate(candidate_moves[:5]):
+                move = cand.get("move", cand.get("move_san", "?"))
+                eval_cp = cand.get("eval_cp", 0)
+                eval_str = f"+{eval_cp/100:.2f}" if eval_cp >= 0 else f"{eval_cp/100:.2f}"
+                moves_list.append(f"{move} ({eval_str})")
+            if moves_list:
+                analysis_parts.append(f"CANDIDATE MOVES: {', '.join(moves_list)}")
+        
         if "best_move" in value:
             analysis_parts.append(f"best: {value['best_move']}")
         

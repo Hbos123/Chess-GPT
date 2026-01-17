@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import TrainingSession from "./TrainingSession";
+import { getBackendBase } from "@/lib/backendBase";
 
 interface TrainingManagerProps {
   onClose: () => void;
@@ -14,6 +15,7 @@ export default function TrainingManager({
   initialAnalyzedGames,
   initialUsername
 }: TrainingManagerProps) {
+  const BACKEND_BASE = getBackendBase();
   const [username, setUsername] = useState(initialUsername || "");
   const [mode, setMode] = useState<"feed-through" | "standalone">(
     initialAnalyzedGames ? "feed-through" : "standalone"
@@ -50,7 +52,7 @@ export default function TrainingManager({
     try {
       // Create training session
       setProgressMessage("Creating personalized training session...");
-      const response = await fetch("http://localhost:8000/create_training_session", {
+      const response = await fetch(`${BACKEND_BASE}/create_training_session`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

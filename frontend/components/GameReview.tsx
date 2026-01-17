@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { getBackendBase } from "@/lib/backendBase";
 
 interface GameReviewProps {
   pgn: string;
@@ -11,6 +12,7 @@ export default function GameReview({ pgn, onReviewComplete }: GameReviewProps) {
   const [isReviewing, setIsReviewing] = useState(false);
   const [progress, setProgress] = useState(0);
   const [report, setReport] = useState<any>(null);
+  const BACKEND_BASE = getBackendBase();
 
   const handleReview = async () => {
     if (!pgn || pgn.trim().length === 0) {
@@ -24,7 +26,7 @@ export default function GameReview({ pgn, onReviewComplete }: GameReviewProps) {
     try {
       // Call backend to review game
       // This is a simplified version - full implementation would show progress
-      const response = await fetch(`http://localhost:8000/review_game?pgn_string=${encodeURIComponent(pgn)}`, {
+      const response = await fetch(`${BACKEND_BASE}/review_game?pgn_string=${encodeURIComponent(pgn)}`, {
         method: 'POST'
       });
 

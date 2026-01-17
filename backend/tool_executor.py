@@ -5,6 +5,24 @@ Routes and executes tool calls from LLM
 
 from typing import Dict, Any, Optional, List
 import json
+import os
+import asyncio
+
+
+def _safe_float(x, default: float = 0.0) -> float:
+    """
+    Convert numeric-ish values to float, defaulting on None/invalid.
+    Avoids runtime crashes when formatting with :0.0f/:0.1f etc.
+    """
+    try:
+        if x is None:
+            return default
+        # Avoid bool surprising formatting/comparisons
+        if isinstance(x, bool):
+            return float(x)
+        return float(x)
+    except Exception:
+        return default
 
 
 def translate_tag_to_natural_english(tag_name: str, context: str = "default") -> str:
@@ -137,7 +155,16 @@ class ToolExecutor:
         training_planner,
         srs_scheduler,
         supabase_client,
-        openai_client
+        openai_client,
+        llm_router=None,
+        game_window_manager=None,
+        # Optional injected callbacks (preferred). If omitted, we fall back to importing,
+        # but note: when backend is launched via `python main.py`, importing `main`
+        # creates a *second module copy* (module name `main` vs `__main__`) and will
+        # NOT share initialized globals like `engine_pool_instance`.
+        review_game_internal_fn=None,
+        analyze_fen_fn=None,
+        save_error_positions_fn=None,
     ):
         self.engine_queue = engine_queue
         self.game_fetcher = game_fetcher
@@ -147,6 +174,8 @@ class ToolExecutor:
         self.srs_scheduler = srs_scheduler
         self.supabase_client = supabase_client
         self.openai_client = openai_client
+        self.llm_router = llm_router
+        self.game_window_manager = game_window_manager
         
         # Initialize Personal Review System managers
         if supabase_client:
@@ -158,12 +187,30 @@ class ToolExecutor:
             self.stats_manager = None
             self.archive_manager = None
         
-        # Import internal functions we need
-        from main import _review_game_internal, analyze_fen, _generate_opening_lesson_internal, _save_error_positions
-        self.review_game_internal = _review_game_internal
-        self.analyze_fen = analyze_fen
-        self.generate_opening_lesson_internal = _generate_opening_lesson_internal
-        self.save_error_positions = _save_error_positions
+        # Prefer injected callbacks to avoid module-duplication issues.
+        self.review_game_internal = review_game_internal_fn
+        self.analyze_fen = analyze_fen_fn
+        self.save_error_positions = save_error_positions_fn
+
+        # Import internal functions we need (with graceful fallback)
+        # (Only used when not injected, e.g. in isolated scripts.)
+        if self.review_game_internal is None or self.analyze_fen is None or self.save_error_positions is None:
+            try:
+                from main import _review_game_internal, analyze_fen, _save_error_positions
+                self.review_game_internal = self.review_game_internal or _review_game_internal
+                self.analyze_fen = self.analyze_fen or analyze_fen
+                self.save_error_positions = self.save_error_positions or _save_error_positions
+            except ImportError as e:
+                print(f"   ⚠️ Tool executor: Some imports failed: {e}")
+                self.review_game_internal = None
+                self.analyze_fen = None
+                self.save_error_positions = None
+        
+        try:
+            from main import _generate_opening_lesson_internal
+            self.generate_opening_lesson_internal = _generate_opening_lesson_internal
+        except ImportError:
+            self.generate_opening_lesson_internal = None
     
     async def execute_tool(self, tool_name: str, arguments: Dict[str, Any], context: Dict = None, status_callback = None) -> Dict[str, Any]:
         """
@@ -189,8 +236,10 @@ class ToolExecutor:
                 return await self._analyze_move(arguments, context)
             elif tool_name == "review_full_game":
                 return await self._review_full_game(arguments, status_callback)
-            el            if tool_name == "fetch_and_review_games":
+            elif tool_name == "fetch_and_review_games":
                 return await self._fetch_and_review_games(arguments, status_callback, context)
+            elif tool_name == "select_games":
+                return await self._select_games(arguments, context)
             elif tool_name == "generate_training_session":
                 return await self._generate_training_session(arguments)
             elif tool_name == "get_lesson":
@@ -202,7 +251,7 @@ class ToolExecutor:
             elif tool_name == "get_game_details":
                 return self._get_game_details(arguments)
             elif tool_name == "query_positions":
-                return self._query_positions(arguments)
+                return self._query_positions(arguments, context)
             elif tool_name == "get_training_stats":
                 return self._get_training_stats(arguments)
             elif tool_name == "save_position":
@@ -211,6 +260,8 @@ class ToolExecutor:
                 return self._create_collection(arguments)
             elif tool_name == "setup_position":
                 return self._setup_position(arguments, context)
+            elif tool_name == "set_ai_game":
+                return self._set_ai_game(arguments, context)
             # Investigation tools
             elif tool_name == "investigate":
                 return await self._investigate(arguments, context)
@@ -224,6 +275,10 @@ class ToolExecutor:
                 return await self._calculate_baseline(arguments)
             elif tool_name == "detect_anomalies":
                 return await self._detect_anomalies(arguments)
+            elif tool_name == "extend_baseline_intuition":
+                return await self._extend_baseline_intuition(arguments, context)
+            elif tool_name == "tree_search":
+                return await self._tree_search(arguments, context)
             else:
                 return {"error": f"Unknown tool: {tool_name}"}
         
@@ -236,6 +291,48 @@ class ToolExecutor:
     # ========================================================================
     # HIGH-LEVEL TOOL IMPLEMENTATIONS
     # ========================================================================
+
+    async def _extend_baseline_intuition(self, args: Dict, context: Dict) -> Dict:
+        """
+        Re-run baseline D2/D16 (two-pass) with higher budgets to extend PGN/tree depth.
+        Deterministic: same FEN + same policy yields same structure.
+        """
+        fen = context.get("board_state") or args.get("fen") or context.get("fen") if context else args.get("fen")
+        if not fen:
+            return {"error": "No FEN provided and no current position in context"}
+
+        from skills.baseline_intuition import run_baseline_intuition, BaselineIntuitionPolicy
+        from scan_service import ScanPolicy
+        from skills.motifs import MotifPolicy
+
+        scan_pol = ScanPolicy(
+            d2_depth=int(args.get("d2_depth", 2)),
+            d16_depth=int(args.get("d16_depth", 16)),
+            branching_limit=int(args.get("branching_limit", 6)),
+            max_pv_plies=int(args.get("max_pv_plies", 24)),
+            include_pgn=True,
+            pgn_max_chars=int(args.get("pgn_max_chars", 24000)),
+            timeout_s=float(args.get("timeout_s", 30.0)),
+        )
+        motif_pol = MotifPolicy(
+            max_pattern_plies=int(args.get("motifs_max_pattern_plies", 5)),
+            motifs_top=int(args.get("motifs_top", 40)),
+            max_line_plies=int(args.get("motifs_max_line_plies", 14)),
+            max_branch_lines=int(args.get("motifs_max_branch_lines", 20)),
+        )
+        pol = BaselineIntuitionPolicy(scan=scan_pol, motifs=motif_pol)
+        baseline = await run_baseline_intuition(
+            engine_pool_instance=(context.get("engine_pool_instance") if context else None) or getattr(self, "engine_pool", None),
+            engine_queue=(context.get("engine_queue") if context else None) or getattr(self, "engine_queue", None),
+            start_fen=fen,
+            policy=pol,
+        )
+
+        return {
+            "success": True,
+            "fen": fen,
+            "baseline_intuition": baseline,
+        }
     
     async def _analyze_position(self, args: Dict, context: Dict) -> Dict:
         """
@@ -248,8 +345,12 @@ class ToolExecutor:
             return {"error": "No FEN provided and no current position in context"}
         
         # CHECK FOR CACHED ANALYSIS FIRST (from auto-analysis after moves)
+        # IMPORTANT: In DISCUSS/ANALYZE, cached_analysis is a legacy shortcut that can bypass
+        # D2/D16 scanning. Only allow cached_analysis in PLAY/lesson/AI-game loops.
         cached_analysis = context.get("cached_analysis") if context else None
-        if cached_analysis:
+        mode = (context or {}).get("mode")
+        allow_cache = str(mode).upper() == "PLAY" or bool((context or {}).get("ai_game_active") or (context or {}).get("lesson_mode"))
+        if cached_analysis and allow_cache:
             print(f"   ✅ Using pre-computed analysis from cache (instant!)")
             print(f"      Eval: {cached_analysis.get('eval_cp', 0)}cp")
             return {
@@ -273,7 +374,7 @@ class ToolExecutor:
         print(f"   Using FEN: {fen}")
         
         # Call the SAME /analyze_position endpoint the UI button uses
-        # Use light_mode=True by default for speed (game review uses this)
+        # Use light_mode=False by default for full analysis
         # This gives us the full structured response with candidates, themes, threats
         import aiohttp
         
@@ -286,8 +387,9 @@ class ToolExecutor:
                     "light_mode": light_mode
                 }
                 
+                backend_port = int(os.getenv("BACKEND_PORT", "8001"))
                 async with session.get(
-                    "http://localhost:8000/analyze_position",
+                    f"http://localhost:{backend_port}/analyze_position",
                     params=params,
                     timeout=aiohttp.ClientTimeout(total=60)
                 ) as response:
@@ -393,51 +495,67 @@ class ToolExecutor:
         except Exception as e:
             return {"error": f"Invalid move notation '{move_san}': {str(e)}. Position: {fen[:60]}"}
         
-        # Analyze before
-        info_before = await self.engine_queue.enqueue(self.engine_queue.engine.analyse, board, chess.engine.Limit(depth=depth), multipv=3)
-        best_move = info_before[0]["pv"][0]
-        best_san = board.san(best_move)
-        
-        # Get alternatives in SAN BEFORE modifying the board
-        alternatives = [board.san(info_before[i]["pv"][0]) for i in range(min(3, len(info_before)))]
-        
-        score_before = info_before[0]["score"].white()
-        best_eval = score_before.score(mate_score=10000) if not score_before.is_mate() else (10000 if score_before.mate() > 0 else -10000)
-        
-        # Make the move
-        board.push(move)
-        
-        # Analyze after
-        info_after = await self.engine_queue.enqueue(self.engine_queue.engine.analyse, board, chess.engine.Limit(depth=depth))
-        score_after = info_after["score"].white()
-        played_eval = score_after.score(mate_score=10000) if not score_after.is_mate() else (10000 if score_after.mate() > 0 else -10000)
-        
-        # Calculate quality
-        cp_loss = abs(best_eval - played_eval)
-        is_best = (move_san == best_san)
-        
-        if cp_loss < 20:
-            quality = "excellent"
-        elif cp_loss < 50:
-            quality = "good"
-        elif cp_loss < 100:
-            quality = "inaccuracy"
-        elif cp_loss < 200:
-            quality = "mistake"
-        else:
-            quality = "blunder"
-        
+        # Tree-first: call backend /analyze_move which is rebased to D2/D16.
+        import aiohttp
+        try:
+            backend_port = int(os.getenv("BACKEND_PORT", "8001"))
+            async with aiohttp.ClientSession() as session:
+                params = {"fen": fen, "move_san": move_san, "depth": int(depth)}
+                async with session.post(
+                    f"http://localhost:{backend_port}/analyze_move",
+                    params=params,
+                    timeout=aiohttp.ClientTimeout(total=90),
+                ) as response:
+                    if response.status != 200:
+                        error_text = await response.text()
+                        return {"error": f"analyze_move failed: {error_text}"}
+                    result = await response.json()
+        except Exception as e:
+            return {"error": f"Error calling analyze_move endpoint: {str(e)}"}
+
+        # Normalize to the tool’s expected compact shape (keep keys stable for downstream formatters)
+        pmr = (result or {}).get("playedMoveReport") or {}
         return {
             "success": True,
             "move": move_san,
-            "is_best_move": is_best,
-            "quality": quality,
-            "cp_loss": cp_loss,
-            "best_move": best_san,
-            "eval_before": best_eval,
-            "eval_after": played_eval,
-            "alternatives": alternatives
+            "is_best_move": bool(pmr.get("is_best_move") or result.get("is_best_move")),
+            "quality": "d2d16",  # legacy field; callers should use d2d16 payload for detail
+            "cp_loss": int(pmr.get("cp_loss") or result.get("cp_loss") or 0),
+            "best_move": str(pmr.get("best_move_d16_san") or result.get("best_move_d16_san") or result.get("best_move_san") or ""),
+            "eval_before": int(pmr.get("eval_before_cp") or result.get("eval_before_cp") or 0),
+            "eval_after": int(pmr.get("eval_after_cp") or result.get("eval_after_cp") or 0),
+            "alternatives": [],
+            "endpoint_response": result,
         }
+
+    async def _tree_search(self, args: Dict, context: Dict) -> Dict:
+        """
+        Search backend D2/D16 move tree via /board/tree/search.
+        """
+        thread_id = args.get("thread_id") or (context or {}).get("task_id") or (context or {}).get("thread_id") or (context or {}).get("session_id")
+        query = args.get("query")
+        limit = int(args.get("limit", 25))
+        if not thread_id:
+            return {"error": "tree_search requires thread_id (tab/thread id)."}
+        if not query:
+            return {"error": "tree_search requires query."}
+
+        import aiohttp
+        try:
+            backend_port = int(os.getenv("BACKEND_PORT", "8001"))
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    f"http://localhost:{backend_port}/board/tree/search",
+                    json={"thread_id": thread_id, "query": query, "limit": limit},
+                    timeout=aiohttp.ClientTimeout(total=30),
+                ) as response:
+                    if response.status != 200:
+                        error_text = await response.text()
+                        return {"error": f"tree_search failed: {error_text}"}
+                    data = await response.json()
+                    return {"success": True, "thread_id": thread_id, "query": query, "results": data.get("results", [])}
+        except Exception as e:
+            return {"error": f"tree_search error: {str(e)}"}
     
     async def _review_full_game(self, args: Dict, status_callback = None) -> Dict:
         """Review complete game"""
@@ -480,6 +598,213 @@ class ToolExecutor:
             "review": result,
             "summary": summary
         }
+
+    async def _select_games(self, args: Dict, context: Dict = None) -> Dict[str, Any]:
+        """
+        Fetch a candidate pool of games and deterministically select specific games.
+        This is intentionally *non-analytic* (no Stockfish).
+        """
+        username = args.get("username")
+        platform = args.get("platform", "chess.com")
+
+        # Auto-inject from context.connected_accounts if missing
+        if (not username or not platform) and context:
+            try:
+                connected_accounts = context.get("connected_accounts", [])
+                if isinstance(connected_accounts, list) and connected_accounts:
+                    account = connected_accounts[0] if isinstance(connected_accounts[0], dict) else {}
+                    username = username or account.get("username")
+                    platform = platform or account.get("platform", "chess.com")
+                    if platform in ("chesscom", "chess_com"):
+                        platform = "chess.com"
+                    print(f"   📎 Auto-injected from context.connected_accounts: {username} on {platform}")
+            except Exception:
+                pass
+
+        missing_fields = []
+        if not username:
+            missing_fields.append("username")
+        if not platform:
+            missing_fields.append("platform")
+        if missing_fields:
+            return {
+                "success": False,
+                "error": "info_required",
+                "missing_fields": missing_fields,
+                "message": "Missing required fields for select_games: " + ", ".join(missing_fields),
+            }
+
+        candidate_fetch_count = int(args.get("candidate_fetch_count", 50) or 50)
+        # Ensure we have a big enough pool to satisfy category slices (rapid/bullet/etc).
+        # The model sometimes emits tiny values (e.g. 1–2), which makes selection look "broken".
+        candidate_fetch_count = max(60, min(candidate_fetch_count, 500))
+        months_back = int(args.get("months_back", 6) or 6)
+        date_from = args.get("date_from")
+        date_to = args.get("date_to")
+
+        global_unique = bool(args.get("global_unique", True))
+        global_limit = args.get("global_limit")
+        try:
+            global_limit = int(global_limit) if global_limit is not None else None
+        except Exception:
+            global_limit = None
+        include_pgn = bool(args.get("include_pgn", False))
+
+        requests = args.get("requests") or []
+        
+        # Auto-infer filters from request names (e.g., "last_rapid_game" -> time_control: "rapid")
+        for req in requests:
+            if not isinstance(req, dict):
+                continue
+            name = str(req.get("name") or "").lower()
+            filters = req.get("filters") or {}
+            if not isinstance(filters, dict):
+                filters = {}
+            
+            # Time control inference from name
+            if "rapid" in name and "time_control" not in filters:
+                filters["time_control"] = "rapid"
+            elif "bullet" in name and "time_control" not in filters:
+                filters["time_control"] = "bullet"
+            elif "blitz" in name and "time_control" not in filters:
+                filters["time_control"] = "blitz"
+            elif "classical" in name and "time_control" not in filters:
+                filters["time_control"] = "classical"
+            elif "daily" in name or "correspond" in name:
+                if "time_control" not in filters:
+                    filters["time_control"] = "daily"
+            
+            # Result inference from name
+            if "win" in name or "won" in name:
+                if "result" not in filters:
+                    filters["result"] = "win"
+            elif "loss" in name or "lost" in name:
+                if "result" not in filters:
+                    filters["result"] = "loss"
+            elif "draw" in name:
+                if "result" not in filters:
+                    filters["result"] = "draw"
+            
+            # Color inference from name
+            if "black" in name:
+                if "color" not in filters:
+                    filters["color"] = "black"
+            elif "white" in name:
+                if "color" not in filters:
+                    filters["color"] = "white"
+            
+            req["filters"] = filters
+
+        print(
+            "   📋 select_games args: "
+            f"username={username}, platform={platform}, candidate_fetch_count={candidate_fetch_count}, "
+            f"months_back={months_back}, date_from={date_from}, date_to={date_to}, "
+            f"global_unique={global_unique}, global_limit={global_limit}, requests={len(requests)}"
+        )
+        for i, req in enumerate(requests):
+            if isinstance(req, dict):
+                print(f"   📋   request[{i}]: name={req.get('name')}, filters={req.get('filters')}")
+
+        from tools.game_filters import fetch_games_filtered
+        from tools.game_select import select_games_from_candidates
+
+        try:
+            filtered = await fetch_games_filtered(
+                username=username,
+                platform=platform,
+                date_from=date_from,
+                date_to=date_to,
+                months_back=months_back,
+                max_games=candidate_fetch_count,
+            )
+        except Exception as e:
+            import traceback
+            print(f"[TOOL_EXECUTOR] Error calling fetch_games_filtered: {e}")
+            traceback.print_exc()
+            return {
+                "success": False,
+                "error": "fetch_failed",
+                "message": f"Failed to fetch games: {str(e)}",
+            }
+        
+        # Check for error in response
+        if isinstance(filtered, dict) and filtered.get("error"):
+            error_msg = filtered.get("error", "Unknown error")
+            print(f"[TOOL_EXECUTOR] fetch_games_filtered returned error: {error_msg}")
+            return {
+                "success": False,
+                "error": "fetch_failed",
+                "message": f"Failed to fetch games: {error_msg}",
+            }
+        
+        candidates = filtered.get("games", []) or []
+        if not candidates:
+            return {
+                "success": False,
+                "error": "no_games",
+                "message": f"No games found for {username} on {platform}",
+            }
+
+        sel = select_games_from_candidates(
+            candidates=candidates,
+            username=username,
+            requests=requests,
+            global_unique=global_unique,
+            global_limit=global_limit,
+        )
+
+        # Optionally enrich selected refs with PGN so the frontend can open a game in a new tab.
+        if include_pgn:
+            try:
+                by_url = {}
+                by_id = {}
+                for g in candidates:
+                    if not isinstance(g, dict):
+                        continue
+                    url = g.get("url")
+                    gid = g.get("game_id")
+                    if isinstance(url, str) and url:
+                        by_url[url] = g
+                    if gid is not None:
+                        by_id[str(gid)] = g
+
+                selected = sel.get("selected") if isinstance(sel, dict) else None
+                if isinstance(selected, dict):
+                    pgns_added = 0
+                    for _, arr in selected.items():
+                        if not isinstance(arr, list):
+                            continue
+                        for ref in arr:
+                            if not isinstance(ref, dict):
+                                continue
+                            if ref.get("pgn"):
+                                pgns_added += 1
+                                continue
+                            src = None
+                            u = ref.get("url")
+                            gid = ref.get("game_id")
+                            if isinstance(u, str) and u in by_url:
+                                src = by_url.get(u)
+                            elif gid is not None and str(gid) in by_id:
+                                src = by_id.get(str(gid))
+                            if isinstance(src, dict):
+                                pgn = src.get("pgn")
+                                if isinstance(pgn, str) and pgn.strip():
+                                    ref["pgn"] = pgn
+                                    pgns_added += 1
+                    print(f"[TOOL_EXECUTOR] Added PGN to {pgns_added} selected game refs")
+            except Exception:
+                pass
+
+        return {
+            "success": True,
+            "platform": platform,
+            "username": username,
+            "total_candidates": sel.get("total_candidates", 0),
+            "selected": sel.get("selected", {}),
+            "selected_flat": sel.get("selected_flat", []),
+            "unmet": sel.get("unmet", []),
+        }
     
     async def _fetch_and_review_games(self, args: Dict, status_callback = None, context: Dict = None) -> Dict:
         """Workflow: Fetch + analyze games"""
@@ -487,6 +812,22 @@ class ToolExecutor:
         
         username = args.get("username")
         platform = args.get("platform", "chess.com")
+        
+        # Fallback to context.connected_accounts if username/platform not provided
+        if not username or not platform:
+            if context:
+                connected_accounts = context.get("connected_accounts", [])
+                if connected_accounts:
+                    account = connected_accounts[0]
+                    if not username:
+                        username = account.get("username")
+                    if not platform:
+                        platform = account.get("platform", "chess.com")
+                    # Normalize platform
+                    if platform in ("chesscom", "chess_com"):
+                        platform = "chess.com"
+                    print(f"   📎 Auto-injected from context.connected_accounts: {username} on {platform}")
+        
         # Support both 'count' and 'max_games' as parameters
         max_games = args.get("count") or args.get("max_games", 5)
         games_to_analyze = args.get("games_to_analyze", min(3, max_games))
@@ -495,6 +836,19 @@ class ToolExecutor:
         time_control = args.get("time_control", "all")
         result_filter = args.get("result_filter", "all")
         review_subject = args.get("review_subject", "player")  # player|opponent|both
+
+        # Advanced selection controls (LLM-controlled)
+        months_back = int(args.get("months_back", 6) or 6)
+        date_from = args.get("date_from")
+        date_to = args.get("date_to")
+        opponent = args.get("opponent")
+        opening_eco = args.get("opening_eco")
+        color = args.get("color")
+        min_moves = args.get("min_moves")
+        min_opponent_rating = args.get("min_opponent_rating")
+        max_opponent_rating = args.get("max_opponent_rating")
+        sort = (args.get("sort") or "date_desc").strip().lower()
+        offset = int(args.get("offset", 0) or 0)
         
         # Get interpreter's intent (injected by main.py)
         interpreter_intent = args.get("interpreter_intent", "")
@@ -504,7 +858,13 @@ class ToolExecutor:
             if status_callback:
                 await status_callback(phase, message, progress, replace)
         
-        print(f"   📋 fetch_and_review_games args: username={username}, platform={platform}, count={max_games}")
+        print(
+            "   📋 fetch_and_review_games args: "
+            f"username={username}, platform={platform}, count={max_games}, analyze={games_to_analyze}, "
+            f"time_control={time_control}, result_filter={result_filter}, months_back={months_back}, "
+            f"date_from={date_from}, date_to={date_to}, opponent={opponent}, opening_eco={opening_eco}, "
+            f"color={color}, offset={offset}, sort={sort}"
+        )
         
         # Check if both username and platform are provided
         missing_fields = []
@@ -537,9 +897,75 @@ class ToolExecutor:
         # Step 1: Fetch games
         await emit_status(f"Fetching games from {platform}...", 0.0)
         print(f"📥 Fetching games for {username} from {platform}...")
-        games = await self.game_fetcher.fetch_games(username, platform, max_games, 6)
+
+        # Normalize filters for fetch_games_filtered
+        tc_filter = None
+        if isinstance(time_control, str) and time_control.lower() not in ("all", ""):
+            tc_filter = time_control.lower()
+
+        rf = (result_filter or "all").lower().strip() if isinstance(result_filter, str) else "all"
+        if rf in ("wins", "win"):
+            result_norm = "win"
+        elif rf in ("losses", "loss"):
+            result_norm = "loss"
+        elif rf in ("draws", "draw"):
+            result_norm = "draw"
+        else:
+            result_norm = None
+
+        color_norm = None
+        if isinstance(color, str):
+            c = color.lower().strip()
+            if c in ("white", "black"):
+                color_norm = c
+
+        # Fetch extra for filtering + offset
+        fetch_cap = int(max_games) + int(offset)
+        fetch_cap = max(1, fetch_cap)
+
+        from tools.game_filters import fetch_games_filtered
+        filtered = await fetch_games_filtered(
+            username=username,
+            platform=platform,
+            date_from=date_from,
+            date_to=date_to,
+            months_back=months_back,
+            opponent=opponent,
+            opening_eco=opening_eco,
+            time_control=tc_filter,
+            result=result_norm,
+            min_opponent_rating=min_opponent_rating,
+            max_opponent_rating=max_opponent_rating,
+            color=color_norm,
+            min_moves=min_moves,
+            max_games=max(50, fetch_cap),
+        )
+        games = filtered.get("games", [])
+
+        # Filter by game_id if provided
+        game_id = args.get("game_id")
+        if game_id:
+            # Filter games to find the one matching the game_id
+            matching_games = [g for g in games if str(g.get("game_id", "")) == str(game_id)]
+            if matching_games:
+                games = matching_games
+                print(f"   ✅ Found game {game_id} in fetched games")
+            else:
+                print(f"   ⚠️ Game {game_id} not found in fetched games, will try to fetch it directly")
+                # Try to fetch the specific game by ID if available
+                # This might require a different API call depending on the platform
+                # For now, we'll proceed with empty list and let the error handler catch it
+        
+        # Apply user-controlled sort + offset + limit
+        reverse = True if sort != "date_asc" else False
+        games = sorted(games, key=lambda g: (g.get("date") or ""), reverse=reverse)
+        if offset:
+            games = games[offset:]
+        games = games[:max_games]
         
         if not games:
+            if game_id:
+                return {"error": f"Game {game_id} not found for {username} on {platform}"}
             return {"error": f"No games found for {username} on {platform}"}
         
         await emit_status(f"Fetched {len(games)} game(s)", 0.1)
@@ -589,7 +1015,11 @@ class ToolExecutor:
             # Use the global engine (pass None to use fallback), with move-level callback
             review = await self.review_game_internal(pgn, focus_color, True, depth, None, move_progress_callback)
             
-            if "error" not in review:
+            print(f"      🔍 Review result for game {idx+1}: has_error={'error' in review}, keys={list(review.keys())[:5]}")
+            
+            if "error" in review:
+                print(f"      ⚠️ Review failed for game {idx+1}: {review.get('error', 'unknown error')}")
+            elif "error" not in review:
                 # Preserve original PGN for time-based analysis
                 review["pgn"] = pgn
 
@@ -620,7 +1050,7 @@ class ToolExecutor:
                 # === NEW: Save game with Personal Review System ===
                 if self.archive_manager and self.supabase_client:
                     try:
-                        # Determine review_type (always "full" for now, can be "light" in future)
+                        # Always use full review (light analysis removed)
                         review_type = "full"
                         
                         # Prepare game data for saving
@@ -666,23 +1096,43 @@ class ToolExecutor:
                         # Skip saving if no user_id (can't save without authenticated user)
                         if not user_id:
                             print(f"      ⚠️ No user_id available, skipping Personal Review System save")
-                            continue
-                        
-                        # Save game with limit enforcement
-                        game_id = self.archive_manager.save_game_with_limit(user_id, game_data)
-                        
-                        if game_id and review_type == "full":
-                            # Extract and save error positions
-                            ply_records = review.get("ply_records", [])
-                            if ply_records:
-                                positions_saved = await self.save_error_positions(
-                                    ply_records,
-                                    game_id,
-                                    user_id,
-                                    self.supabase_client,
-                                    focus_color
-                                )
-                                print(f"      💾 Saved {positions_saved} error positions for training")
+                        else:
+                            # Save game with limit enforcement
+                            game_id = self.archive_manager.save_game_with_limit(user_id, game_data)
+                            
+                            # Maintain 60-game window after saving
+                            if game_id and self.game_window_manager:
+                                try:
+                                    await self.game_window_manager.maintain_window(user_id)
+                                except Exception as window_err:
+                                    print(f"      ⚠️ Error maintaining game window: {window_err}")
+                            
+                            if game_id and review_type == "full":
+                                # Extract and save moves to normalized tables
+                                ply_records = review.get("ply_records", [])
+                                if ply_records and self.supabase_client:
+                                    try:
+                                        moves_saved = self.supabase_client.save_moves_from_ply_records(
+                                            game_id,
+                                            user_id,
+                                            ply_records
+                                        )
+                                        print(f"      💾 Saved {moves_saved} moves to normalized tables")
+                                    except Exception as moves_err:
+                                        print(f"      ⚠️ Error saving moves to normalized tables: {moves_err}")
+                                        import traceback
+                                        traceback.print_exc()
+                                
+                                # Extract and save error positions
+                                if ply_records:
+                                    positions_saved = await self.save_error_positions(
+                                        ply_records,
+                                        game_id,
+                                        user_id,
+                                        self.supabase_client,
+                                        focus_color
+                                    )
+                                    print(f"      💾 Saved {positions_saved} error positions for training")
                         
                     except Exception as e:
                         print(f"      ⚠️ Error saving game to Personal Review System: {e}")
@@ -690,6 +1140,7 @@ class ToolExecutor:
                         traceback.print_exc()
                 
                 analyzed_games.append(review)
+                print(f"      ✅ Added review to analyzed_games (total: {len(analyzed_games)})")
                 
                 # Status update after completing each game
                 await emit_status(f"Completed game {idx+1}/{total_to_analyze}", game_end_progress, replace=True)
@@ -698,6 +1149,7 @@ class ToolExecutor:
         
         await emit_status(f"Analysis complete", 0.9, replace=True)
         print(f"      ✅ Analyzed {len(analyzed_games)} games")
+        print(f"      🔍 Final analyzed_games length: {len(analyzed_games)}, games fetched: {len(games)}")
         
         # Step 3: Always aggregate for conversational output
         if len(analyzed_games) > 0:
@@ -954,7 +1406,7 @@ Return ONLY valid JSON in this exact format:
 
             def call_openai():
                 return self.openai_client.chat.completions.create(
-                    model="gpt-4o-mini",
+                    model="gpt-5",
                     messages=[
                         {"role": "system", "content": "Return only valid JSON. No markdown. Follow constraints strictly."},
                         {"role": "user", "content": prompt},
@@ -962,12 +1414,23 @@ Return ONLY valid JSON in this exact format:
                     temperature=0.4,
                 )
 
-            loop = asyncio.get_event_loop()
-            import concurrent.futures as _cf
-            with _cf.ThreadPoolExecutor(max_workers=1) as pool:
-                response = await loop.run_in_executor(pool, call_openai)
+            if self.llm_router:
+                parsed = self.llm_router.complete_json(
+                    session_id="default",
+                    stage="walkthrough_preanalysis",
+                    system_prompt="Return only valid JSON. No markdown. Follow constraints strictly.",
+                    user_text=prompt,
+                    temperature=0.4,
+                    model="gpt-5",
+                )
+                content = json.dumps(parsed, ensure_ascii=False)
+            else:
+                loop = asyncio.get_event_loop()
+                import concurrent.futures as _cf
+                with _cf.ThreadPoolExecutor(max_workers=1) as pool:
+                    response = await loop.run_in_executor(pool, call_openai)
 
-            content = (response.choices[0].message.content or "").strip()
+                content = (response.choices[0].message.content or "").strip()
 
             # Best-effort JSON extraction
             try:
@@ -1136,16 +1599,45 @@ Return ONLY valid JSON in this exact format:
             "note": "This tool will work after Supabase integration"
         }
     
-    def _query_positions(self, args: Dict) -> Dict:
-        """Query saved positions"""
-        username = args.get("username")
-        tags = args.get("tags", [])
+    def _query_positions(self, args: Dict, context: Dict = None) -> Dict:
+        """Query saved positions using the new position search tool"""
+        from tools.position_search import search_user_positions
+        
+        # Resolve user_id
+        user_id = args.get("user_id")
+        if not user_id and context:
+            user_id = context.get("user_id") or context.get("profile", {}).get("user_id")
+            
+        if not user_id and self.supabase_client:
+            # Try to get current user if authenticated
+            pass # We'll assume it's passed in context for now
+            
+        if not user_id:
+            return {"success": False, "error": "User not authenticated. Cannot search personal history."}
+
+        tags = args.get("tags")
+        themes = args.get("themes")
+        error_categories = args.get("error_categories")
+        phases = [args.get("phase")] if args.get("phase") else None
+        mover_name = args.get("mover_name")
+        limit = args.get("limit", 5)
+        
+        results = search_user_positions(
+            supabase_client=self.supabase_client,
+            user_id=user_id,
+            tags=tags,
+            themes=themes,
+            error_categories=error_categories,
+            phases=phases,
+            mover_name=mover_name,
+            limit=limit
+        )
         
         return {
             "success": True,
-            "positions_found": 0,
-            "message": "Database integration pending",
-            "note": "This tool will work after Supabase integration"
+            "positions_found": len(results),
+            "positions": results,
+            "message": f"Found {len(results)} positions matching your criteria."
         }
     
     def _get_training_stats(self, args: Dict) -> Dict:
@@ -1212,10 +1704,14 @@ Return ONLY valid JSON in this exact format:
     def _generate_review_narrative(self, summary: Dict, phase_stats: Dict, opening_perf: list, username: str, platform: str, user_query: str = "") -> str:
         """Generate structured Q&A style narrative from personal review stats"""
         
-        total_games = summary.get('total_games', 0)
-        avg_accuracy = summary.get('avg_accuracy', 0)
-        win_rate = summary.get('win_rate', 0) * 100 if summary.get('win_rate') else 0
-        avg_rating = summary.get('avg_rating', 0)
+        total_games = summary.get('total_games', 0) or 0
+        avg_accuracy_raw = summary.get('avg_accuracy')
+        avg_accuracy = float(avg_accuracy_raw) if avg_accuracy_raw is not None else 0.0
+        win_rate_raw = summary.get('win_rate')
+        win_rate = float(win_rate_raw) * 100 if win_rate_raw is not None else 0.0
+        avg_rating = summary.get('avg_rating', 0) or 0
+        platform = platform or "chess.com"
+        username = username or "player"
         
         # 1. OPENING - Conversational introduction
         narrative = f"I just finished analyzing your last **{total_games} games** on **{platform}** as **{username}**. "
@@ -1225,18 +1721,20 @@ Return ONLY valid JSON in this exact format:
         narrative += f"## Your Performance Assessment\n\n"
         
         # Make verdict more conversational based on accuracy
-        if avg_accuracy > 90:
+        if avg_accuracy and avg_accuracy > 90:
             narrative += f"You're playing at an **exceptional level** with **{avg_accuracy:.1f}% accuracy**. "
             narrative += f"Your calculation and decision-making are consistently strong. "
-        elif avg_accuracy > 80:
+        elif avg_accuracy and avg_accuracy > 80:
             narrative += f"You're playing **solidly** at **{avg_accuracy:.1f}% accuracy**, but there's room to optimize. "
             narrative += f"You have a good foundation, but tightening up some specific areas will push you to the next level. "
-        elif avg_accuracy > 70:
+        elif avg_accuracy and avg_accuracy > 70:
             narrative += f"You're showing **decent fundamentals** at **{avg_accuracy:.1f}% accuracy**, but your execution is inconsistent. "
             narrative += f"The good news is that with some focused practice, you can improve significantly. "
-        else:
+        elif avg_accuracy:
             narrative += f"At **{avg_accuracy:.1f}% accuracy**, there's **significant opportunity for improvement**. "
             narrative += f"Don't be discouraged - identifying these weaknesses is the first step to getting stronger. "
+        else:
+            narrative += f"Let me analyze your performance based on the games reviewed.\n\n"
         
         narrative += f"\n\n"
         
@@ -1273,7 +1771,7 @@ Return ONLY valid JSON in this exact format:
         # Check phase performance gaps
         if phase_stats:
             phases_sorted = sorted(
-                [(name, data.get('accuracy', 0)) for name, data in phase_stats.items()],
+                [(name, _safe_float((data or {}).get('accuracy'), 0.0)) for name, data in phase_stats.items()],
                 key=lambda x: x[1]
             )
             weakest = phases_sorted[0]
@@ -1282,11 +1780,11 @@ Return ONLY valid JSON in this exact format:
             
             if gap > 10:
                 justifications.append(
-                    f"**Phase consistency is an issue.** Your {strongest[0]} ({strongest[1]:.1f}%) is {gap:.0f}% stronger than your {weakest[0]} ({weakest[1]:.1f}%). This gap suggests you need focused practice in your weaker phase."
+                    f"**Phase consistency is an issue.** Your {strongest[0]} ({_safe_float(strongest[1], 0.0):.1f}%) is {gap:.0f}% stronger than your {weakest[0]} ({_safe_float(weakest[1], 0.0):.1f}%). This gap suggests you need focused practice in your weaker phase."
                 )
             
             # Highlight if endgame is weak
-            endgame_acc = phase_stats.get('endgame', {}).get('accuracy', 0)
+            endgame_acc = _safe_float(phase_stats.get('endgame', {}).get('accuracy'), 0.0)
             if endgame_acc < 70 and phase_stats.get('endgame', {}).get('move_count', 0) > 0:
                 justifications.append(
                     f"**Your endgame technique needs work.** At {endgame_acc:.1f}% accuracy, you're likely missing conversions or allowing draws in winning positions. This is costing you rating points."
@@ -1295,23 +1793,30 @@ Return ONLY valid JSON in this exact format:
         # Win rate correlation
         if win_rate < 40 and avg_accuracy > 75:
             justifications.append(
-                f"**Something's off with your win conversion.** Your {win_rate:.0f}% win rate is surprisingly low for {avg_accuracy:.1f}% accuracy. You might be losing won positions or struggling in time pressure."
+                f"**Something's off with your win conversion.** Your {_safe_float(win_rate, 0.0):.0f}% win rate is surprisingly low for {_safe_float(avg_accuracy, 0.0):.1f}% accuracy. You might be losing won positions or struggling in time pressure."
             )
         elif win_rate > 60:
             justifications.append(
-                f"**You're good at closing out games.** Your {win_rate:.0f}% win rate shows you know how to convert advantages into wins - that's a valuable skill."
+                f"**You're good at closing out games.** Your {_safe_float(win_rate, 0.0):.0f}% win rate shows you know how to convert advantages into wins - that's a valuable skill."
             )
         
         # Opening performance
         if opening_perf and len(opening_perf) > 0:
-            best_opening = max(opening_perf, key=lambda x: x.get('avg_accuracy', 0))
-            if best_opening.get('avg_accuracy', 0) > avg_accuracy + 5:
+            sanitized = []
+            for op in opening_perf:
+                if not isinstance(op, dict):
+                    continue
+                op2 = dict(op)
+                op2["avg_accuracy"] = _safe_float(op.get("avg_accuracy"), 0.0)
+                sanitized.append(op2)
+            best_opening = max(sanitized, key=lambda x: x.get('avg_accuracy', 0.0)) if sanitized else None
+            if best_opening and best_opening.get('avg_accuracy', 0.0) > avg_accuracy + 5:
                 justifications.append(
                     f"**You have a weapon in your repertoire.** Your {best_opening.get('opening', 'Unknown')} is performing at {best_opening.get('avg_accuracy', 0):.1f}% - well above your average. Keep playing it!"
                 )
             
             # Check for weak openings
-            weak_openings = [op for op in opening_perf if op.get('avg_accuracy', 0) < avg_accuracy - 5]
+            weak_openings = [op for op in sanitized if op.get('avg_accuracy', 0.0) < avg_accuracy - 5]
             if weak_openings:
                 justifications.append(
                     f"**One opening is dragging you down.** Your {weak_openings[0].get('opening', 'Unknown')} is underperforming at {weak_openings[0].get('avg_accuracy', 0):.1f}%. Consider either studying it more or switching to something else."
@@ -1329,6 +1834,7 @@ Return ONLY valid JSON in this exact format:
     def _generate_prioritized_suggestions(self, phase_stats: Dict, avg_accuracy: float, opening_perf: list) -> list:
         """Generate ordered suggestions by impact"""
         suggestions = []
+        avg_accuracy = _safe_float(avg_accuracy, 0.0)
         
         # Priority 1: Fix biggest weakness
         if phase_stats:
@@ -1336,7 +1842,7 @@ Return ONLY valid JSON in this exact format:
             if weakest_phase[1].get('accuracy') is not None and weakest_phase[1].get('accuracy', 100) < 75 and weakest_phase[1].get('move_count', 0) > 0:
                 suggestions.append({
                     'title': f"Master {weakest_phase[0]} technique",
-                    'detail': f"At {weakest_phase[1].get('accuracy', 0):.1f}%, this is costing you games. Study {weakest_phase[0]} fundamentals and practice conversion."
+                    'detail': f"At {_safe_float(weakest_phase[1].get('accuracy'), 0.0):.1f}%, this is costing you games. Study {weakest_phase[0]} fundamentals and practice conversion."
                 })
         
         # Priority 2: Improve consistency
@@ -1348,7 +1854,14 @@ Return ONLY valid JSON in this exact format:
         
         # Priority 3: Opening repertoire
         if opening_perf and len(opening_perf) > 0:
-            weak_openings = [op for op in opening_perf if op.get('avg_accuracy', 0) < avg_accuracy - 5]
+            sanitized = []
+            for op in opening_perf:
+                if not isinstance(op, dict):
+                    continue
+                op2 = dict(op)
+                op2["avg_accuracy"] = _safe_float(op.get("avg_accuracy"), 0.0)
+                sanitized.append(op2)
+            weak_openings = [op for op in sanitized if op.get('avg_accuracy', 0) < avg_accuracy - 5]
             if weak_openings:
                 suggestions.append({
                     'title': "Strengthen opening preparation",
@@ -1436,8 +1949,8 @@ Return ONLY valid JSON in this exact format:
             opening = first_game.get("opening", {}) if first_game else {}
             opening_name = opening.get("name", "Unknown opening") if opening else "Unknown opening"
             
-            avg_accuracy = summary.get('avg_accuracy', 0)
-            avg_cp_loss = summary.get('avg_cp_loss', 0)
+            avg_accuracy = _safe_float(summary.get('avg_accuracy'), 0.0)
+            avg_cp_loss = _safe_float(summary.get('avg_cp_loss'), 0.0)
             
             # Phase stats
             opening_acc = phase_stats.get("opening", {}).get("avg_accuracy")
@@ -1465,11 +1978,11 @@ Phase Accuracy (only phases with moves shown):"""
             # Only include phases that have data
             phase_acc_parts = []
             if opening_acc is not None:
-                phase_acc_parts.append(f"- Opening: {opening_acc:.1f}%")
+                phase_acc_parts.append(f"- Opening: {_safe_float(opening_acc, 0.0):.1f}%")
             if middlegame_acc is not None:
-                phase_acc_parts.append(f"- Middlegame: {middlegame_acc:.1f}%")
+                phase_acc_parts.append(f"- Middlegame: {_safe_float(middlegame_acc, 0.0):.1f}%")
             if endgame_acc is not None:
-                phase_acc_parts.append(f"- Endgame: {endgame_acc:.1f}%")
+                phase_acc_parts.append(f"- Endgame: {_safe_float(endgame_acc, 0.0):.1f}%")
             
             if phase_acc_parts:
                 context += "\n" + "\n".join(phase_acc_parts)
@@ -1494,15 +2007,15 @@ Key Moments Found:
                 time_context_parts = []
                 
                 # Average time per move
-                avg_time = time_mgmt.get("avg_time_per_move", 0)
+                avg_time = _safe_float(time_mgmt.get("avg_time_per_move"), 0.0)
                 if avg_time and avg_time > 0:
                     time_context_parts.append(f"- Average time per move: {avg_time:.1f}s")
                 
                 # Time by phase - only include phases with data
                 phase_times = []
-                avg_opening_time = time_mgmt.get("avg_time_opening", 0)
-                avg_middlegame_time = time_mgmt.get("avg_time_middlegame", 0)
-                avg_endgame_time = time_mgmt.get("avg_time_endgame", 0)
+                avg_opening_time = _safe_float(time_mgmt.get("avg_time_opening"), 0.0)
+                avg_middlegame_time = _safe_float(time_mgmt.get("avg_time_middlegame"), 0.0)
+                avg_endgame_time = _safe_float(time_mgmt.get("avg_time_endgame"), 0.0)
                 if avg_opening_time and avg_opening_time > 0:
                     phase_times.append(f"Opening {avg_opening_time:.1f}s")
                 if avg_middlegame_time and avg_middlegame_time > 0:
@@ -1519,7 +2032,7 @@ Key Moments Found:
                         time_context_parts.append("- Accuracy by thinking time:")
                         for time_range in valid_ranges:
                             label = time_range.get("time_range", "")
-                            acc = time_range.get("avg_accuracy", 0)
+                            acc = _safe_float(time_range.get("avg_accuracy"), 0.0)
                             count = time_range.get("move_count", 0)
                             time_context_parts.append(f"  • {label}: {acc:.1f}% ({count} moves)")
                 
@@ -1559,7 +2072,7 @@ Key Moments Found:
             if moments_with_time:
                 context += "\n\n**Time spent on key moments:**"
                 for ply, san, time_s, cat in moments_with_time[:5]:
-                    context += f"\n- Move {ply} ({san}): {time_s:.1f}s ({cat})"
+                    context += f"\n- Move {ply} ({san}): {_safe_float(time_s, 0.0):.1f}s ({cat})"
             
             context += f"\n\nQuery Intent: {selection_rationale.get('query_intent', 'general')}"
             context += f"\nNarrative Focus: {selection_rationale.get('narrative_focus', '')}"
@@ -1591,8 +2104,9 @@ Key Moments Found:
                     cp_loss = record.get("cp_loss", 0)
                     phase = record.get("phase", "")
                     time_spent = record.get("time_spent_s", 0)
-                    time_str = f", {time_spent:.1f}s" if time_spent else ""
-                    context += f"\n{i}. Move {ply} ({move_san}): {category}, {cp_loss:.0f}cp loss, {phase}{time_str}"
+                    time_spent_f = _safe_float(time_spent, 0.0)
+                    time_str = f", {time_spent_f:.1f}s" if time_spent_f > 0 else ""
+                    context += f"\n{i}. Move {ply} ({move_san}): {category}, {_safe_float(cp_loss, 0.0):.0f}cp loss, {phase}{time_str}"
             
             system_prompt = """You are a chess coach providing game feedback. Write a brief, conversational response to the user's question about their game.
 
@@ -1628,12 +2142,23 @@ Write your response now based on the game data provided."""
             import asyncio
             from concurrent.futures import ThreadPoolExecutor
             
+            if self.llm_router:
+                return self.llm_router.complete(
+                    session_id="default",
+                    stage="review_narrative",
+                    system_prompt=system_prompt,
+                    user_text=context,
+                    temperature=0.7,
+                    model="gpt-5",
+                    max_tokens=300,
+                ).strip()
+            
             loop = asyncio.get_event_loop()
             with ThreadPoolExecutor() as executor:
                 response = await loop.run_in_executor(
                     executor,
                     lambda: self.openai_client.chat.completions.create(
-                        model="gpt-4o-mini",
+                        model="gpt-5",
                         messages=[
                             {"role": "system", "content": system_prompt},
                             {"role": "user", "content": context}
@@ -1647,11 +2172,9 @@ Write your response now based on the game data provided."""
             return narrative
             
         except Exception as e:
-            print(f"⚠️ LLM narrative generation failed: {e}, using fallback")
-            # Fallback to simple summary
-            avg_accuracy = summary.get('avg_accuracy', 0)
-            game_result = first_game.get("result", "") if first_game else ""
-            return f"I analyzed your game. You achieved {avg_accuracy:.1f}% accuracy. Result: {game_result}."
+            # No synthetic fallback narrative: avoid crashing the tool call.
+            print(f"⚠️ LLM narrative generation failed: {e}")
+            return ""
     
     def _generate_review_narrative_with_context(
         self,
@@ -1729,7 +2252,7 @@ Write your response now based on the game data provided."""
                 print(f"⚠️ Failed to generate LLM narrative: {e}")
                 # Fall through to template-based generation
         
-        avg_accuracy = summary.get('avg_accuracy', 0)
+        avg_accuracy = _safe_float(summary.get('avg_accuracy'), 0.0)
         win_rate = summary.get('win_rate', 0)
         
         # Determine query type for context
@@ -1915,8 +2438,8 @@ Write your response now based on the game data provided."""
                 
                 if gap > 10:
                     justifications.append(
-                        f"**Phase consistency is an issue.** Your {strongest[0]} ({strongest[1].get('accuracy', 0):.1f}%) "
-                        f"is {gap:.0f}% stronger than your {weakest[0]} ({weakest[1].get('accuracy', 0):.1f}%). "
+                        f"**Phase consistency is an issue.** Your {strongest[0]} ({_safe_float(strongest[1].get('accuracy'), 0.0):.1f}%) "
+                        f"is {gap:.0f}% stronger than your {weakest[0]} ({_safe_float(weakest[1].get('accuracy'), 0.0):.1f}%). "
                         f"This gap suggests you need focused practice in your weaker phase."
                     )
             
@@ -1941,12 +2464,12 @@ Write your response now based on the game data provided."""
                 
                 if direction == "low":
                     justifications.append(
-                        f"**Weakness in {tag_natural} positions.** Your accuracy drops to {acc:.1f}% in these positions "
+                        f"**Weakness in {tag_natural} positions.** Your accuracy drops to {_safe_float(acc, 0.0):.1f}% in these positions "
                         f"({count} moves). This is a clear area for improvement."
                     )
                 elif direction == "high":
                     justifications.append(
-                        f"**Strength in {tag_natural} positions.** Your accuracy is {acc:.1f}% in these positions "
+                        f"**Strength in {tag_natural} positions.** Your accuracy is {_safe_float(acc, 0.0):.1f}% in these positions "
                         f"({count} moves) - well above your average. Keep leveraging this strength!"
                     )
             elif stat.get("type") == "tag_preference":
@@ -1959,14 +2482,14 @@ Write your response now based on the game data provided."""
                     count = stat.get("count", 0)
                     justifications.append(
                         f"**You underestimate the use of {tag_natural}.** You tend to create these positions "
-                        f"but struggle with them ({created_acc:.1f}% accuracy when creating, {count} moves)."
+                        f"but struggle with them ({_safe_float(created_acc, 0.0):.1f}% accuracy when creating, {count} moves)."
                     )
                 elif pattern == "avoids":
                     removed_acc = stat.get("removed_accuracy", 0)
                     count = stat.get("count", 0)
                     justifications.append(
                         f"**You failed to capitalize on {tag_natural}.** You remove these patterns "
-                        f"with lower accuracy ({removed_acc:.1f}%, {count} moves). Consider maintaining them instead."
+                        f"with lower accuracy ({_safe_float(removed_acc, 0.0):.1f}%, {count} moves). Consider maintaining them instead."
                     )
         
         # Win rate context (single game = statement, multiple = percentage)
@@ -1978,8 +2501,8 @@ Write your response now based on the game data provided."""
                 justifications.append("**You lost this game.** Let's see what you can learn from it.")
         elif win_rate < 0.4 and avg_accuracy > 75:
             justifications.append(
-                f"**Win conversion is an issue.** Your {win_rate*100:.0f}% win rate is surprisingly low "
-                f"for {avg_accuracy:.1f}% accuracy. You might be losing won positions."
+                f"**Win conversion is an issue.** Your {_safe_float(win_rate, 0.0)*100:.0f}% win rate is surprisingly low "
+                f"for {_safe_float(avg_accuracy, 0.0):.1f}% accuracy. You might be losing won positions."
             )
         
         # Add justifications to narrative
@@ -2693,8 +3216,17 @@ Write your response now based on the game data provided."""
                 return f"Error: {result.get('message', result.get('error'))}"
             
             games_analyzed = result.get('games_analyzed', 0)
-            avg_acc = result.get('stats', {}).get('avg_accuracy', 0)
+            avg_acc = _safe_float((result.get('stats', {}) or {}).get('avg_accuracy'), 0.0)
             return f"Personal review complete: Analyzed {games_analyzed} games from {result.get('platform', 'platform')}, average accuracy {avg_acc:.1f}%. Displaying narrative and charts in chat."
+
+        elif tool_name == "select_games":
+            if result.get("error") == "info_required":
+                return result.get("message", "Missing account info for selecting games.")
+            if result.get("error"):
+                return f"Error: {result.get('message', result.get('error'))}"
+            total = result.get("total_candidates", 0)
+            selected_flat = result.get("selected_flat") or []
+            return f"Selected {len(selected_flat)} game(s) from {total} candidate games. Displaying game list in chat."
         
         elif tool_name == "generate_training_session":
             return f"{result.get('message', 'Training generated')}. Created {result.get('drills_generated', 0)} drills."
@@ -2830,4 +3362,34 @@ Write your response now based on the game data provided."""
         
         else:
             return json.dumps(result, indent=2)
+    
+    def _set_ai_game(self, args: Dict, context: Dict) -> Dict:
+        """
+        Set AI game mode. This tool just returns a UI command that will be handled by the frontend.
+        The tool doesn't need to do anything - it just signals the frontend to enable AI game mode.
+        """
+        active = args.get("active", False)
+        ai_side = args.get("ai_side", "auto")
+        make_move_now = args.get("make_move_now", False)
+        
+        # Normalize ai_side: "auto" -> null for frontend
+        if ai_side == "auto":
+            ai_side = None
+        
+        # Return a result that includes a UI command
+        # The task controller will extract this and add it to ui_commands
+        return {
+            "success": True,
+            "active": active,
+            "ai_side": ai_side,
+            "make_move_now": make_move_now,
+            "ui_command": {
+                "action": "set_ai_game",
+                "params": {
+                    "active": active,
+                    "ai_side": ai_side,
+                    "make_move_now": make_move_now
+                }
+            }
+        }
 

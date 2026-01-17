@@ -7,10 +7,11 @@ from contextlib import asynccontextmanager
 from io import StringIO
 import urllib.parse
 import urllib.request
+from datetime import datetime
 
 from fastapi import FastAPI, HTTPException, Query, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, JSONResponse
 from pydantic import BaseModel, Field
 import chess
 import chess.engine
@@ -29,6 +30,7 @@ from delta_analyzer import calculate_delta, compare_tags_for_move_analysis
 from game_fetcher import GameFetcher
 from profile_indexer import ProfileIndexingManager
 from supabase_client import SupabaseClient
+from profile_analytics.engine import ProfileAnalyticsEngine
 from personal_review_aggregator import PersonalReviewAggregator
 from personal_stats_manager import PersonalStatsManager
 from game_archive_manager import GameArchiveManager
@@ -110,6 +112,11 @@ request_interpreter: Optional[RequestInterpreter] = None
 
 # Profile indexing manager
 profile_indexer: Optional[ProfileIndexingManager] = None
+
+# Profile analytics engine
+profile_analytics_engine: Optional[ProfileAnalyticsEngine] = None
+game_window_manager = None
+account_init_manager = None
 
 # Supabase client
 supabase_client: Optional[SupabaseClient] = None
@@ -199,7 +206,7 @@ async def initialize_engine():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Initialize and cleanup the Stockfish engine and explorer client."""
-    global engine, engine_queue, PRE_GENERATED_POSITIONS, explorer_client, game_fetcher, review_aggregator, stats_manager, archive_manager, llm_planner, llm_reporter, position_miner, drill_generator, training_planner, srs_scheduler, card_databases, tool_executor, profile_indexer, supabase_client, engine_pool_instance
+    global engine, engine_queue, PRE_GENERATED_POSITIONS, explorer_client, game_fetcher, review_aggregator, stats_manager, archive_manager, llm_planner, llm_reporter, position_miner, drill_generator, training_planner, srs_scheduler, card_databases, tool_executor, profile_indexer, profile_analytics_engine, supabase_client, engine_pool_instance
     
     await initialize_engine()
     
@@ -217,20 +224,53 @@ async def lifespan(app: FastAPI):
     # Initialize Lichess explorer client
     explorer_client = LichessExplorerClient()
     
-    # Initialize Supabase
+    # Initialize Supabase or Local PostgreSQL
     supabase_url = os.getenv("SUPABASE_URL")
     supabase_service_role_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
-    if supabase_url and supabase_service_role_key:
+    local_postgres_url = os.getenv("LOCAL_POSTGRES_URL")
+    
+    # Check if using local PostgreSQL
+    if local_postgres_url:
         try:
-            supabase_client = SupabaseClient(supabase_url, supabase_service_role_key)
+            from local_postgres_client import LocalPostgresClient
+            supabase_client = LocalPostgresClient(local_postgres_url)
+            print("✅ Using local PostgreSQL database")
         except Exception as exc:
-            print(f"⚠️  Failed to initialize Supabase client: {exc}")
+            print(f"⚠️  Failed to initialize local PostgreSQL client: {exc}")
             supabase_client = None
+    elif supabase_url and supabase_service_role_key:
+        # Check if URL points to localhost (local Supabase)
+        if "localhost" in supabase_url or "127.0.0.1" in supabase_url:
+            # Try to use local PostgreSQL if connection string provided
+            if local_postgres_url:
+                try:
+                    from local_postgres_client import LocalPostgresClient
+                    supabase_client = LocalPostgresClient(local_postgres_url)
+                    print("✅ Using local PostgreSQL database (detected from SUPABASE_URL)")
+                except Exception as exc:
+                    print(f"⚠️  Failed to initialize local PostgreSQL client: {exc}")
+                    supabase_client = None
+            else:
+                # Fall back to Supabase client (for local Supabase CLI instance)
+                try:
+                    supabase_client = SupabaseClient(supabase_url, supabase_service_role_key)
+                except Exception as exc:
+                    print(f"⚠️  Failed to initialize Supabase client: {exc}")
+                    supabase_client = None
+        else:
+            # Remote Supabase
+            try:
+                supabase_client = SupabaseClient(supabase_url, supabase_service_role_key)
+            except Exception as exc:
+                print(f"⚠️  Failed to initialize Supabase client: {exc}")
+                supabase_client = None
     else:
         supabase_client = None
 
     # Initialize Personal Review components
     game_fetcher = GameFetcher()
+    
+    # Create profile_indexer first (without callback)
     profile_indexer = ProfileIndexingManager(
         game_fetcher,
         supabase_client=supabase_client,
@@ -238,6 +278,218 @@ async def lifespan(app: FastAPI):
         engine_queue=engine_queue,
         engine_instance=engine,
     )
+    
+    # Define callback to save and analyze games after indexing
+    # This must be defined after profile_indexer is created
+    async def on_indexing_complete_callback(user_id: str) -> None:
+        """Callback to review and save games after they're fetched"""
+        if not profile_indexer or not supabase_client:
+            print(f"⚠️ [INDEXING_CALLBACK] Cannot process games: profile_indexer={profile_indexer is not None}, supabase_client={supabase_client is not None}")
+            return
+        
+        try:
+            # Import _utc_now from profile_indexer
+            from profile_indexer import _utc_now, ProfileIndexStatus
+            
+            # Get fetched games from profile_indexer
+            games = profile_indexer._games.get(user_id, [])
+            if not games:
+                print(f"ℹ️ [INDEXING_CALLBACK] No games to process for user {user_id}")
+                return
+            
+            # Update status to "analyzing" when starting
+            if user_id in profile_indexer._status:
+                status = profile_indexer._status[user_id]
+                status.state = "analyzing"
+                status.message = f"Starting analysis of {len(games)} games..."
+                status.last_updated = _utc_now()
+            else:
+                status = ProfileIndexStatus(
+                    state="analyzing",
+                    message=f"Starting analysis of {len(games)} games...",
+                    games_indexed=len(games),
+                    last_updated=_utc_now()
+                )
+                profile_indexer._status[user_id] = status
+            
+            print(f"🔄 [INDEXING_CALLBACK] Starting to process {len(games)} games for user {user_id}")
+            
+            # Process up to 60 most recent games (rolling window)
+            games_to_process = games[:60]
+            total_games = len(games_to_process)
+            print(f"📊 [INDEXING_CALLBACK] Processing {total_games} games (limited to 60 for rolling window)")
+            
+            saved_count = 0
+            error_count = 0
+            
+            for idx, game in enumerate(games_to_process, 1):
+                try:
+                    # Update status with current progress before processing
+                    if user_id in profile_indexer._status:
+                        status = profile_indexer._status[user_id]
+                        status.state = "analyzing"
+                        status.message = f"Analyzing game {idx} of {total_games}..."
+                        status.deep_analyzed_games = saved_count
+                        status.last_updated = _utc_now()
+                    
+                    print(f"🎮 [INDEXING_CALLBACK] Processing game {idx}/{total_games}: {game.get('game_id', 'unknown')} from {game.get('platform', 'unknown')}")
+                    
+                    # Get PGN
+                    pgn = game.get("pgn", "")
+                    if not pgn:
+                        print(f"⚠️ [INDEXING_CALLBACK] Game {idx} has no PGN, skipping")
+                        error_count += 1
+                        continue
+                    
+                    # Determine player color
+                    player_color = game.get("player_color", "white")
+                    
+                    # Review the game
+                    print(f"🔍 [INDEXING_CALLBACK] Reviewing game {idx} (side_focus={player_color})")
+                    review_result = await _review_game_internal(
+                        pgn_string=pgn,
+                        side_focus=player_color,
+                        include_timestamps=game.get("has_clock", False),
+                        depth=14,
+                        engine_instance=engine,
+                    )
+                    
+                    if "error" in review_result:
+                        print(f"❌ [INDEXING_CALLBACK] Review failed for game {idx}: {review_result.get('error')}")
+                        error_count += 1
+                        continue
+                    
+                    # Extract stats from review
+                    stats = review_result.get("stats", {}).get(player_color, {})
+                    counts = stats.get("counts", {})
+                    phase_stats = stats.get("by_phase", {})
+                    
+                    # Normalize platform for database (chess.com -> chesscom)
+                    platform = game.get("platform", "chess.com")
+                    platform_db = "chesscom" if platform == "chess.com" else platform
+                    
+                    # Parse date
+                    game_date = None
+                    date_str = game.get("date", "")
+                    if date_str:
+                        try:
+                            from datetime import datetime
+                            game_date = datetime.strptime(date_str, "%Y-%m-%d").isoformat() + "Z"
+                        except:
+                            pass
+                    
+                    # Prepare game data for saving
+                    game_data = {
+                        "platform": platform_db,
+                        "external_id": game.get("game_id", ""),
+                        "game_date": game_date,
+                        "user_color": player_color,
+                        "opponent_name": game.get("opponent_name", "Unknown"),
+                        "user_rating": game.get("player_rating", 0),
+                        "opponent_rating": game.get("opponent_rating", 0),
+                        "result": game.get("result", "unknown"),
+                        "termination": game.get("termination", ""),
+                        "time_control": game.get("time_control", ""),
+                        "time_category": game.get("time_category", "unknown"),
+                        "opening_eco": review_result.get("opening", {}).get("eco_final", "") or game.get("eco", ""),
+                        "opening_name": review_result.get("opening", {}).get("name_final", "") or game.get("opening", ""),
+                        "theory_exit_ply": review_result.get("opening", {}).get("theory_exit_ply"),
+                        "accuracy_overall": stats.get("overall_accuracy", 0),
+                        "accuracy_opening": phase_stats.get("opening", {}).get("accuracy", 0),
+                        "accuracy_middlegame": phase_stats.get("middlegame", {}).get("accuracy", 0),
+                        "accuracy_endgame": phase_stats.get("endgame", {}).get("accuracy", 0),
+                        "avg_cp_loss": stats.get("avg_cp_loss", 0),
+                        "blunders": counts.get("blunder", 0),
+                        "mistakes": counts.get("mistake", 0),
+                        "inaccuracies": counts.get("inaccuracy", 0),
+                        "total_moves": len(review_result.get("ply_records", [])),
+                        "game_character": review_result.get("game_character", "unknown"),
+                        "endgame_type": review_result.get("endgame_type", "none"),
+                        "pgn": pgn,
+                        "game_review": review_result,
+                        "review_type": "full",
+                    }
+                    
+                    # Save to database
+                    print(f"💾 [INDEXING_CALLBACK] Saving game {idx} to database")
+                    game_id = supabase_client.save_game_review(user_id, game_data)
+                    
+                    if game_id:
+                        saved_count += 1
+                        # Update status with saved count after each successful save
+                        if user_id in profile_indexer._status:
+                            status = profile_indexer._status[user_id]
+                            status.deep_analyzed_games = saved_count
+                            status.message = f"Analyzed {saved_count} of {total_games} games..."
+                            status.last_updated = _utc_now()
+                        
+                        # Don't invalidate cache after every game - too aggressive
+                        # We'll invalidate once at the end of indexing instead
+                        # This prevents multiple concurrent recalculations during bulk indexing
+                        
+                        print(f"✅ [INDEXING_CALLBACK] Successfully saved game {idx} with ID: {game_id}")
+                    else:
+                        error_count += 1
+                        print(f"❌ [INDEXING_CALLBACK] Failed to save game {idx} (save_game_review returned None)")
+                    
+                except Exception as e:
+                    error_count += 1
+                    print(f"❌ [INDEXING_CALLBACK] Error processing game {idx}: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    continue
+            
+            # Update final status when complete
+            if user_id in profile_indexer._status:
+                status = profile_indexer._status[user_id]
+                status.state = "idle"
+                status.message = f"Analysis complete: {saved_count} games saved, {error_count} errors"
+                status.deep_analyzed_games = saved_count
+                status.last_updated = _utc_now()
+            
+            # Invalidate analytics cache once at the end of indexing (not after every game)
+            # This prevents multiple concurrent recalculations during bulk indexing
+            if profile_analytics_engine and saved_count > 0:
+                profile_analytics_engine.invalidate_cache(user_id)
+                print(f"🔄 [INDEXING_CALLBACK] Invalidated analytics cache after completing {saved_count} game saves")
+            
+            print(f"✅ [INDEXING_CALLBACK] Completed processing games for user {user_id}: {saved_count} saved, {error_count} errors")
+            
+        except Exception as e:
+            print(f"❌ [INDEXING_CALLBACK] Fatal error in callback for user {user_id}: {e}")
+            import traceback
+            traceback.print_exc()
+            # Update status to error state
+            if user_id in profile_indexer._status:
+                from profile_indexer import _utc_now
+                status = profile_indexer._status[user_id]
+                status.state = "error"
+                status.message = f"Analysis failed: {str(e)}"
+                status.last_updated = _utc_now()
+    
+    # Now set the callback on the profile_indexer
+    if supabase_client:
+        profile_indexer.on_indexing_complete = on_indexing_complete_callback
+        print("✅ [INIT] on_indexing_complete callback set for ProfileIndexingManager")
+    
+    # Initialize Profile Analytics Engine (if Supabase available)
+    if supabase_client:
+        try:
+            print("🔧 [PROFILE_ANALYTICS] Initializing Profile Analytics Engine...")
+            profile_analytics_engine = ProfileAnalyticsEngine(
+                supabase_client,
+                profile_indexer=profile_indexer
+            )
+            print("✅ [PROFILE_ANALYTICS] Profile Analytics Engine initialized successfully")
+        except Exception as e:
+            import traceback
+            print(f"❌ [PROFILE_ANALYTICS] Failed to initialize Profile Analytics Engine: {e}")
+            print(f"   Traceback: {traceback.format_exc()}")
+            profile_analytics_engine = None
+    else:
+        profile_analytics_engine = None
+        print("⚠️ [PROFILE_ANALYTICS] Profile Analytics Engine not initialized (Supabase unavailable)")
+    
     review_aggregator = PersonalReviewAggregator()
     
     # Initialize Personal Review System managers (if Supabase available)
@@ -249,6 +501,25 @@ async def lifespan(app: FastAPI):
         stats_manager = None
         archive_manager = None
         print("⚠️ Personal Review System managers not initialized (Supabase unavailable)")
+    
+    # Initialize Game Window Manager and Account Initialization Manager
+    game_window_manager = None
+    account_init_manager = None
+    if supabase_client:
+        try:
+            from services.game_window_manager import GameWindowManager
+            from services.account_initialization_manager import AccountInitializationManager
+            game_window_manager = GameWindowManager(supabase_client)
+            account_init_manager = AccountInitializationManager(
+                supabase_client,
+                profile_indexer,
+                game_window_manager
+            )
+            print("✅ Game Window Manager and Account Initialization Manager initialized")
+        except Exception as e:
+            print(f"⚠️ Failed to initialize window/account managers: {e}")
+            game_window_manager = None
+            account_init_manager = None
     
     llm_planner = LLMPlanner(openai_client)
     llm_reporter = LLMReporter(openai_client)
@@ -300,6 +571,23 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         print(f"⚠️  Could not load pre-generated positions: {e}")
     
+    # Background task for periodic account checks
+    async def periodic_account_check():
+        """Background task to check all accounts every hour"""
+        while True:
+            await asyncio.sleep(3600)  # 1 hour
+            if account_init_manager:
+                try:
+                    results = await account_init_manager.check_all_accounts()
+                    print(f"📊 Account check completed: {results['accounts_checked']} accounts checked")
+                except Exception as e:
+                    print(f"❌ Account check error: {e}")
+    
+    # Start background task
+    if account_init_manager:
+        asyncio.create_task(periodic_account_check())
+        print("✅ Background account check task started")
+    
     yield
     
     # Shutdown: Stop queue processor and cancel pending requests
@@ -337,13 +625,32 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Chess GPT Backend", version="1.0.0", lifespan=lifespan)
 
-# CORS
+# Lightweight liveness probe for dev tooling / scripts.
+@app.get("/health")
+async def health():
+    return {"status": "ok"}
+
+# CORS - Allow local development origins
+# Note: Cannot use allow_origins=["*"] with allow_credentials=True per CORS spec.
+# We whitelist common local dev origins explicitly, and additionally allow common LAN origins via regex.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:3001"],
+    allow_origins=[
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://localhost:3001",
+        "http://127.0.0.1:3001",
+        "http://localhost",  # No port (defaults to 80, but some browsers might send this)
+        "http://127.0.0.1",  # No port
+    ],
+    # Allow LAN IPs (192.168.x.x, 10.x.x.x, 172.16-31.x.x) and localhost on any port (including no port).
+    # This regex matches: http://localhost, http://localhost:3000, http://192.168.1.1:3000, etc.
+    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2[0-9]|3[0-1])\.\d+\.\d+)(:\d+)?/?$",
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["*"],  # Allow all methods
+    allow_headers=["*"],  # Allow all headers
+    expose_headers=["*"],  # Expose all headers
+    max_age=3600,
 )
 
 
@@ -962,27 +1269,27 @@ async def analyze_position(
             themes_final_future = loop.run_in_executor(pool, compute_themes_and_tags, final_fen)
             
             # While themes calculate, do Stockfish analysis of final position
-        print("🔍 Step 5/6: Analyzing PV final position with Stockfish...")
+            print("🔍 Step 5/6: Analyzing PV final position with Stockfish...")
             final_info = await engine_queue.enqueue(
                 engine_queue.engine.analyse,
                 final_board,
                 chess.engine.Limit(depth=depth)
             )
-        final_score = final_info.get("score")
-        
-        if final_score and final_score.is_mate():
-            final_mate = final_score.relative.mate()
-            eval_cp_final = 10000 if final_mate > 0 else -10000
-        elif final_score:
-            eval_cp_final = final_score.relative.score(mate_score=10000)
-        else:
-            eval_cp_final = 0
-        
-        material_balance_final = calculate_material_balance(final_board)
-        positional_cp_final = eval_cp_final - material_balance_final
-        
-        print(f"   Final eval: {eval_cp_final}cp, Material: {material_balance_final}cp")
-        
+            final_score = final_info.get("score")
+            
+            if final_score and final_score.is_mate():
+                final_mate = final_score.relative.mate()
+                eval_cp_final = 10000 if final_mate > 0 else -10000
+            elif final_score:
+                eval_cp_final = final_score.relative.score(mate_score=10000)
+            else:
+                eval_cp_final = 0
+            
+            material_balance_final = calculate_material_balance(final_board)
+            positional_cp_final = eval_cp_final - material_balance_final
+            
+            print(f"   Final eval: {eval_cp_final}cp, Material: {material_balance_final}cp")
+            
             # Wait for theme/tag results
             raw_start = await themes_start_future
             raw_final = await themes_final_future
@@ -1944,7 +2251,7 @@ async def _review_game_internal(
             
             # Progress callback - unified "Analyzing moves n/N" format
             async def parallel_progress(move_done: int, move_total: int, message: str = "Analyzing moves..."):
-            if status_callback:
+                if status_callback:
                     # Calculate progress: 10% to 95% (theory check is 0-5%, analysis is 5-95%)
                     if "theory" in message.lower():
                         # Theory check phase: 0% to 5%
@@ -2033,9 +2340,9 @@ async def _review_game_internal(
         # Sequential fallback - only if parallel failed or unavailable
         if not use_parallel:
             print(f"⏳ Analyzing {move_count} moves sequentially (depth={depth}, multipv=2)...")
-        
-        # Reset for sequential processing
-        pgn_io = chess.pgn.read_game(StringIO(cleaned_pgn))
+
+            # Reset for sequential processing
+            pgn_io = chess.pgn.read_game(StringIO(cleaned_pgn))
             ply_records = []
             advantage_history = []
             board = chess.Board()
@@ -2052,52 +2359,56 @@ async def _review_game_internal(
                 except Exception:
                     return 0
 
-        for move in pgn_io.mainline_moves():
-            ply = len(ply_records) + 1
-            
-            if status_callback:
+            for move in pgn_io.mainline_moves():
+                ply = len(ply_records) + 1
+
+                if status_callback:
                     progress = ply / move_count if move_count > 0 else 0
-                    await status_callback("executing", f"Analyzing move {ply}/{move_count}...", progress, replace=True)
-            
-            fen_before = board.fen()
-            side_moved = "white" if board.turn == chess.WHITE else "black"
-            move_san = board.san(move)
-            move_uci = move.uci()
-            
+                    await status_callback(
+                        "executing",
+                        f"Analyzing move {ply}/{move_count}...",
+                        progress,
+                        replace=True,
+                    )
+
+                fen_before = board.fen()
+                side_moved = "white" if board.turn == chess.WHITE else "black"
+                move_san = board.san(move)
+                move_uci = move.uci()
+
                 info_before = await engine_queue.enqueue(
                     engine_queue.engine.analyse,
                     board,
                     chess.engine.Limit(depth=depth),
-                    multipv=2
+                    multipv=2,
                 )
 
                 best_move_uci = ""
                 best_move_san = ""
                 best_eval_cp = 0
-            second_best_gap_cp = 0
-
+                second_best_gap_cp = 0
                 try:
                     best_move_uci = str(info_before[0]["pv"][0]) if info_before and info_before[0].get("pv") else ""
                     best_move_san = board.san(chess.Move.from_uci(best_move_uci)) if best_move_uci else ""
                     best_eval_cp = _score_to_white_cp(info_before[0].get("score"))
-            if len(info_before) >= 2:
+                    if len(info_before) >= 2:
                         second_best_gap_cp = abs(best_eval_cp - _score_to_white_cp(info_before[1].get("score")))
                 except Exception:
                     pass
 
-            board.push(move)
-            fen_after = board.fen()
-            
+                board.push(move)
+                fen_after = board.fen()
+
                 info_after = await engine_queue.enqueue(
                     engine_queue.engine.analyse,
                     board,
-                    chess.engine.Limit(depth=depth)
+                    chess.engine.Limit(depth=depth),
                 )
                 played_eval_cp = _score_to_white_cp(info_after.get("score"))
 
                 cp_loss = max(0, abs(best_eval_cp - played_eval_cp))
-            accuracy_pct = 100 / (1 + (cp_loss / 50) ** 0.7)
-            
+                accuracy_pct = 100 / (1 + (cp_loss / 50) ** 0.7)
+
                 time_spent_s = None
                 if isinstance(timestamps, dict) and ply in timestamps and (ply - 1) in timestamps:
                     try:
@@ -2110,7 +2421,7 @@ async def _review_game_internal(
                 opening_name = None
                 is_theory_move = False
                 try:
-            theory_check = check_lichess_masters(fen_before)
+                    theory_check = check_lichess_masters(fen_before)
                     is_theory = bool(theory_check.get("isTheory", False))
                     opening_name = theory_check.get("opening") if is_theory else None
                     is_theory_move = is_theory and ply <= 20
@@ -2119,63 +2430,63 @@ async def _review_game_internal(
 
                 # Phase detection (best effort)
                 try:
-            piece_count = len(board.piece_map())
-            queens = len([p for p in board.piece_map().values() if p.piece_type == chess.QUEEN])
-            new_phase = calculate_phase(board, piece_count, queens, is_theory, ply)
+                    piece_count = len(board.piece_map())
+                    queens = len([p for p in board.piece_map().values() if p.piece_type == chess.QUEEN])
+                    new_phase = calculate_phase(board, piece_count, queens, is_theory, ply)
                     if isinstance(new_phase, str) and new_phase:
-                    last_phase = new_phase
+                        last_phase = new_phase
                 except Exception:
                     pass
 
                 # Category bucket
-            if is_theory_move:
-                category = "theory"
-            elif cp_loss == 0 and second_best_gap_cp >= 50:
-                category = "critical_best"
-            elif cp_loss < 20:
-                category = "excellent"
-            elif cp_loss < 50:
-                category = "good"
-            elif cp_loss < 80:
-                category = "inaccuracy"
-            elif cp_loss < 200:
-                category = "mistake"
-            else:
-                category = "blunder"
-            
-            ply_record = {
-                "ply": ply,
-                "side_moved": side_moved,
-                "san": move_san,
-                "uci": move_uci,
-                "fen_before": fen_before,
-                "fen_after": fen_after,
-                "engine": {
-                    "eval_before_cp": best_eval_cp,
+                if is_theory_move:
+                    category = "theory"
+                elif cp_loss == 0 and second_best_gap_cp >= 50:
+                    category = "critical_best"
+                elif cp_loss < 20:
+                    category = "excellent"
+                elif cp_loss < 50:
+                    category = "good"
+                elif cp_loss < 80:
+                    category = "inaccuracy"
+                elif cp_loss < 200:
+                    category = "mistake"
+                else:
+                    category = "blunder"
+
+                ply_record = {
+                    "ply": ply,
+                    "side_moved": side_moved,
+                    "san": move_san,
+                    "uci": move_uci,
+                    "fen_before": fen_before,
+                    "fen_after": fen_after,
+                    "engine": {
+                        "eval_before_cp": best_eval_cp,
                         "eval_before_str": format_eval(best_eval_cp),
-                    "best_move_uci": best_move_uci,
-                    "best_move_san": best_move_san,
-                    "played_eval_after_cp": played_eval_cp,
-                    "played_eval_after_str": format_eval(played_eval_cp),
+                        "best_move_uci": best_move_uci,
+                        "best_move_san": best_move_san,
+                        "played_eval_after_cp": played_eval_cp,
+                        "played_eval_after_str": format_eval(played_eval_cp),
                         "mate_in": None,
                         "second_best_gap_cp": second_best_gap_cp,
-                },
-                "cp_loss": cp_loss,
-                "accuracy_pct": accuracy_pct,
-                "category": category,
-                "time_spent_s": time_spent_s,
+                    },
+                    "cp_loss": cp_loss,
+                    "accuracy_pct": accuracy_pct,
+                    "category": category,
+                    "time_spent_s": time_spent_s,
                     "raw_before": {},
                     "raw_after": {},
                     "analyse": {},
-                "phase": last_phase,
-                "is_theory": is_theory_move,
+                    "phase": last_phase,
+                    "is_theory": is_theory_move,
                     "opening_name": opening_name,
-                "key_point_labels": [],
+                    "key_point_labels": [],
                     "notes": "",
-            }
-            
-            ply_records.append(ply_record)
-            advantage_history.append(played_eval_cp)
+                }
+
+                ply_records.append(ply_record)
+                advantage_history.append(played_eval_cp)
         
             # Emit completion message
         if status_callback:
@@ -3830,49 +4141,49 @@ async def llm_chat_stream(request: LLMRequest):
                 print(f"   🔄 LLM iteration {iterations}/{max_iterations}...")
                 
                 try:
-                if tools:
-                    # Force the EXACT tool on first iteration if interpreter planned tools
-                    if force_tool_call and iterations == 1:
-                        first_tool = orchestration_plan.tool_sequence[0]
-                        tool_choice_value = {"type": "function", "function": {"name": first_tool.name}}
-                        print(f"   🔧 Forcing specific tool: {first_tool.name}")
-                    else:
-                        tool_choice_value = "auto"
-                    
+                    if tools:
+                        # Force the EXACT tool on first iteration if interpreter planned tools
+                        if force_tool_call and iterations == 1 and orchestration_plan and orchestration_plan.tool_sequence:
+                            first_tool = orchestration_plan.tool_sequence[0]
+                            tool_choice_value = {"type": "function", "function": {"name": first_tool.name}}
+                            print(f"   🔧 Forcing specific tool: {first_tool.name}")
+                        else:
+                            tool_choice_value = "auto"
+
                         print(f"   📡 Calling OpenAI API with tools...")
-                    response = openai_client.chat.completions.create(
-                        model=request.model,
-                        messages=messages,
-                        temperature=request.temperature,
-                        tools=tools,
-                        tool_choice=tool_choice_value
-                    )
-                else:
+                        response = openai_client.chat.completions.create(
+                            model=request.model,
+                            messages=messages,
+                            temperature=request.temperature,
+                            tools=tools,
+                            tool_choice=tool_choice_value,
+                        )
+                    else:
                         print(f"   📡 Calling OpenAI API without tools...")
-                    response = openai_client.chat.completions.create(
-                        model=request.model,
-                        messages=messages,
-                        temperature=request.temperature
-                    )
-                
+                        response = openai_client.chat.completions.create(
+                            model=request.model,
+                            messages=messages,
+                            temperature=request.temperature,
+                        )
+
                     print(f"   ✅ LLM API call succeeded")
-                response_message = response.choices[0].message
+                    response_message = response.choices[0].message
 
                     content_len = len(response_message.content) if response_message.content else 0
                     print(
                         f"   📨 LLM response: tool_calls={len(response_message.tool_calls) if response_message.tool_calls else 0}, "
                         f"content_length={content_len}"
                     )
-                
-                if not response_message.tool_calls:
-                    final_content = response_message.content or ""
+
+                    if not response_message.tool_calls:
+                        final_content = response_message.content or ""
                         print(f"   ✅ Got final content: {len(final_content)} chars")
                         if not final_content:
                             print(f"   ⚠️ WARNING: final_content is empty! Response was: {response_message}")
-                    break
+                        break
                     else:
                         print(f"   🔧 LLM requested {len(response_message.tool_calls)} tool calls, will execute...")
-                        
+
                 except Exception as llm_err:
                     print(f"   ❌ LLM call failed at iteration {iterations}: {llm_err}")
                     import traceback
@@ -5298,7 +5609,7 @@ async def fetch_player_games(request: FetchGamesRequest):
 
 
 class ProfileAccountPayload(BaseModel):
-    platform: Literal["chesscom", "lichess"] = "chesscom"
+    platform: Literal["chess.com", "lichess", "chesscom"] = "chess.com"
     username: str = Field(..., min_length=1)
 
 
@@ -5362,16 +5673,123 @@ async def get_profile_preferences(user_id: str):
     return {"preferences": prefs}
 
 
+@app.get("/profile/validate-account")
+async def validate_account(
+    username: str = Query(..., description="Username to validate"),
+    platform: str = Query(..., pattern="^(chess.com|lichess)$", description="Platform: chess.com or lichess")
+):
+    """Validate that an account exists on chess.com or lichess"""
+    try:
+        import aiohttp
+        import urllib.parse
+        
+        # Normalize platform name
+        platform_normalized = "chess.com" if platform in ["chess.com", "chesscom"] else "lichess"
+        
+        # URL encode username to handle special characters
+        encoded_username = urllib.parse.quote(username)
+        
+        async with aiohttp.ClientSession() as session:
+            if platform_normalized == "chess.com":
+                # Chess.com profile endpoint
+                profile_url = f"https://api.chess.com/pub/player/{encoded_username}"
+            else:  # lichess
+                # Lichess user endpoint
+                profile_url = f"https://lichess.org/api/user/{encoded_username}"
+            
+            print(f"🔍 Validating {platform_normalized} account: {username} (URL: {profile_url})")
+            
+            try:
+                async with session.get(profile_url, timeout=aiohttp.ClientTimeout(total=10)) as response:
+                    print(f"📡 Validation response status: {response.status} for {username} on {platform_normalized}")
+                    
+                    if response.status == 200:
+                        # Account exists
+                        print(f"✅ Account {username} on {platform_normalized} is valid")
+                        return {
+                            "valid": True,
+                            "username": username,
+                            "platform": platform_normalized,
+                            "message": "Account found"
+                        }
+                    elif response.status == 404:
+                        # Account doesn't exist
+                        print(f"❌ Account {username} on {platform_normalized} not found (404)")
+                        return {
+                            "valid": False,
+                            "username": username,
+                            "platform": platform_normalized,
+                            "message": "Account not found"
+                        }
+                    else:
+                        # Other error - get response text for debugging
+                        try:
+                            error_text = await response.text()
+                            print(f"⚠️ Validation error for {username}: status {response.status}, error: {error_text[:200]}")
+                        except:
+                            error_text = f"Status {response.status}"
+                            print(f"⚠️ Validation error for {username}: status {response.status}")
+                        
+                        return {
+                            "valid": False,
+                            "username": username,
+                            "platform": platform_normalized,
+                            "message": f"API returned status {response.status}: {error_text[:100] if 'error_text' in locals() else ''}"
+                        }
+            except aiohttp.ClientError as e:
+                return {
+                    "valid": False,
+                    "username": username,
+                    "platform": platform_normalized,
+                    "message": f"Network error: {str(e)}"
+                }
+            except asyncio.TimeoutError:
+                return {
+                    "valid": False,
+                    "username": username,
+                    "platform": platform_normalized,
+                    "message": "Validation timeout - please try again"
+                }
+        
+    except Exception as e:
+        import traceback
+        error_detail = traceback.format_exc()
+        print(f"❌ Error validating account {username} on {platform}: {error_detail}")
+        return {
+            "valid": False,
+            "username": username,
+            "platform": platform,
+            "message": f"Error validating account: {str(e)}"
+        }
+
+
 @app.post("/profile/preferences")
 async def save_profile_preferences(payload: ProfilePreferencesPayload):
     if not profile_indexer:
         raise HTTPException(status_code=503, detail="Profile indexer not initialized")
 
-    normalized_accounts = [
-        {"platform": acc.platform, "username": acc.username.strip()}
-        for acc in payload.accounts
-        if acc.username.strip()
-    ]
+    # Validate platform names and normalize
+    normalized_accounts = []
+    for acc in payload.accounts:
+        if not acc.username.strip():
+            continue
+        
+        # Only allow chess.com or lichess
+        platform = acc.platform.lower()
+        if platform not in ["chess.com", "lichess", "chesscom"]:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Invalid platform: {platform}. Only 'chess.com' or 'lichess' are allowed."
+            )
+        
+        # Normalize platform name
+        platform_normalized = "chess.com" if platform in ["chess.com", "chesscom"] else "lichess"
+        
+        normalized_accounts.append({
+            "platform": platform_normalized,
+            "username": acc.username.strip()
+        })
+    
     prefs = {
         "accounts": normalized_accounts,
         "time_controls": [tc.lower() for tc in payload.time_controls],
@@ -5388,11 +5806,105 @@ async def save_profile_preferences(payload: ProfilePreferencesPayload):
 
 @app.get("/profile/overview")
 async def profile_overview(user_id: str):
+    """
+    Must be fast and must not block on Supabase/network.
+    Frontend polls this endpoint for progress (deep_analyzed_games).
+    """
     if not profile_indexer:
-        raise HTTPException(status_code=503, detail="Profile indexer not initialized")
-    overview = _profile_overview_payload(user_id)
-    await profile_indexer.ensure_background_index(user_id)
-    return overview
+        return JSONResponse(
+            {
+                "preferences": {},
+                "status": {"state": "error", "message": "Profile indexer not initialized"},
+                "highlights": [],
+                "games": [],
+            },
+            status_code=503,
+        )
+
+    # In-memory only (never touch Supabase here).
+    prefs = {}
+    highlights = []
+    games = []
+    status = _default_profile_status()
+    try:
+        prefs = profile_indexer.load_preferences(user_id) or {}
+    except Exception:
+        prefs = {}
+    try:
+        full_status = profile_indexer.get_status(user_id) or {}
+        
+        # Get active games count from game window manager
+        active_games_count = 0
+        if supabase_client and game_window_manager:
+            try:
+                active_games_count = game_window_manager.count_active_games(user_id)
+            except Exception:
+                pass
+        
+        status = {
+            "state": full_status.get("state", "idle"),
+            "message": full_status.get("message", ""),
+            "games_indexed": full_status.get("games_indexed", 0),
+            "deep_analyzed_games": active_games_count or full_status.get("deep_analyzed_games", 0),
+            "target_games": 60,  # Always 60 for rolling window
+            "total_games_estimate": full_status.get("total_games_estimate", 0),
+            "last_error": full_status.get("last_error"),
+            "background_active": full_status.get("background_active", False),
+            "next_poll_at": full_status.get("next_poll_at"),
+        }
+    except Exception:
+        status = _default_profile_status()
+    try:
+        highlights = profile_indexer.get_highlights(user_id) or []
+    except Exception:
+        highlights = []
+    try:
+        cached_games = profile_indexer.get_games(user_id, limit=25) or []
+        games = [
+            {
+                "game_id": g.get("game_id") or g.get("external_id"),
+                "platform": g.get("platform"),
+                "opponent_name": g.get("opponent_name"),
+                "date": g.get("date") or g.get("game_date"),
+                "result": g.get("result"),
+                "opening": g.get("opening") or g.get("opening_name") or g.get("opening_eco"),
+            }
+            for g in cached_games
+        ]
+    except Exception:
+        games = []
+
+    # Kick background pipeline (never await)
+    try:
+        asyncio.create_task(profile_indexer.ensure_background_index(user_id))
+    except Exception:
+        pass
+    
+    # Trigger account initialization check (non-blocking)
+    # Also ensure background indexing is active
+    global account_init_manager
+    if account_init_manager:
+        try:
+            # Check this specific account (non-blocking)
+            print(f"🔍 Triggering account check for user {user_id}")
+            asyncio.create_task(account_init_manager.check_all_accounts())
+        except Exception as e:
+            print(f"⚠️ Error triggering account check: {e}")
+    
+    # Also ensure profile indexer is active (this will start indexing if accounts are linked)
+    if profile_indexer:
+        try:
+            # This will check for accounts and start indexing if needed
+            asyncio.create_task(profile_indexer.ensure_background_index(user_id))
+        except Exception as e:
+            print(f"⚠️ Error ensuring background index: {e}")
+
+    return {
+        "preferences": prefs,
+        "status": status,
+        "highlights": highlights,
+        "games": games,
+    }
 
 
 @app.get("/profile/stats")
@@ -5401,6 +5913,225 @@ async def profile_stats(user_id: str):
         raise HTTPException(status_code=503, detail="Profile indexer not initialized")
     stats = profile_indexer.get_stats(user_id)
     return {"stats": stats}
+
+
+@app.get("/profile/habits/{user_id}")
+async def profile_habits(user_id: str):
+    """
+    Get profile habits data for a user.
+    Returns computed habits, strengths, weaknesses, and trend chart data.
+    """
+    if not stats_manager:
+        raise HTTPException(status_code=503, detail="Personal stats manager not initialized")
+    
+    try:
+        print(f"📊 [PROFILE_HABITS_ENDPOINT] Request received for user_id: {user_id}")
+        habits_data = stats_manager.get_habits_for_frontend(user_id)
+        print(f"✅ [PROFILE_HABITS_ENDPOINT] Returning habits data for user_id: {user_id}")
+        return habits_data
+    except Exception as e:
+        import traceback
+        error_trace = traceback.format_exc()
+        print(f"❌ [PROFILE_HABITS_ENDPOINT] Error fetching habits for user_id: {user_id}")
+        print(f"   Error: {str(e)}")
+        print(f"   Traceback: {error_trace}")
+        raise HTTPException(status_code=500, detail=f"Failed to fetch profile habits: {str(e)}")
+
+
+# IMPORTANT: This route must come BEFORE /profile/analytics/{user_id} to avoid route conflicts
+@app.get("/profile/analytics/{user_id}/detailed")
+async def get_detailed_analytics(user_id: str):
+    """
+    Get comprehensive detailed analytics including:
+    - Phase accuracies with win/loss tracking
+    - Opening repertoire with accuracy
+    - Piece accuracy breakdown
+    - Tag transition analytics
+    - Time bucket performance
+    """
+    if not supabase_client:
+        raise HTTPException(status_code=503, detail="Supabase client not initialized")
+    
+    try:
+        print(f"📊 [DETAILED_ANALYTICS_ENDPOINT] Request received for user_id: {user_id}")
+        
+        # Use asyncio.to_thread to prevent blocking the event loop
+        def fetch_and_aggregate():
+            games = supabase_client.get_active_reviewed_games(user_id, limit=60, include_full_review=True)
+            if not games:
+                print(f"⚠️ [DETAILED_ANALYTICS_ENDPOINT] No games found for user_id: {user_id}")
+                from profile_analytics.detailed_analytics import DetailedAnalyticsAggregator
+                aggregator = DetailedAnalyticsAggregator()
+                return aggregator._empty_analytics()
+            
+            print(f"📚 [DETAILED_ANALYTICS_ENDPOINT] Found {len(games)} games for user_id: {user_id}")
+            
+            from profile_analytics.detailed_analytics import DetailedAnalyticsAggregator
+            aggregator = DetailedAnalyticsAggregator()
+            return aggregator.aggregate(games)
+        
+        # Run in thread pool to avoid blocking
+        detailed_analytics = await asyncio.to_thread(fetch_and_aggregate)
+        
+        print(f"✅ [DETAILED_ANALYTICS_ENDPOINT] Returning detailed analytics for user_id: {user_id}")
+        return detailed_analytics
+        
+    except Exception as e:
+        import traceback
+        error_trace = traceback.format_exc()
+        print(f"❌ [DETAILED_ANALYTICS_ENDPOINT] Error fetching detailed analytics for user_id: {user_id}")
+        print(f"   Error: {str(e)}")
+        print(f"   Traceback: {error_trace}")
+        raise HTTPException(status_code=500, detail=f"Failed to fetch detailed analytics: {str(e)}")
+
+
+@app.get("/profile/analytics/{user_id}")
+async def profile_analytics(user_id: str):
+    """
+    Get comprehensive analytics for a user including lifetime stats, patterns, and strength analysis.
+    Returns cached data if available (1-hour TTL), otherwise computes fresh analytics.
+    """
+    print(f"📊 [PROFILE_ANALYTICS_ENDPOINT] Request received for user_id: {user_id}")
+    
+    if not profile_analytics_engine:
+        print(f"❌ [PROFILE_ANALYTICS_ENDPOINT] Engine not initialized for user_id: {user_id}")
+        raise HTTPException(status_code=503, detail="Profile analytics engine not initialized")
+    
+    print(f"✅ [PROFILE_ANALYTICS_ENDPOINT] Engine initialized, calling get_full_analytics for user_id: {user_id}")
+    
+    try:
+        analytics_data = await profile_analytics_engine.get_full_analytics(user_id)
+        
+        print(f"📦 [PROFILE_ANALYTICS_ENDPOINT] Analytics data received for user_id: {user_id}, keys: {list(analytics_data.keys())}")
+        
+        # If the engine returned an error dict, return empty structure instead of error
+        if "error" in analytics_data:
+            error_msg = analytics_data.get("error", "Analytics computation failed")
+            print(f"⚠️ [PROFILE_ANALYTICS_ENDPOINT] Error in analytics data for user_id: {user_id}, error: {error_msg}")
+            # Return empty structure instead of raising error - let frontend handle gracefully
+            analytics_data = {
+                "user_id": user_id,
+                "generated_at": datetime.now().isoformat(),
+                "lifetime_stats": {},
+                "patterns": {},
+                "strength_profile": {},
+                "rolling_window": {"status": "no_data"},
+                "deltas": {}
+            }
+        
+        # Ensure all required fields exist with defaults
+        if not analytics_data:
+            analytics_data = {}
+        
+        # Always return a valid structure
+        safe_analytics_data = {
+            "user_id": user_id,
+            "generated_at": analytics_data.get("generated_at", datetime.now().isoformat()),
+            "lifetime_stats": analytics_data.get("lifetime_stats", {}),
+            "patterns": analytics_data.get("patterns", {}),
+            "strength_profile": analytics_data.get("strength_profile", {}),
+            "rolling_window": analytics_data.get("rolling_window", {"status": "no_data"}),
+            "deltas": analytics_data.get("deltas", {})
+        }
+        
+        print(f"✅ [PROFILE_ANALYTICS_ENDPOINT] Successfully returning analytics for user_id: {user_id}")
+        
+        # Save daily pattern snapshot after computing analytics (non-blocking)
+        try:
+            pattern_recognizer = profile_analytics_engine.pattern_recognizer
+            await pattern_recognizer.save_daily_pattern_snapshot(user_id, "current")
+        except Exception as snapshot_err:
+            print(f"⚠️ [PROFILE_ANALYTICS_ENDPOINT] Error saving pattern snapshot: {snapshot_err}")
+        
+        return safe_analytics_data
+    except HTTPException:
+        print(f"⚠️ [PROFILE_ANALYTICS_ENDPOINT] HTTPException raised for user_id: {user_id}")
+        # Return empty structure instead of raising - let frontend handle gracefully
+        return {
+            "user_id": user_id,
+            "generated_at": datetime.now().isoformat(),
+            "lifetime_stats": {},
+            "patterns": {},
+            "strength_profile": {},
+            "rolling_window": {"status": "no_data"},
+            "deltas": {}
+        }
+    except Exception as e:
+        import traceback
+        error_detail = f"Failed to fetch analytics: {str(e)}\n{traceback.format_exc()}"
+        print(f"❌ [PROFILE_ANALYTICS_ENDPOINT] Unexpected error for user_id: {user_id}, error: {error_detail}")
+        # Return empty structure instead of raising - let frontend handle gracefully
+        return {
+            "user_id": user_id,
+            "generated_at": datetime.now().isoformat(),
+            "lifetime_stats": {},
+            "patterns": {},
+            "strength_profile": {},
+            "rolling_window": {"status": "no_data"},
+            "deltas": {}
+        }
+
+
+@app.get("/profile/analytics/{user_id}/patterns/history")
+async def get_pattern_history(
+    user_id: str,
+    days: int = 30
+):
+    """Get pattern history for graphing (time-series data)"""
+    if not supabase_client:
+        raise HTTPException(status_code=503, detail="Database not available")
+    
+    try:
+        from datetime import datetime, timedelta
+        cutoff_date = (datetime.now() - timedelta(days=days)).date().isoformat()
+        
+        # Check if it's LocalPostgresClient
+        if hasattr(supabase_client, '_execute_query'):
+            # Use direct SQL query
+            query = """
+                SELECT * FROM public.pattern_snapshots
+                WHERE user_id = %s AND snapshot_date >= %s
+                ORDER BY snapshot_date ASC
+            """
+            patterns = supabase_client._execute_query(query, (user_id, cutoff_date))
+            return {
+                "patterns": patterns if patterns else [],
+                "days": days
+            }
+        
+        # Otherwise use Supabase client
+        result = supabase_client.client.table("pattern_snapshots")\
+            .select("*")\
+            .eq("user_id", user_id)\
+            .gte("snapshot_date", cutoff_date)\
+            .order("snapshot_date", desc=False)\
+            .execute()
+        
+        return {
+            "patterns": result.data if result.data else [],
+            "days": days
+        }
+    except Exception as e:
+        # Handle case where table doesn't exist yet (migrations not run)
+        error_msg = str(e)
+        if "does not exist" in error_msg or "relation" in error_msg.lower():
+            return {
+                "patterns": [],
+                "days": days,
+                "note": "Pattern snapshots table not yet initialized"
+            }
+        raise HTTPException(status_code=500, detail=f"Error fetching pattern history: {str(e)}")
+
+
+@app.post("/admin/check-all-accounts")
+async def check_all_accounts():
+    """Manually trigger account initialization check"""
+    global account_init_manager
+    if not account_init_manager:
+        raise HTTPException(status_code=503, detail="Account initialization manager not available")
+    
+    results = await account_init_manager.check_all_accounts()
+    return results
 
 
 class PlanReviewRequest(BaseModel):

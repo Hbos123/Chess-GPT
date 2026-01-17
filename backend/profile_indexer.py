@@ -52,7 +52,6 @@ class ProfileIndexStatus:
     target_games: int = 50
     next_poll_at: Optional[str] = None
     background_active: bool = False
-    light_analyzed_games: int = 0
     deep_analyzed_games: int = 0
 
     def to_dict(self) -> Dict[str, Any]:
@@ -196,6 +195,7 @@ class ProfileIndexingManager:
         review_fn: Optional[Callable[..., Awaitable[Dict[str, Any]]]] = None,
         engine_queue: Optional[Any] = None,
         engine_instance: Optional[Any] = None,
+        on_indexing_complete: Optional[Callable[[str], Awaitable[None]]] = None,
     ) -> None:
         self.game_fetcher = game_fetcher
         self.max_cached_games = max_cached_games
@@ -205,12 +205,12 @@ class ProfileIndexingManager:
         self.review_fn = review_fn
         self.engine_queue = engine_queue
         self.engine_instance = engine_instance
+        self.on_indexing_complete = on_indexing_complete
 
         self._status: Dict[str, ProfileIndexStatus] = {}
         self._games: Dict[str, List[Dict[str, Any]]] = {}
         self._tasks: Dict[str, asyncio.Task] = {}
         self._analysis_tasks: Dict[str, asyncio.Task] = {}
-        self._light_results: Dict[str, Dict[str, Any]] = {}
         self._deep_completed: Dict[str, set] = {}
         self._background_tasks: Dict[str, asyncio.Task] = {}
         self._next_poll_timestamp: Dict[str, float] = {}
@@ -219,14 +219,15 @@ class ProfileIndexingManager:
         self._lesson_history: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
         self._lock = asyncio.Lock()
 
-        self.prefs_dir = Path("backend/cache/profile_prefs")
+        # Use absolute path based on this file's location to ensure consistency
+        script_dir = Path(__file__).parent.resolve()
+        self.prefs_dir = script_dir / "cache" / "profile_prefs"
         self.prefs_dir.mkdir(parents=True, exist_ok=True)
 
         # Background indexing configuration
         self.background_target_games = 50
         self.background_interval_seconds = 20 * 60  # 20 minutes
         self.background_batch_size = max(5, self.max_games_per_account // 3)
-        self.light_analysis_depth = 12
         self.deep_analysis_depth = 20
 
     # ---------------------------------------------------------------------
@@ -338,6 +339,10 @@ class ProfileIndexingManager:
         time_controls: Sequence[str],
     ) -> None:
         """Start (or restart) indexing for a user."""
+        print(f"🎯 [START_INDEXING] Called for user {user_id}")
+        print(f"🎯 [START_INDEXING] Input accounts: {accounts}")
+        print(f"🎯 [START_INDEXING] Input time_controls: {time_controls}")
+        
         normalized_accounts = [
             {
                 "platform": acc.get("platform", "chesscom"),
@@ -347,8 +352,11 @@ class ProfileIndexingManager:
             if acc.get("username")
         ]
 
+        print(f"🎯 [START_INDEXING] Normalized accounts: {normalized_accounts}")
+
         if not normalized_accounts:
             # Nothing to index. Reset status.
+            print(f"⚠️ [START_INDEXING] No valid accounts after normalization")
             self._status[user_id] = ProfileIndexStatus(
                 state="idle",
                 message="Add at least one account to index games.",
@@ -367,11 +375,14 @@ class ProfileIndexingManager:
             last_updated=_utc_now(),
         )
         self._status[user_id] = status
+        print(f"✅ [START_INDEXING] Status set to queued for user {user_id}")
 
         async with self._lock:
             existing_task = self._tasks.get(user_id)
             if existing_task and not existing_task.done():
+                print(f"🔄 [START_INDEXING] Cancelling existing task for user {user_id}")
                 existing_task.cancel()
+            print(f"🚀 [START_INDEXING] Creating new indexing task for user {user_id}")
             task = asyncio.create_task(
                 self._run_indexing(
                     user_id=user_id,
@@ -380,6 +391,7 @@ class ProfileIndexingManager:
                 )
             )
             self._tasks[user_id] = task
+            print(f"✅ [START_INDEXING] Task created and stored for user {user_id}")
 
     async def _run_indexing(
         self,
@@ -390,6 +402,11 @@ class ProfileIndexingManager:
         max_games_override: Optional[int] = None,
         background: bool = False,
     ) -> None:
+        print(f"🔄 [RUN_INDEXING] Starting indexing task for user {user_id}")
+        print(f"🔄 [RUN_INDEXING] Accounts: {accounts}")
+        print(f"🔄 [RUN_INDEXING] Time controls: {time_controls}")
+        print(f"🔄 [RUN_INDEXING] Background mode: {background}")
+        
         status = self._status[user_id]
         status.target_games = self.background_target_games
         status.games_indexed = 0
@@ -412,8 +429,12 @@ class ProfileIndexingManager:
             for account in accounts:
                 status.message = f"Fetching {account['username']} ({account['platform']})"
                 status.last_updated = _utc_now()
+                print(f"📥 [RUN_INDEXING] Fetching games for {account['username']} on {account['platform']}")
 
-                platform = "chess.com" if account["platform"] == "chesscom" else "lichess"
+                # Normalize platform: handle both "chess.com" and "chesscom" formats
+                platform = "chess.com" if account["platform"] in ["chesscom", "chess.com"] else "lichess"
+                print(f"📥 [RUN_INDEXING] Normalized platform: {platform}")
+                print(f"📥 [RUN_INDEXING] Max games: {max_games_override or self.max_games_per_account}, months_back: {self.months_back}")
                 try:
                     fetched = await self.game_fetcher.fetch_games(
                         username=account["username"],
@@ -421,12 +442,17 @@ class ProfileIndexingManager:
                         max_games=max_games_override or self.max_games_per_account,
                         months_back=self.months_back,
                     )
+                    print(f"✅ [RUN_INDEXING] Fetched {len(fetched)} games for {account['username']}")
                 except Exception as exc:
+                    print(f"❌ [RUN_INDEXING] Error fetching games for {account['username']}: {exc}")
+                    import traceback
+                    traceback.print_exc()
                     status.state = "error"
                     status.last_error = str(exc)
                     status.message = f"Failed to fetch {account['username']}: {exc}"
                     status.last_updated = _utc_now()
-                    return
+                    # Don't return - continue with other accounts
+                    continue
 
                 filtered = self._filter_games_by_time_control(fetched, time_controls)
                 self._games[user_id].extend(filtered)
@@ -441,31 +467,52 @@ class ProfileIndexingManager:
                 game.get("game_id") or f"{game.get('platform')}::{game.get('date')}::{game.get('opponent_name')}"
                 for game in self._games[user_id]
             }
-            if user_id in self._light_results:
-                self._light_results[user_id] = {
-                    gid: summary
-                    for gid, summary in self._light_results[user_id].items()
-                    if gid in current_ids
-                }
             if user_id in self._deep_completed:
                 self._deep_completed[user_id] = {
                     gid for gid in self._deep_completed[user_id] if gid in current_ids
                 }
             if status:
-                status.light_analyzed_games = len(self._light_results.get(user_id, {}))
                 status.deep_analyzed_games = len(self._deep_completed.get(user_id, set()))
-            status.state = "complete" if not background else "idle"
+            # Update state and message
+            if background:
+                status.state = "idle"
+                status.message = f"Indexed {status.games_indexed} game(s). Starting analysis..."
+            else:
+                status.state = "complete"
+                status.message = f"Indexed {status.games_indexed} game(s)."
+            
             status.background_active = False
-            status.message = (
-                f"Indexed {status.games_indexed} game(s)."
-                if not background
-                else "Background refresh complete."
-            )
             status.finished_at = _utc_now()
             status.progress_percent = 100 if status.games_indexed else status.progress_percent
             status.last_updated = _utc_now()
             self._refresh_stats(user_id)
             self._schedule_analysis(user_id)
+            
+            # Trigger review callback if provided (for automatic game reviews after indexing)
+            # Trigger for both regular and background indexing
+            if self.on_indexing_complete:
+                try:
+                    # Reduced logging - only log errors
+                    # print(f"   🔄 Triggering review callback for user {user_id}...")
+                    # Update status to show we're starting reviews
+                    if status:
+                        status.state = "reviewing"
+                        status.message = f"Indexed {status.games_indexed} games. Starting analysis of 60 most recent games..."
+                        status.last_updated = _utc_now()
+                    
+                    # Do NOT await the callback here — it can be very CPU heavy and will stall the event loop,
+                    # causing unrelated endpoints (/meta, /board/tree/get, profile fetches) to time out on the client.
+                    asyncio.create_task(self.on_indexing_complete(user_id))
+                except Exception as e:
+                    print(f"⚠️ Error in on_indexing_complete callback: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    if status:
+                        status.state = "idle"
+                        status.message = f"Indexed {status.games_indexed} games. Review failed: {str(e)}"
+                        status.last_updated = _utc_now()
+            else:
+                print(f"   ⚠️ No on_indexing_complete callback set for user {user_id}")
 
         finally:
             if not background:
@@ -1327,57 +1374,27 @@ class ProfileIndexingManager:
 
     def _schedule_analysis(self, user_id: str) -> None:
         if not self.review_fn:
+            print(f"⚠️ [SCHEDULE_ANALYSIS] No review_fn available for user {user_id}")
             return
         existing = self._analysis_tasks.get(user_id)
         if existing and not existing.done():
+            print(f"ℹ️ [SCHEDULE_ANALYSIS] Analysis task already running for user {user_id}")
             return
+        print(f"🚀 [SCHEDULE_ANALYSIS] Creating analysis pipeline task for user {user_id}")
         task = asyncio.create_task(self._run_analysis_pipeline(user_id))
         self._analysis_tasks[user_id] = task
+        print(f"✅ [SCHEDULE_ANALYSIS] Analysis pipeline task created for user {user_id}")
 
     async def _run_analysis_pipeline(self, user_id: str) -> None:
+        """Run deep analysis pipeline - only full analysis, no light analysis"""
+        print(f"🔬 [ANALYSIS_PIPELINE] Starting analysis pipeline for user {user_id}")
         try:
-            await self._run_light_analysis(user_id)
             await self._run_deep_analysis(user_id)
+            print(f"✅ [ANALYSIS_PIPELINE] Completed analysis pipeline for user {user_id}")
         except Exception as exc:
-            print(f"⚠️  Analysis pipeline error for {user_id}: {exc}")
-
-    async def _run_light_analysis(self, user_id: str) -> None:
-        if not self.review_fn:
-            return
-        games = list(self._games.get(user_id, []))
-        if not games:
-            return
-        self._light_results.setdefault(user_id, {})
-        status = self._status.get(user_id)
-        for game in games:
-            game_id = game.get("game_id") or f"{game.get('platform')}::{game.get('date')}::{game.get('opponent_name')}"
-            if game_id in self._light_results[user_id]:
-                continue
-            if not game.get("pgn"):
-                continue
-            if status:
-                status.message = f"Light analysis – {game.get('opponent_name', 'game')}"
-                status.last_updated = _utc_now()
-            try:
-                result = await self.review_fn(
-                    game["pgn"],
-                    side_focus="both",
-                    include_timestamps=False,
-                    depth=self.light_analysis_depth,
-                    engine_instance=self.engine_instance,
-                )
-            except Exception as exc:
-                print(f"⚠️  Light analysis failed for {game_id}: {exc}")
-                continue
-            if not result or "ply_records" not in result:
-                continue
-            summary = self._summarize_light_result(result, game)
-            self._light_results[user_id][game_id] = summary
-            self._apply_light_summary_to_game(game, summary)
-            if status:
-                status.light_analyzed_games = len(self._light_results[user_id])
-                status.last_updated = _utc_now()
-        self._refresh_stats(user_id)
+            print(f"❌ [ANALYSIS_PIPELINE] Analysis pipeline error for {user_id}: {exc}")
+            import traceback
+            traceback.print_exc()
 
     def _summarize_light_result(self, review_result: Dict[str, Any], game: Dict[str, Any]) -> Dict[str, Any]:
         player_color = game.get("player_color", "white")
@@ -1659,50 +1676,13 @@ class ProfileIndexingManager:
             "resilience": resilience,
         }
 
-    def _apply_light_summary_to_game(self, game: Dict[str, Any], summary: Dict[str, Any]) -> None:
-        if summary.get("player_accuracy") is not None:
-            game["player_accuracy"] = summary["player_accuracy"]
-        if summary.get("blunder_count") is not None:
-            game["blunder_count"] = summary["blunder_count"]
-        if summary.get("mistake_count") is not None:
-            game["mistake_count"] = summary["mistake_count"]
-        if summary.get("phase_accuracy"):
-            game["phase_accuracy"] = summary["phase_accuracy"]
-        game["critical_moves"] = summary.get("critical", [])
-        if summary.get("advanced_metrics"):
-            game["advanced_metrics"] = summary["advanced_metrics"]
 
     async def _run_deep_analysis(self, user_id: str) -> None:
-        if not self.engine_queue:
-            return
-        light_results = self._light_results.get(user_id, {})
-        if not light_results:
-            return
-        completed = self._deep_completed.setdefault(user_id, set())
-        status = self._status.get(user_id)
-        for game in self._games.get(user_id, []):
-            game_id = game.get("game_id") or f"{game.get('platform')}::{game.get('date')}::{game.get('opponent_name')}"
-            if game_id in completed:
-                continue
-            summary = light_results.get(game_id)
-            if not summary:
-                continue
-            critical = summary.get("critical") or []
-            if not critical:
-                completed.add(game_id)
-                continue
-            if status:
-                status.message = f"Deep analysis – {game.get('opponent_name', 'game')}"
-                status.last_updated = _utc_now()
-            for record in critical:
-                fen = record.get("fen_before")
-                if not fen:
-                    continue
-                await self._reanalyze_critical_move(fen)
-            completed.add(game_id)
-            if status:
-                status.deep_analyzed_games = len(completed)
-                status.last_updated = _utc_now()
+        """Run deep analysis - this is now a no-op since full analysis happens in start_indexing"""
+        # Deep analysis is now handled automatically in /profile/start_indexing
+        # which does full game reviews for the 30 most recent games
+        # This method is kept for compatibility but does nothing
+        pass
 
     async def _reanalyze_critical_move(self, fen: str) -> None:
         if not self.engine_queue:
@@ -1721,13 +1701,71 @@ class ProfileIndexingManager:
     async def ensure_background_index(self, user_id: str) -> None:
         """Called when the user is active to keep background indexing humming."""
         self._last_activity[user_id] = time.monotonic()
+        
+        # Ensure status exists
+        if user_id not in self._status:
+            prefs = self.load_preferences(user_id) or {}
+            accounts = prefs.get("accounts", [])
+            if not accounts and self.supabase_client:
+                profile = self.supabase_client.get_or_create_profile(user_id)
+                if profile:
+                    accounts = profile.get("linked_accounts") or []
+            
+            if accounts:
+                self._status[user_id] = ProfileIndexStatus(
+                    state="idle",
+                    message="Ready to fetch games",
+                    total_accounts=len(accounts),
+                    accounts=accounts,
+                    games_indexed=len(self._games.get(user_id, [])),
+                    deep_analyzed_games=len(self._deep_completed.get(user_id, set())),
+                    last_updated=_utc_now(),
+                )
+            else:
+                self._status[user_id] = ProfileIndexStatus(
+                    state="idle",
+                    message="No accounts linked",
+                    last_updated=_utc_now(),
+                )
+        
+        # Never block the event loop / request path here.
+        # Schedule any heavy work in the background so endpoints like /meta and /board/tree/get stay responsive.
         self._schedule_analysis(user_id)
-        await self._maybe_schedule_background(user_id)
+        try:
+            asyncio.create_task(self._maybe_schedule_background(user_id))
+        except Exception:
+            # best-effort
+            pass
 
     async def _maybe_schedule_background(self, user_id: str) -> None:
         total_games = len(self._games.get(user_id, []))
         status = self._status.get(user_id)
-        if not status or total_games < self.background_target_games:
+        if not status:
+            return
+        
+        # If we have accounts but no games yet, start indexing
+        if total_games == 0 and status.accounts:
+            # Start initial indexing
+            prefs = self.load_preferences(user_id) or {}
+            time_controls = prefs.get("time_controls", [])
+            if not time_controls and self.supabase_client:
+                profile = self.supabase_client.get_or_create_profile(user_id)
+                if profile:
+                    time_controls = profile.get("time_controls", [])
+            
+            if status.accounts:
+                # Start indexing in background (do not await; keep loop responsive)
+                asyncio.create_task(
+                    self._run_indexing(
+                        user_id=user_id,
+                        accounts=status.accounts,
+                        time_controls=[tc.lower() for tc in time_controls] if time_controls else [],
+                        background=True,
+                    )
+                )
+            return
+        
+        if total_games < self.background_target_games:
             return
         if status.state not in {"idle", "complete"}:
             return
@@ -1748,6 +1786,25 @@ class ProfileIndexingManager:
         self._background_tasks[user_id] = task
 
     async def _run_background_refresh(self, user_id: str) -> None:
+        # Ensure status exists
+        if user_id not in self._status:
+            prefs = self.load_preferences(user_id) or {}
+            accounts = prefs.get("accounts", [])
+            if not accounts and self.supabase_client:
+                profile = self.supabase_client.get_or_create_profile(user_id)
+                if profile:
+                    accounts = profile.get("linked_accounts") or []
+            
+            self._status[user_id] = ProfileIndexStatus(
+                state="idle",
+                message="Initializing...",
+                total_accounts=len(accounts) if accounts else 0,
+                accounts=accounts,
+                games_indexed=len(self._games.get(user_id, [])),
+                deep_analyzed_games=len(self._deep_completed.get(user_id, set())),
+                last_updated=_utc_now(),
+            )
+        
         status = self._status.get(user_id)
         accounts = status.accounts if status else []
         prefs = self.load_preferences(user_id) or {}
@@ -1755,7 +1812,18 @@ class ProfileIndexingManager:
         if not accounts:
             accounts = prefs.get("accounts", [])
         if not accounts:
+            if status:
+                status.message = "No accounts linked"
+                status.last_updated = _utc_now()
             return
+        
+        # Update status to show we're starting
+        if status:
+            status.state = "background"
+            status.message = "Starting background refresh..."
+            status.background_active = True
+            status.last_updated = _utc_now()
+        
         try:
             await self._run_indexing(
                 user_id=user_id,
@@ -1771,6 +1839,7 @@ class ProfileIndexingManager:
             status = self._status.get(user_id)
             if status:
                 status.next_poll_at = _utc_from_timestamp(time.time() + self.background_interval_seconds)
+                status.background_active = False
 
     @staticmethod
     def _dedupe_and_sort_games(games: List[Dict[str, Any]]) -> List[Dict[str, Any]]:

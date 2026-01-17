@@ -46,6 +46,8 @@ OPENING_PATTERNS = {
     "london": {"eco": "D02", "keywords": ["london"], "moves": ["d4", "d5", "Nf3", "Nf6", "Bf4"]},
     "pirc": {"eco": "B07", "keywords": ["pirc"], "moves": ["e4", "d6", "d4", "Nf6"]},
     "alekhine": {"eco": "B02", "keywords": ["alekhine"], "moves": ["e4", "Nf6"]},
+    "russian": {"eco": "C42", "keywords": ["russian", "petrov"], "moves": ["e4", "e5", "Nf3", "Nf6"]},
+    "petrov": {"eco": "C42", "keywords": ["russian", "petrov"], "moves": ["e4", "e5", "Nf3", "Nf6"]},
 }
 def _normalize_pattern_data(data: Dict) -> Optional[Dict]:
     """Ensure pattern data contains a SAN move list."""
@@ -103,11 +105,14 @@ def fuzzy_match_opening(query: str) -> Optional[Dict]:
     
     # Direct lookup
     if query_lower in OPENING_PATTERNS:
-        return _normalize_pattern_data(OPENING_PATTERNS[query_lower])
+        normalized = _normalize_pattern_data(OPENING_PATTERNS[query_lower])
+        if normalized:
+            return normalized
     
-    # Keyword matching
+    # Keyword matching - check if any keyword from patterns appears in the query
     for opening_name, data in OPENING_PATTERNS.items():
-        if any(keyword in query_lower for keyword in data["keywords"]):
+        keywords = data.get("keywords", [])
+        if any(keyword in query_lower for keyword in keywords):
             normalized = _normalize_pattern_data(data)
             if normalized:
                 return normalized
@@ -216,7 +221,8 @@ async def resolve_opening(
         }
     
     # Fallback: Try to treat as a single opening move (e.g., "e4", "d4")
-    if len(query.split()) == 1:
+    # Only try this if it's a single word AND looks like a chess move (2-4 chars, starts with letter)
+    if len(query.split()) == 1 and len(query) >= 2 and len(query) <= 4 and query[0].isalpha():
         try:
             board = chess.Board()
             move = board.parse_san(query)

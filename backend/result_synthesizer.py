@@ -31,8 +31,9 @@ class SynthesisReport:
 class ResultSynthesizer:
     """Synthesizes investigation results into reports"""
     
-    def __init__(self, openai_client=None):
+    def __init__(self, openai_client=None, llm_router=None):
         self.client = openai_client
+        self.llm_router = llm_router
     
     async def synthesize(
         self,
@@ -53,7 +54,7 @@ class ResultSynthesizer:
         Returns:
             SynthesisReport
         """
-        if self.client:
+        if self.llm_router or self.client:
             return await self._llm_synthesize(results, synthesis_prompt, format, investigation_type)
         else:
             return self._basic_synthesize(results, synthesis_prompt, investigation_type)
@@ -97,17 +98,28 @@ Output your response as a structured report with clear sections."""
 Create a comprehensive synthesis report."""
 
         try:
-            response = self.client.chat.completions.create(
-                model="gpt-4o",  # Use stronger model for synthesis
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
-                ],
-                temperature=0.4,
-                max_tokens=3000
-            )
-            
-            content = response.choices[0].message.content.strip()
+            if self.llm_router:
+                content = self.llm_router.complete(
+                    session_id="default",
+                    stage="result_synthesizer",
+                    system_prompt=system_prompt,
+                    user_text=user_prompt,
+                    temperature=0.4,
+                    model="gpt-5",
+                    max_tokens=3000,
+                ).strip()
+            else:
+                response = self.client.chat.completions.create(
+                    model="gpt-5",
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt}
+                    ],
+                    temperature=0.4,
+                    max_tokens=3000
+                )
+                
+                content = response.choices[0].message.content.strip()
             return self._parse_llm_report(content, investigation_type)
             
         except Exception as e:

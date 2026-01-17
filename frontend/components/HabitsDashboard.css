@@ -1,0 +1,581 @@
+/* HabitsDashboard Styles */
+
+.habits-dashboard {
+  padding: 1rem;
+  background: var(--bg-secondary, #1a1a2e);
+  border-radius: 12px;
+}
+
+.habits-dashboard.loading,
+.habits-dashboard.error,
+.habits-dashboard.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 200px;
+  color: var(--text-secondary, #9ca3af);
+  text-align: center;
+  gap: 0.5rem;
+}
+
+.habits-dashboard.empty .empty-hint {
+  font-size: 0.85rem;
+  opacity: 0.7;
+}
+
+.loading-spinner {
+  color: var(--accent, #6366f1);
+}
+
+/* Header */
+.habits-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 1.25rem;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.habits-title h3 {
+  margin: 0;
+  font-size: 1.1rem;
+  color: var(--text-primary, #fff);
+  font-weight: 600;
+}
+
+.habits-subtitle {
+  display: block;
+  font-size: 0.8rem;
+  color: var(--text-secondary, #9ca3af);
+  margin-top: 0.25rem;
+}
+
+.habits-view-toggle {
+  display: flex;
+  gap: 0.25rem;
+  background: var(--bg-tertiary, #0f0f23);
+  border-radius: 8px;
+  padding: 3px;
+}
+
+.habits-view-toggle button {
+  padding: 0.4rem 0.8rem;
+  font-size: 0.8rem;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary, #9ca3af);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.habits-view-toggle button.active {
+  background: var(--accent, #6366f1);
+  color: white;
+}
+
+.habits-view-toggle button:hover:not(.active) {
+  background: var(--bg-hover, #2a2a4a);
+}
+
+/* Grid layout */
+.habits-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.habits-section h4 {
+  margin: 0 0 0.75rem 0;
+  font-size: 0.9rem;
+  color: var(--text-primary, #fff);
+  font-weight: 500;
+}
+
+.habits-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 0.875rem;
+}
+
+/* Habit Card */
+.habit-card {
+  background: var(--bg-tertiary, #0f0f23);
+  border-radius: 10px;
+  padding: 0.875rem;
+  border: 1px solid transparent;
+  transition: all 0.2s;
+  cursor: pointer;
+  user-select: none;
+}
+
+.habit-card:hover {
+  border-color: var(--border-hover, #4a4a6a);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.habit-card:active {
+  transform: translateY(0);
+  box-shadow: none;
+}
+
+.habit-card:focus-visible {
+  outline: 2px solid var(--accent, #6366f1);
+  outline-offset: 2px;
+}
+
+.habit-card.strength {
+  border-left: 3px solid #22c55e;
+}
+
+.habit-card.weakness {
+  border-left: 3px solid #ef4444;
+}
+
+.habit-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.habit-name {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-primary, #fff);
+  line-height: 1.3;
+}
+
+/* Trend Badge */
+.trend-badge {
+  font-size: 0.7rem;
+  padding: 0.15rem 0.4rem;
+  border-radius: 4px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.trend-badge.trend-up {
+  background: rgba(34, 197, 94, 0.15);
+  color: #22c55e;
+}
+
+.trend-badge.trend-down {
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+}
+
+.trend-badge.trend-stable {
+  background: rgba(156, 163, 175, 0.15);
+  color: #9ca3af;
+}
+
+/* Habit Metrics */
+.habit-metrics {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.habit-accuracy {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.accuracy-value {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: var(--text-primary, #fff);
+}
+
+.accuracy-deviation {
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+
+.accuracy-deviation.positive {
+  color: #22c55e;
+}
+
+.accuracy-deviation.negative {
+  color: #ef4444;
+}
+
+/* Sparkline */
+.sparkline {
+  flex-shrink: 0;
+}
+
+/* Additional Metrics */
+.habit-additional-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--border-color, #2a2a4a);
+}
+
+.habit-metric-item {
+  font-size: 0.7rem;
+  color: var(--text-secondary, #9ca3af);
+  padding: 0.2rem 0.4rem;
+  background: var(--bg-secondary, #1a1a2e);
+  border-radius: 4px;
+}
+
+/* Habit Footer */
+.habit-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.habit-sample {
+  font-size: 0.7rem;
+  color: var(--text-tertiary, #6b7280);
+}
+
+.significance-bar {
+  width: 40px;
+  height: 3px;
+  background: var(--bg-secondary, #1a1a2e);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.significance-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #6366f1, #8b5cf6);
+  border-radius: 2px;
+  transition: width 0.3s ease;
+}
+
+/* Trend Chart */
+.habits-trend-view {
+  min-height: 280px;
+}
+
+.trend-chart-container {
+  background: var(--bg-tertiary, #0f0f23);
+  border-radius: 10px;
+  padding: 1rem;
+}
+
+.trend-chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.3rem 0.6rem;
+  background: var(--bg-secondary, #1a1a2e);
+  border: 2px solid transparent;
+  border-radius: 6px;
+  font-size: 0.75rem;
+  color: var(--text-secondary, #9ca3af);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.legend-item:hover {
+  background: var(--bg-hover, #2a2a4a);
+}
+
+.legend-item.active {
+  color: var(--text-primary, #fff);
+}
+
+.legend-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.trend-chart-svg {
+  display: block;
+  width: 100%;
+  max-height: 200px;
+}
+
+.axis-label {
+  font-size: 10px;
+  fill: var(--text-tertiary, #6b7280);
+}
+
+.baseline-label {
+  font-size: 9px;
+  fill: var(--text-tertiary, #6b7280);
+}
+
+.trend-chart-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 150px;
+  color: var(--text-tertiary, #6b7280);
+  font-size: 0.85rem;
+}
+
+/* Show More Button */
+.show-more-container {
+  display: flex;
+  justify-content: center;
+  margin-top: 1rem;
+}
+
+.show-more-btn {
+  padding: 0.5rem 1.5rem;
+  background: var(--bg-tertiary, #0f0f23);
+  border: 1px solid var(--border-color, #2a2a4a);
+  border-radius: 8px;
+  color: var(--text-secondary, #9ca3af);
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.show-more-btn:hover {
+  background: var(--bg-hover, #2a2a4a);
+  color: var(--text-primary, #fff);
+  border-color: var(--border-hover, #4a4a6a);
+}
+
+/* Large Sparkline for Modal */
+.large-sparkline {
+  display: block;
+  width: 100%;
+  max-height: 180px;
+}
+
+/* Habit Detail Modal */
+.habit-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.75);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 1rem;
+  animation: fadeIn 0.15s ease-out;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.habit-modal {
+  background: var(--bg-secondary, #1a1a2e);
+  border-radius: 16px;
+  width: 100%;
+  max-width: 550px;
+  max-height: 90vh;
+  overflow-y: auto;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
+  animation: slideUp 0.2s ease-out;
+}
+
+@keyframes slideUp {
+  from { 
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to { 
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  padding: 1.25rem 1.5rem;
+  border-bottom: 1px solid var(--border-color, #2a2a4a);
+}
+
+.modal-header h3 {
+  margin: 0;
+  font-size: 1.25rem;
+  color: var(--text-primary, #fff);
+  font-weight: 600;
+}
+
+.modal-group-badge {
+  display: inline-block;
+  margin-top: 0.4rem;
+  padding: 0.2rem 0.6rem;
+  border-radius: 4px;
+  font-size: 0.7rem;
+  color: white;
+  font-weight: 500;
+}
+
+.modal-close {
+  background: transparent;
+  border: none;
+  font-size: 1.75rem;
+  color: var(--text-secondary, #9ca3af);
+  cursor: pointer;
+  line-height: 1;
+  padding: 0.25rem;
+  border-radius: 4px;
+  transition: all 0.15s;
+}
+
+.modal-close:hover {
+  color: var(--text-primary, #fff);
+  background: var(--bg-hover, #2a2a4a);
+}
+
+.modal-metrics {
+  display: flex;
+  gap: 1.5rem;
+  padding: 1.25rem 1.5rem;
+  background: var(--bg-tertiary, #0f0f23);
+  flex-wrap: wrap;
+}
+
+.modal-metric {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 70px;
+}
+
+.modal-metric .metric-value {
+  font-size: 1.4rem;
+  font-weight: 700;
+  color: var(--text-primary, #fff);
+}
+
+.modal-metric .metric-value.positive {
+  color: #22c55e;
+}
+
+.modal-metric .metric-value.negative {
+  color: #ef4444;
+}
+
+.modal-metric .metric-label {
+  font-size: 0.7rem;
+  color: var(--text-tertiary, #6b7280);
+  text-transform: uppercase;
+  letter-spacing: 0.025em;
+}
+
+.modal-chart {
+  padding: 1.25rem 1.5rem;
+  min-height: 180px;
+}
+
+.modal-overlay-options {
+  padding: 1rem 1.5rem;
+  border-top: 1px solid var(--border-color, #2a2a4a);
+}
+
+.modal-overlay-options h4 {
+  margin: 0 0 0.75rem;
+  font-size: 0.85rem;
+  color: var(--text-secondary, #9ca3af);
+  font-weight: 500;
+}
+
+.overlay-option {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.5rem 0;
+  font-size: 0.85rem;
+  color: var(--text-primary, #fff);
+  cursor: pointer;
+  border-bottom: 1px solid var(--border-color, #2a2a4a);
+}
+
+.overlay-option:last-child {
+  border-bottom: none;
+}
+
+.overlay-option input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent, #6366f1);
+  cursor: pointer;
+}
+
+.overlay-label {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex: 1;
+}
+
+.overlay-value {
+  color: var(--text-secondary, #9ca3af);
+  font-size: 0.8rem;
+}
+
+.modal-footer {
+  padding: 1rem 1.5rem;
+  border-top: 1px solid var(--border-color, #2a2a4a);
+  text-align: center;
+}
+
+.modal-footer .habit-sample {
+  font-size: 0.8rem;
+  color: var(--text-tertiary, #6b7280);
+}
+
+/* Responsive */
+@media (max-width: 600px) {
+  .habits-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  
+  .habits-view-toggle {
+    align-self: flex-start;
+  }
+  
+  .habits-cards {
+    grid-template-columns: 1fr;
+  }
+  
+  .habit-card {
+    padding: 1rem;
+  }
+  
+  .trend-chart-legend {
+    justify-content: center;
+  }
+  
+  .habit-modal {
+    max-height: 100vh;
+    border-radius: 12px 12px 0 0;
+    margin-top: auto;
+  }
+  
+  .modal-metrics {
+    gap: 1rem;
+  }
+  
+  .modal-metric .metric-value {
+    font-size: 1.2rem;
+  }
+}

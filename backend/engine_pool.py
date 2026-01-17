@@ -120,17 +120,32 @@ class EnginePool:
                 await self.shutdown()
                 return False
     
-    async def acquire(self) -> Tuple[int, chess.engine.UciProtocol]:
+    async def acquire(self, timeout: float = 60.0) -> Tuple[int, chess.engine.UciProtocol]:
         """
         Acquire an available engine from the pool.
-        Blocks until an engine is available.
+        Blocks until an engine is available, with optional timeout.
+        
+        Args:
+            timeout: Maximum time to wait for an engine (seconds). Default 60s.
+                    If None, waits indefinitely.
         
         Returns: (engine_id, engine) tuple
+        
+        Raises:
+            asyncio.TimeoutError: If timeout is exceeded
         """
         if not self._initialized:
             raise RuntimeError("Engine pool not initialized. Call initialize() first.")
         
-        engine_id, engine = await self.available.get()
+        if timeout is None:
+            engine_id, engine = await self.available.get()
+        else:
+            try:
+                engine_id, engine = await asyncio.wait_for(self.available.get(), timeout=timeout)
+            except asyncio.TimeoutError:
+                print(f"   ⚠️ [ENGINE_POOL] Timeout waiting for available engine after {timeout}s")
+                raise
+        
         self.engine_status[engine_id].is_available = False
         self.engine_status[engine_id].last_used = time.time()
         return engine_id, engine
@@ -145,19 +160,53 @@ class EnginePool:
         self,
         fen: str,
         depth: int = 14,
-        multipv: int = 2
+        multipv: int = 2,
+        acquire_timeout: float = 60.0,
+        analysis_timeout: float = 120.0
     ) -> Dict[str, Any]:
         """
         Analyze a single position using an engine from the pool.
+        
+        Args:
+            fen: Position FEN string
+            depth: Analysis depth
+            multipv: Number of principal variations
+            acquire_timeout: Max time to wait for available engine (seconds)
+            analysis_timeout: Max time for engine analysis (seconds)
+        
+        Returns:
+            Dict with success, engine_id, result/error
         """
-        engine_id, engine = await self.acquire()
+        engine_id = None
+        engine = None
         try:
+            # Acquire engine with timeout
+            engine_id, engine = await self.acquire(timeout=acquire_timeout)
+            
             board = chess.Board(fen)
-            result = await engine.analyse(board, chess.engine.Limit(depth=depth), multipv=multipv)
+            print(f"      🔍 [ENGINE_POOL] analyze_single:", flush=True)
+            print(f"         - Input FEN: {fen}", flush=True)
+            print(f"         - Board FEN: {board.fen()}", flush=True)
+            print(f"         - Side to move: {'WHITE' if board.turn == chess.WHITE else 'BLACK'}", flush=True)
+            
+            # Run analysis with timeout
+            result = await asyncio.wait_for(
+                engine.analyse(board, chess.engine.Limit(depth=depth), multipv=multipv),
+                timeout=analysis_timeout
+            )
+            
             return {
                 "success": True,
                 "engine_id": engine_id,
                 "result": result
+            }
+        except asyncio.TimeoutError as e:
+            error_msg = f"Analysis timeout after {analysis_timeout}s" if engine_id is not None else f"Engine acquisition timeout after {acquire_timeout}s"
+            print(f"   ⚠️ [ENGINE_POOL] {error_msg}")
+            return {
+                "success": False,
+                "engine_id": engine_id,
+                "error": error_msg
             }
         except Exception as e:
             return {
@@ -166,7 +215,8 @@ class EnginePool:
                 "error": str(e)
             }
         finally:
-            await self.release(engine_id, engine)
+            if engine_id is not None and engine is not None:
+                await self.release(engine_id, engine)
     
     async def analyze_position_pair(
         self,
@@ -412,20 +462,57 @@ class EnginePool:
                     try:
                         board = chess.Board(fen)
                         
-                        # Theme/tag calculation in process pool
-                        themes_future = loop.run_in_executor(
-                            self.process_pool, compute_themes_and_tags, fen
-                        )
+                        # Theme/tag calculation in process pool (with recovery)
+                        themes_future = None
+                        try:
+                            themes_future = loop.run_in_executor(
+                                self.process_pool, compute_themes_and_tags, fen
+                            )
+                        except RuntimeError as e:
+                            if "process pool is not usable" in str(e):
+                                print(f"   ⚠️ Process pool died, recreating...")
+                                await self._recreate_process_pool()
+                                themes_future = loop.run_in_executor(
+                                    self.process_pool, compute_themes_and_tags, fen
+                                )
+                            else:
+                                raise
                         
-                        # Engine analysis (multipv=2 for all positions)
-                        info = await engine.analyse(
-                            board,
-                            chess.engine.Limit(depth=depth),
-                            multipv=multipv
-                        )
+                        # Engine analysis (multipv=2 for all positions) with crash recovery
+                        info = None
+                        max_retries = 2
+                        for retry in range(max_retries):
+                            try:
+                                info = await engine.analyse(
+                                    board,
+                                    chess.engine.Limit(depth=depth),
+                                    multipv=multipv
+                                )
+                                break  # Success, exit retry loop
+                            except chess.engine.EngineTerminatedError:
+                                if retry < max_retries - 1:
+                                    print(f"   ⚠️ Engine {engine_id} crashed, recreating...")
+                                    await self._recreate_engine(engine_id)
+                                    # Get the recreated engine
+                                    engine = self.engines[engine_id]
+                                    print(f"   ✓ Engine {engine_id} recreated, retrying...")
+                                else:
+                                    raise  # Last retry failed, propagate error
                         
-                        # Get theme/tag results
-                        raw = await themes_future
+                        # Get theme/tag results (with recovery)
+                        try:
+                            raw = await themes_future
+                        except RuntimeError as e:
+                            if "process pool is not usable" in str(e):
+                                print(f"   ⚠️ Process pool died during execution, recreating...")
+                                await self._recreate_process_pool()
+                                themes_future = loop.run_in_executor(
+                                    self.process_pool, compute_themes_and_tags, fen
+                                )
+                                raw = await themes_future
+                            else:
+                                raise
+                        
                         raw["theme_scores"] = compute_theme_scores(raw["themes"])
                         
                         # Extract engine eval
@@ -455,18 +542,42 @@ class EnginePool:
                                 "depth": pv_info.get("depth", depth)
                             })
                         
+                        # Add scoring and compartmentalization
+                        from significance_scorer import SignificanceScorer
+                        from raw_data_compartmentalizer import RawDataCompartmentalizer
+                        
+                        # Score all metrics
+                        scored_insights = SignificanceScorer.score_all_metrics_in_raw_analysis(raw)
+                        
+                        # Compartmentalize for LLM access
+                        compartments = RawDataCompartmentalizer.compartmentalize({
+                            **raw,
+                            "scored_insights": scored_insights
+                        })
+                        
                         # Cache results
                         fen_analysis_cache[fen] = {
                             "fen": fen,
                             "engine_info": serialized_info,
                             "eval_cp": eval_cp,
                             "best_move_uci": best_move_uci,
+                            "scored_insights": scored_insights,
+                            "compartments": compartments,
                             **raw
                         }
                         
                     except Exception as e:
-                        print(f"   ⚠️ Analysis error for FEN: {e}")
-                        fen_analysis_cache[fen] = {"error": str(e)}
+                        error_msg = str(e)
+                        print(f"   ⚠️ Analysis error for FEN: {error_msg}")
+                        
+                        # Check if process pool died
+                        if "process pool is not usable" in error_msg or "child process terminated" in error_msg.lower():
+                            try:
+                                await self._recreate_process_pool()
+                            except Exception as pool_err:
+                                print(f"   ❌ Failed to recreate process pool: {pool_err}")
+                        
+                        fen_analysis_cache[fen] = {"error": error_msg}
                     
                     # Update progress - report as move analysis progress
                     async with progress_lock:
@@ -614,11 +725,22 @@ class EnginePool:
                         # Check cache first
                         best_move_analysis = fen_analysis_cache.get(fen_after_best)
                         if not best_move_analysis:
-                            # Compute themes/tags for best move position
-                            raw_best = await loop.run_in_executor(
-                                self.process_pool, compute_themes_and_tags, fen_after_best
-                            )
-                            best_move_tags = raw_best.get("tags", [])
+                            # Compute themes/tags for best move position (with recovery)
+                            try:
+                                raw_best = await loop.run_in_executor(
+                                    self.process_pool, compute_themes_and_tags, fen_after_best
+                                )
+                                best_move_tags = raw_best.get("tags", [])
+                            except RuntimeError as e:
+                                if "process pool is not usable" in str(e) or "child process terminated" in str(e).lower():
+                                    print(f"   ⚠️ Process pool died during best move analysis, recreating...")
+                                    await self._recreate_process_pool()
+                                    raw_best = await loop.run_in_executor(
+                                        self.process_pool, compute_themes_and_tags, fen_after_best
+                                    )
+                                    best_move_tags = raw_best.get("tags", [])
+                                else:
+                                    raise
                         else:
                             best_move_tags = best_move_analysis.get("tags", [])
                     except Exception as e:
@@ -640,8 +762,35 @@ class EnginePool:
                     threat_category = None
                     threat_description = None
                 
+                # Add scoring for raw_after (with delta from raw_before)
+                from significance_scorer import SignificanceScorer
+                from raw_data_compartmentalizer import RawDataCompartmentalizer
+                
+                # Score raw_after with deltas from raw_before
+                scored_insights_after = SignificanceScorer.score_all_metrics_in_raw_analysis(
+                    analysis_after,
+                    raw_before=analysis_before
+                )
+                
+                # Score CP loss
+                cp_loss_score = SignificanceScorer.score_cp_loss(cp_loss)
+                scored_insights_after["cp_loss"] = cp_loss_score
+                
+                # Score second-best gap
+                if second_best_gap_cp > 0:
+                    gap_score = SignificanceScorer.score_second_best_gap(second_best_gap_cp)
+                    scored_insights_after["second_best_gap"] = gap_score
+                
+                # Add scored insights to analysis_after
+                analysis_after["scored_insights"] = scored_insights_after
+                analysis_after["compartments"] = RawDataCompartmentalizer.compartmentalize(analysis_after)
+                
+                # Also add compartments to analysis_before if not present
+                if "compartments" not in analysis_before:
+                    analysis_before["compartments"] = RawDataCompartmentalizer.compartmentalize(analysis_before)
+                
                 # Build ply record
-                results[idx] = {
+                ply_record = {
                     "success": True,
                     "ply": ply,
                     "side_moved": side_moved,
@@ -675,6 +824,44 @@ class EnginePool:
                     "key_point_labels": [],
                     "notes": ""
                 }
+                
+                # Generate structured explanation (if not a theory move or excellent move)
+                if not is_theory_move and cp_loss > 20:
+                    try:
+                        from explanation_generator import generate_move_explanation
+                        
+                        # Determine game phase (simple piece-count based)
+                        try:
+                            board_for_phase = chess.Board(fen_before)
+                            piece_count = len(board_for_phase.piece_map())
+                            if piece_count >= 28:
+                                phase = "opening"
+                            elif piece_count >= 12:
+                                phase = "middlegame"
+                            else:
+                                phase = "endgame"
+                        except:
+                            # Fallback to ply-based phase detection
+                            phase = "opening" if ply <= 20 else ("endgame" if ply > 60 else "middlegame")
+                        
+                        # Generate structured analysis
+                        structured_analysis = generate_move_explanation(
+                            ply_record=ply_record,
+                            raw_before=analysis_before,
+                            raw_after=analysis_after,
+                            best_move_tags=best_move_tags,
+                            engine_info=info_before,
+                            ply_records=results[:idx] if idx > 0 else None,  # Previous records for context
+                            phase=phase
+                        )
+                        ply_record["structured_analysis"] = structured_analysis
+                    except Exception as e:
+                        print(f"   ⚠️ Error generating explanation for ply {ply}: {e}")
+                        import traceback
+                        traceback.print_exc()
+                        # Continue without structured analysis
+                
+                results[idx] = ply_record
                 
             except Exception as e:
                 print(f"   ⚠️ Error building ply record {ply}: {e}")
@@ -775,6 +962,55 @@ class EnginePool:
                 break
         
         print("✅ Engine pool shutdown complete")
+    
+    async def _recreate_process_pool(self):
+        """Recreate ProcessPoolExecutor after it becomes unusable."""
+        async with self._lock:
+            if self.process_pool:
+                try:
+                    self.process_pool.shutdown(wait=False)
+                except:
+                    pass
+                self.process_pool = None
+            
+            try:
+                self.process_pool = ProcessPoolExecutor(max_workers=self.pool_size)
+                print(f"   ✓ ProcessPool recreated with {self.pool_size} workers")
+            except Exception as e:
+                print(f"   ❌ Failed to recreate ProcessPool: {e}")
+                raise
+    
+    async def _recreate_engine(self, engine_id: int):
+        """Recreate a crashed engine."""
+        async with self._lock:
+            try:
+                # Remove old engine
+                if engine_id < len(self.engines):
+                    old_engine = self.engines[engine_id]
+                    try:
+                        await old_engine.quit()
+                    except:
+                        pass
+                
+                # Create new engine
+                transport, new_engine = await chess.engine.popen_uci(self.stockfish_path)
+                if engine_id < len(self.engines):
+                    self.engines[engine_id] = new_engine
+                else:
+                    self.engines.append(new_engine)
+                
+                # Update status
+                self.engine_status[engine_id] = EngineStatus(
+                    id=engine_id,
+                    is_available=True,
+                    analyses_completed=0,
+                    last_used=None
+                )
+                
+                print(f"   ✓ Engine {engine_id} recreated")
+            except Exception as e:
+                print(f"   ❌ Failed to recreate engine {engine_id}: {e}")
+                raise
 
 
 # Global instance

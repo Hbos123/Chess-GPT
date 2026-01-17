@@ -3,7 +3,7 @@
 # Manual Test Commands for Chess GPT Backend
 # Run these commands to verify system functionality
 
-BASE_URL="http://localhost:8000"
+BASE_URL="http://localhost:${BACKEND_PORT:-8001}"
 
 echo "==================================================================="
 echo "Chess GPT Backend Manual Test Suite"

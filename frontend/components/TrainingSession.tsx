@@ -2,23 +2,28 @@
 
 import { useState } from "react";
 import TrainingDrill from "./TrainingDrill";
+import { getBackendBase } from "@/lib/backendBase";
 
 interface TrainingSessionProps {
   session: any;
   username: string;
   onComplete: (results: any) => void;
   onClose: () => void;
+  onSwitchToChat?: () => void; // New prop to switch to chat
 }
 
 export default function TrainingSession({
   session,
   username,
   onComplete,
-  onClose
+  onClose,
+  onSwitchToChat
 }: TrainingSessionProps) {
+  const BACKEND_BASE = getBackendBase();
   const [currentDrillIndex, setCurrentDrillIndex] = useState(0);
   const [results, setResults] = useState<any[]>([]);
   const [isComplete, setIsComplete] = useState(false);
+  const [activeTab, setActiveTab] = useState<'training' | 'chat'>('training');
 
   const handleDrillComplete = async (correct: boolean, timeS: number, hintsUsed: number) => {
     const drill = session.cards[currentDrillIndex];
@@ -35,7 +40,7 @@ export default function TrainingSession({
     
     // Update backend SRS
     try {
-      await fetch("http://localhost:8000/update_drill_result", {
+      await fetch(`${BACKEND_BASE}/update_drill_result`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -112,20 +117,56 @@ export default function TrainingSession({
 
   return (
     <div className="training-session-container">
-      <div className="session-info">
+      <div className="session-header">
         <h3>Training Session: {session.mode}</h3>
+        {session.intro && (
+          <div className="session-intro">
+            {session.intro}
+          </div>
+        )}
         <div className="session-composition">
           New: {session.composition.new} • Learning: {session.composition.learning} • Review: {session.composition.review}
         </div>
       </div>
 
-      <TrainingDrill
-        drill={session.cards[currentDrillIndex]}
-        onComplete={handleDrillComplete}
-        onSkip={handleSkip}
-        currentIndex={currentDrillIndex}
-        totalDrills={session.cards.length}
-      />
+      {/* Tab switcher */}
+      <div className="training-tabs">
+        <button
+          className={`training-tab ${activeTab === 'training' ? 'active' : ''}`}
+          onClick={() => setActiveTab('training')}
+        >
+          Training
+        </button>
+        <button
+          className={`training-tab ${activeTab === 'chat' ? 'active' : ''}`}
+          onClick={() => {
+            setActiveTab('chat');
+            if (onSwitchToChat) {
+              onSwitchToChat();
+            }
+          }}
+        >
+          Chat
+        </button>
+      </div>
+
+      {activeTab === 'training' && (
+        <div className="training-content">
+          <TrainingDrill
+            drill={session.cards[currentDrillIndex]}
+            onComplete={handleDrillComplete}
+            onSkip={handleSkip}
+            currentIndex={currentDrillIndex}
+            totalDrills={session.cards.length}
+          />
+        </div>
+      )}
+
+      {activeTab === 'chat' && onSwitchToChat && (
+        <div className="training-chat-placeholder">
+          <p>Switch to chat tab to continue conversation</p>
+        </div>
+      )}
 
       <div className="session-footer">
         <button onClick={onClose} className="exit-session-btn">

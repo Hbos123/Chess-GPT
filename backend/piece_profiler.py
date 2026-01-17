@@ -74,6 +74,13 @@ def build_piece_profiles(
             "total_contribution_cp": 0,
         })
         
+        # Score the piece's NNUE contribution
+        from significance_scorer import SignificanceScorer
+        nnue_score = SignificanceScorer.score_piece_nnue_contribution(
+            contrib["nnue_contribution_cp"],
+            parsed["piece_type"]
+        )
+        
         profiles[piece_id] = {
             "piece_id": piece_id,
             "square": parsed["square"],
@@ -82,6 +89,7 @@ def build_piece_profiles(
             "nnue_contribution_cp": contrib["nnue_contribution_cp"],
             "classical_contribution_cp": contrib["classical_contribution_cp"],
             "total_contribution_cp": contrib["total_contribution_cp"],
+            "nnue_contribution_score": nnue_score,  # NEW: Significance score
             "classical_breakdown": {},
             "tags": [],
             "role": "active",

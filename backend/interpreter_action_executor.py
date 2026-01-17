@@ -92,6 +92,7 @@ class InterpreterActionExecutor:
         engine_queue=None,
         openai_client=None,
         web_searcher=None,
+        board_simulator=None,
         use_cache: bool = True,
         cache_ttl: int = 300
     ):
@@ -99,6 +100,12 @@ class InterpreterActionExecutor:
         self.engine_queue = engine_queue
         self.openai_client = openai_client
         self.web_searcher = web_searcher
+        
+        # Initialize board simulator if not provided
+        if board_simulator is None and engine_queue:
+            from board_simulator import BoardSimulator
+            board_simulator = BoardSimulator(engine_queue)
+        self.board_simulator = board_simulator
         
         self.cache = ActionCache(ttl_seconds=cache_ttl) if use_cache else None
     
@@ -137,6 +144,14 @@ class InterpreterActionExecutor:
             result = await self._execute_search(action.params)
         elif action.action_type == ActionType.COMPUTE:
             result = await self._execute_compute(action.params, accumulated_data)
+        elif action.action_type == ActionType.TEST_MOVE:
+            result = await self._execute_test_move(action.params, accumulated_data)
+        elif action.action_type == ActionType.EXAMINE_PV:
+            result = await self._execute_examine_pv(action.params, accumulated_data)
+        elif action.action_type == ActionType.CHECK_CONSEQUENCE:
+            result = await self._execute_check_consequence(action.params, accumulated_data)
+        elif action.action_type == ActionType.SIMULATE_SEQUENCE:
+            result = await self._execute_simulate_sequence(action.params, accumulated_data)
         else:
             raise ValueError(f"Unknown action type: {action.action_type}")
         
@@ -229,14 +244,12 @@ class InterpreterActionExecutor:
         params: Dict[str, Any],
         accumulated_data: Dict[str, Any] = None
     ) -> Dict[str, Any]:
-        """Execute an analysis action"""
-        if not self.engine_queue:
-            return {"error": "Engine not available"}
-        
+        """Execute an analysis action - uses /analyze_position endpoint for full candidate moves"""
         fen = params.get("fen")
         pgn = params.get("pgn")
         move = params.get("move")
         depth = params.get("depth", 18)
+        lines = params.get("lines", 3)
         
         # If no FEN/PGN, try to get from accumulated data
         if not fen and not pgn and accumulated_data:
@@ -252,12 +265,49 @@ class InterpreterActionExecutor:
         if not fen and not pgn:
             return {"error": "No position to analyze"}
         
+        # Use /analyze_position endpoint to get full structured response with candidate_moves
         try:
-            # Use engine queue for analysis
-            result = await self._analyze_with_engine(fen, pgn, move, depth)
-            return result
+            import aiohttp
+            async with aiohttp.ClientSession() as session:
+                request_params = {
+                    "fen": fen,
+                    "depth": depth,
+                    "lines": lines,
+                    "light_mode": "false"  # String for query param
+                }
+                
+                backend_port = int(os.getenv("BACKEND_PORT", "8001"))
+                async with session.get(
+                    f"http://localhost:{backend_port}/analyze_position",
+                    params=request_params,
+                    timeout=aiohttp.ClientTimeout(total=60)
+                ) as response:
+                    if response.status != 200:
+                        error_text = await response.text()
+                        return {"error": f"Analysis failed: {error_text}"}
+                    
+                    result = await response.json()
+                    
+                    # Extract candidate moves for move testing
+                    candidate_moves = []
+                    if "candidate_moves" in result:
+                        candidate_moves = result["candidate_moves"]
+                    elif "white_analysis" in result and "candidate_moves" in result["white_analysis"]:
+                        candidate_moves = result["white_analysis"]["candidate_moves"]
+                    elif "black_analysis" in result and "candidate_moves" in result["black_analysis"]:
+                        candidate_moves = result["black_analysis"]["candidate_moves"]
+                    
+                    return {
+                        "fen": fen,
+                        "eval_cp": result.get("eval_cp", 0),
+                        "best_move": result.get("best_move"),
+                        "candidate_moves": candidate_moves,  # CRITICAL for move testing
+                        "pv": result.get("pv", []),
+                        "depth": depth,
+                        "endpoint_response": result  # Full response for reference
+                    }
         except Exception as e:
-            return {"error": str(e)}
+            return {"error": str(e), "fen": fen}
     
     async def _analyze_with_engine(
         self,
@@ -482,4 +532,134 @@ class InterpreterActionExecutor:
                         games.append(item)
         
         return games
+    
+    async def _execute_test_move(
+        self,
+        params: Dict[str, Any],
+        accumulated_data: Dict[str, Any] = None
+    ) -> Dict[str, Any]:
+        """Execute test_move action - test a move and follow PV"""
+        if not self.board_simulator:
+            return {"error": "Board simulator not available"}
+        
+        fen = params.get("fen")
+        move_san = params.get("move_san")
+        follow_pv = params.get("follow_pv", True)
+        depth = params.get("depth", 12)
+        
+        if not fen or not move_san:
+            return {"error": "Missing fen or move_san parameter"}
+        
+        try:
+            result = await self.board_simulator.test_move(fen, move_san, follow_pv, depth)
+            return result.to_dict()
+        except Exception as e:
+            return {"error": str(e)}
+    
+    async def _execute_examine_pv(
+        self,
+        params: Dict[str, Any],
+        accumulated_data: Dict[str, Any] = None
+    ) -> Dict[str, Any]:
+        """Execute examine_pv action - analyze PV from position analysis"""
+        # Get PV from accumulated data (from previous analyze action)
+        pv_data = None
+        if accumulated_data:
+            for key, value in accumulated_data.items():
+                if isinstance(value, dict) and ("pv" in value or "principal_variation" in value):
+                    pv_data = value
+                    break
+        
+        if not pv_data:
+            return {"error": "No PV data found. Run analyze action first."}
+        
+        pv = pv_data.get("pv") or pv_data.get("principal_variation", [])
+        
+        # Extract insights about PV
+        insights = []
+        if isinstance(pv, list) and len(pv) > 0:
+            # Check if knight moves in PV
+            knight_moves = [m for m in pv if isinstance(m, str) and m.startswith("N")]
+            if knight_moves:
+                insights.append(f"Knight moves in PV: {knight_moves[0]}")
+                # Find position of first knight move
+                knight_index = pv.index(knight_moves[0])
+                before_knight = pv[:knight_index]
+                if before_knight:
+                    insights.append(f"Moves before knight: {', '.join(before_knight)}")
+            else:
+                insights.append("Knight does not move in PV")
+        
+        return {
+            "pv": pv,
+            "insights": insights,
+            "knight_moves": [m for m in pv if isinstance(m, str) and m.startswith("N")] if isinstance(pv, list) else []
+        }
+    
+    async def _execute_check_consequence(
+        self,
+        params: Dict[str, Any],
+        accumulated_data: Dict[str, Any] = None
+    ) -> Dict[str, Any]:
+        """Execute check_consequence action - check specific consequence of a move"""
+        if not self.board_simulator:
+            return {"error": "Board simulator not available"}
+        
+        fen = params.get("fen")
+        move_san = params.get("move_san")
+        consequence_type = params.get("consequence_type", "doubled_pawns")  # doubled_pawns, pins, captures
+        
+        if not fen or not move_san:
+            return {"error": "Missing fen or move_san parameter"}
+        
+        try:
+            # Test the move
+            result = await self.board_simulator.test_move(fen, move_san, follow_pv=True, depth=12)
+            
+            # Check for specific consequence
+            # Note: result is MoveTestResult from board_simulator, which has consequences field
+            consequences = result.consequences
+            found_consequence = None
+            
+            if consequence_type == "doubled_pawns":
+                if "doubled_pawns" in consequences:
+                    found_consequence = consequences["doubled_pawns"]
+            elif consequence_type == "pins":
+                if "pins" in consequences:
+                    found_consequence = consequences["pins"]
+            elif consequence_type == "captures":
+                if "allows_captures" in consequences:
+                    found_consequence = consequences["allows_captures"]
+            
+            return {
+                "move_san": move_san,
+                "consequence_type": consequence_type,
+                "found": found_consequence is not None,
+                "details": found_consequence,
+                "all_consequences": consequences
+            }
+        except Exception as e:
+            return {"error": str(e)}
+    
+    async def _execute_simulate_sequence(
+        self,
+        params: Dict[str, Any],
+        accumulated_data: Dict[str, Any] = None
+    ) -> Dict[str, Any]:
+        """Execute simulate_sequence action - play out a sequence of moves"""
+        if not self.board_simulator:
+            return {"error": "Board simulator not available"}
+        
+        fen = params.get("fen")
+        moves = params.get("moves", [])
+        depth = params.get("depth", 12)
+        
+        if not fen or not moves:
+            return {"error": "Missing fen or moves parameter"}
+        
+        try:
+            result = await self.board_simulator.test_move_sequence(fen, moves, depth)
+            return result
+        except Exception as e:
+            return {"error": str(e)}
 

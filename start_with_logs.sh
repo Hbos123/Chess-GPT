@@ -32,8 +32,8 @@ sleep 3
 # Start frontend
 echo "🎨 Starting frontend server..."
 cd frontend
-export PATH=/Users/hugobosnic/Desktop/chess-gpt/backend/node-v20.11.0-darwin-arm64/bin:$PATH
-/Users/hugobosnic/Desktop/chess-gpt/backend/node-v20.11.0-darwin-arm64/bin/npm run dev > $FRONTEND_LOG 2>&1 &
+export NEXT_PUBLIC_BACKEND_URL="http://localhost:8000"
+npm run dev > $FRONTEND_LOG 2>&1 &
 FRONTEND_PID=$!
 cd ..
 

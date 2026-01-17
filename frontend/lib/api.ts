@@ -6,12 +6,63 @@ import type {
   TacticsPuzzle,
   Annotation,
 } from "@/types";
+import { buildLearningHeaders, flushNextActionForLastInteraction, noteInteractionCompleted } from "@/lib/learningClient";
+import { getBackendBase } from "@/lib/backendBase";
 
-const BACKEND_URL =
-  process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
+const BACKEND_URL = getBackendBase();
+
+/**
+ * Retry a fetch with exponential backoff - useful for handling backend restarts
+ */
+async function fetchWithRetry(
+  url: string,
+  options?: RequestInit,
+  maxRetries: number = 3,
+  initialDelayMs: number = 500,
+  timeoutMs: number = 30000 // Increased to 30 seconds for profile requests
+): Promise<Response> {
+  let lastError: Error | null = null;
+  
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      // Create abort controller for timeout
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+      
+      const fetchOptions = {
+        ...options,
+        signal: controller.signal
+      };
+      
+      try {
+        const response = await fetch(url, fetchOptions);
+        clearTimeout(timeoutId);
+        return response;
+      } catch (fetchErr) {
+        clearTimeout(timeoutId);
+        throw fetchErr;
+      }
+    } catch (err) {
+      lastError = err instanceof Error ? err : new Error(String(err));
+      // Only retry on network errors (Load failed, connection refused, etc.)
+      // Don't retry on abort/timeout errors
+      if (attempt < maxRetries - 1 && 
+          !lastError.message.includes('aborted') && 
+          lastError.name !== 'AbortError') {
+        const delay = initialDelayMs * Math.pow(2, attempt);
+        await new Promise(resolve => setTimeout(resolve, delay));
+      } else {
+        // Don't retry on timeout/abort
+        break;
+      }
+    }
+  }
+  
+  throw lastError || new Error("Fetch failed after retries");
+}
 
 export async function getMeta(): Promise<MetaResponse> {
-  const response = await fetch(`${BACKEND_URL}/meta`);
+  const response = await fetchWithRetry(`${BACKEND_URL}/meta`);
   if (!response.ok) {
     throw new Error(`Failed to fetch meta: ${response.statusText}`);
   }
@@ -23,9 +74,15 @@ export async function analyzePosition(
   lines: number = 3,
   depth: number = 16
 ): Promise<AnalyzePositionResponse> {
-  // Prefer local WASM engine if available (no backend dependency)
+  // Prefer local WASM engine only in PLAY/lesson loops.
+  // In DISCUSS/ANALYZE we force backend analysis (now D2/D16-backed) so results can
+  // build/extend the shared tree and remain consistent with baseline intuition.
   try {
     if (typeof window !== 'undefined') {
+      const allowWasm =
+        Boolean((window as any).__CHESS_GPT_ALLOW_WASM_ANALYZE) ||
+        String((window as any).__CHESS_GPT_MODE || '').toUpperCase() === 'PLAY';
+      if (!allowWasm) throw new Error('WASM disabled for this mode');
       const { analyzePositionWasm } = await import('./wasmEngine');
       const res = await analyzePositionWasm(fen, lines, depth);
       return res as any;
@@ -35,44 +92,110 @@ export async function analyzePosition(
     console.warn('[analyzePosition] WASM fallback:', e);
   }
   const params = new URLSearchParams({ fen, lines: String(lines), depth: String(depth) });
-  const response = await fetch(`${BACKEND_URL}/analyze_position?${params}`);
-  if (!response.ok) throw new Error(`Failed to analyze position: ${response.statusText}`);
-  return response.json();
+  // Use longer timeout for position analysis (120s to match backend engine queue timeout)
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 120000); // 120 seconds
+  try {
+    await flushNextActionForLastInteraction("requested_line");
+    const { interactionId, headers } = await buildLearningHeaders();
+    const response = await fetch(`${BACKEND_URL}/analyze_position?${params}`, {
+      signal: controller.signal,
+      headers,
+    });
+    clearTimeout(timeoutId);
+    if (!response.ok) throw new Error(`Failed to analyze position: ${response.statusText}`);
+    const data = await response.json();
+    noteInteractionCompleted(interactionId);
+    return data;
+  } catch (err) {
+    clearTimeout(timeoutId);
+    if (err instanceof Error && err.name === 'AbortError') {
+      throw new Error('Position analysis timed out. The engine may be busy.');
+    }
+    throw err;
+  }
 }
 
 export async function playMove(
   fen: string,
-  userMoveSan: string,
+  userMoveSan?: string | null,
   engineElo?: number,
   timeMs?: number
 ): Promise<PlayMoveResponse> {
+  await flushNextActionForLastInteraction("move_played");
+  const { interactionId, headers } = await buildLearningHeaders();
+  // Build request body - only include user_move_san if it's a valid string
+  // Pydantic Optional fields should be omitted (not set to null) when not provided
+  const requestBody: any = {
+    fen,
+    time_ms: timeMs ?? 1500,
+  };
+  
+  // Only include user_move_san if it's a valid non-empty string
+  // When omitted, Pydantic will use the default value of None
+  if (userMoveSan !== undefined && userMoveSan !== null && typeof userMoveSan === 'string' && userMoveSan.trim() !== '') {
+    requestBody.user_move_san = userMoveSan;
+  }
+  
+  if (engineElo !== undefined && engineElo !== null) {
+    requestBody.engine_elo = engineElo;
+  }
+  
   const response = await fetch(`${BACKEND_URL}/play_move`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
+      ...headers,
     },
-    body: JSON.stringify({
-      fen,
-      user_move_san: userMoveSan,
-      engine_elo: engineElo,
-      time_ms: timeMs,
-    }),
+    body: JSON.stringify(requestBody),
   });
   if (!response.ok) {
-    throw new Error(`Failed to play move: ${response.statusText}`);
+    let errorDetail = response.statusText;
+    try {
+      const errorText = await response.text();
+      console.error('[playMove] Error response:', response.status, errorText);
+      try {
+        const errorData = JSON.parse(errorText);
+        // Handle different error response formats
+        if (typeof errorData === 'string') {
+          errorDetail = errorData;
+        } else if (errorData?.detail) {
+          errorDetail = typeof errorData.detail === 'string' ? errorData.detail : JSON.stringify(errorData.detail);
+        } else if (errorData?.message) {
+          errorDetail = typeof errorData.message === 'string' ? errorData.message : JSON.stringify(errorData.message);
+        } else if (errorData?.error) {
+          errorDetail = typeof errorData.error === 'string' ? errorData.error : JSON.stringify(errorData.error);
+        } else {
+          errorDetail = JSON.stringify(errorData);
+        }
+      } catch {
+        // If JSON parsing fails, use the raw text
+        errorDetail = errorText || response.statusText;
+      }
+    } catch (e) {
+      // If text extraction fails, use statusText
+      console.error('Failed to extract error response:', e);
+    }
+    throw new Error(`Failed to play move: ${errorDetail}`);
   }
-  return response.json();
+  const data = await response.json();
+  noteInteractionCompleted(interactionId);
+  return data;
 }
 
 export async function openingLookup(
   fen: string
 ): Promise<OpeningLookupResponse> {
   const params = new URLSearchParams({ fen });
-  const response = await fetch(`${BACKEND_URL}/opening_lookup?${params}`);
+  await flushNextActionForLastInteraction("navigation");
+  const { interactionId, headers } = await buildLearningHeaders();
+  const response = await fetch(`${BACKEND_URL}/opening_lookup?${params}`, { headers });
   if (!response.ok) {
     throw new Error(`Failed to lookup opening: ${response.statusText}`);
   }
-  return response.json();
+  const data = await response.json();
+  noteInteractionCompleted(interactionId);
+  return data;
 }
 
 export async function tacticsNext(
@@ -85,11 +208,15 @@ export async function tacticsNext(
   const url = params.toString()
     ? `${BACKEND_URL}/tactics_next?${params}`
     : `${BACKEND_URL}/tactics_next`;
-  const response = await fetch(url);
+  await flushNextActionForLastInteraction("navigation");
+  const { interactionId, headers } = await buildLearningHeaders();
+  const response = await fetch(url, { headers });
   if (!response.ok) {
     throw new Error(`Failed to fetch tactic: ${response.statusText}`);
   }
-  return response.json();
+  const data = await response.json();
+  noteInteractionCompleted(interactionId);
+  return data;
 }
 
 export async function annotate(annotation: Annotation): Promise<Annotation> {
@@ -273,7 +400,7 @@ export async function saveProfilePreferences(
 
 export async function fetchProfileOverview(userId: string): Promise<ProfileOverviewResponse> {
   const params = new URLSearchParams({ user_id: userId });
-  const response = await fetch(`${BACKEND_URL}/profile/overview?${params.toString()}`);
+  const response = await fetchWithRetry(`${BACKEND_URL}/profile/overview?${params.toString()}`);
   if (!response.ok) {
     const detail = await response.text();
     throw new Error(`Failed to fetch profile overview: ${detail}`);
@@ -362,10 +489,78 @@ export interface ProfileStatsResponse {
 
 export async function fetchProfileStats(userId: string): Promise<ProfileStatsResponse> {
   const params = new URLSearchParams({ user_id: userId });
-  const response = await fetch(`${BACKEND_URL}/profile/stats?${params.toString()}`);
+  const response = await fetchWithRetry(`${BACKEND_URL}/profile/stats?${params.toString()}`);
   if (!response.ok) {
     const detail = await response.text();
     throw new Error(`Failed to fetch profile stats: ${detail}`);
+  }
+  return response.json();
+}
+
+// Habits data types
+export interface HabitEntry {
+  game_id: string;
+  game_date: string;
+  accuracy: number;
+  count: number;
+  significant?: boolean;
+}
+
+export interface Habit {
+  name: string;
+  display_name: string;
+  category: string;
+  habit_type: 'tag' | 'phase' | 'endgame' | 'tag_pref' | 'time';
+  accuracy: number;
+  baseline: number;
+  deviation: number;
+  deviation_percent: number;
+  sample_size: number;
+  total_occurrences: number;
+  variance: number;
+  significance: number;
+  trend: 'improving' | 'declining' | 'stable';
+  trend_value: number;
+  sparkline: number[];
+  history: HabitEntry[];
+  // Optional metrics for different habit types
+  win_rate?: number;
+  avg_cp_loss?: number;
+  error_rate?: number;
+  preference_signal?: string;
+  preference_strength?: number;
+  created_accuracy?: number;
+  removed_accuracy?: number;
+  extremeness?: number;
+}
+
+export interface TrendSeries {
+  name: string;
+  habit_key: string;
+  color: string;
+  series: (HabitEntry | null)[];
+}
+
+export interface ProfileHabitsResponse {
+  habits: Habit[];
+  strengths: Habit[];
+  weaknesses: Habit[];
+  baseline_accuracy: number;
+  total_games: number;
+  trend_chart: {
+    dates: string[];
+    series: TrendSeries[];
+    baseline: number;
+  };
+}
+
+export async function fetchProfileHabits(userId: string): Promise<ProfileHabitsResponse> {
+  // No timeout for habits - computation can take time, and data is saved to Supabase
+  // so it can be fetched later even if the request is slow or cancelled
+  const response = await fetch(`${BACKEND_URL}/profile/habits/${userId}`);
+  if (!response.ok) {
+    const detail = await response.text();
+    throw new Error(`Failed to fetch profile habits: ${detail}`);
   }
   return response.json();
 }
@@ -394,6 +589,11 @@ export interface OpeningLessonBlueprint {
 
 export interface OpeningPracticePosition {
   fen: string;
+  // Back-compat: older/alternate shapes may nest the FEN under `position.fen`.
+  position?: {
+    fen?: string;
+    [key: string]: any;
+  };
   objective?: string;
   hints?: string[];
   candidates?: string[];

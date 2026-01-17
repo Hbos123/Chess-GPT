@@ -1,6 +1,7 @@
 """
 Delta analyzer - computes differences between starting and ending positions.
 Classifies plan types based on material and positional changes.
+Now includes significance scoring for all deltas.
 """
 
 from typing import Dict, List
@@ -62,6 +63,25 @@ def calculate_delta(
     black_material_delta = -(material_final_cp - material_start_cp)  # Flip sign for Black
     black_positional_delta = -(positional_final_cp - positional_start_cp)  # Flip sign for Black
     
+    # Score the deltas
+    from significance_scorer import SignificanceScorer
+    
+    # Score theme deltas
+    white_theme_scores = {}
+    for theme_key, delta in white_theme_deltas.items():
+        if abs(delta) > 0.1:
+            white_theme_scores[theme_key] = SignificanceScorer.score_theme_change(delta)
+    
+    black_theme_scores = {}
+    for theme_key, delta in black_theme_deltas.items():
+        if abs(delta) > 0.1:
+            black_theme_scores[theme_key] = SignificanceScorer.score_theme_change(delta)
+    
+    white_material_score = SignificanceScorer.score_material_change(white_material_delta)
+    white_positional_score = SignificanceScorer.score_positional_change(white_positional_delta)
+    black_material_score = SignificanceScorer.score_material_change(black_material_delta)
+    black_positional_score = SignificanceScorer.score_positional_change(black_positional_delta)
+    
     # Classify plan types
     white_plan_type = classify_plan_type(white_material_delta, white_positional_delta)
     black_plan_type = classify_plan_type(black_material_delta, black_positional_delta)
@@ -85,15 +105,21 @@ def calculate_delta(
     return {
         "white": {
             "theme_deltas": white_theme_deltas,
+            "theme_scores": white_theme_scores,
             "material_delta_cp": white_material_delta,
+            "material_score": white_material_score,
             "positional_delta_cp": white_positional_delta,
+            "positional_score": white_positional_score,
             "plan_type": white_plan_type,
             "plan_explanation": white_explanation
         },
         "black": {
             "theme_deltas": black_theme_deltas,
+            "theme_scores": black_theme_scores,
             "material_delta_cp": black_material_delta,
+            "material_score": black_material_score,
             "positional_delta_cp": black_positional_delta,
+            "positional_score": black_positional_score,
             "plan_type": black_plan_type,
             "plan_explanation": black_explanation
         }
@@ -648,4 +674,113 @@ Key Theme Changes:
         output += f"  {direction} {theme}: {delta:+.2f}\n"
     
     return output.strip()
+
+
+def analyze_tag_deltas_for_move(tags_before: List[Dict], tags_after_played: List[Dict],
+                                 best_move_tags: List[Dict], side: str) -> Dict:
+    """
+    Analyze tag deltas for a move (played vs best).
+    
+    Args:
+        tags_before: Tags before move
+        tags_after_played: Tags after played move
+        best_move_tags: Tags after best move
+        side: "white" or "black"
+        
+    Returns:
+        {
+            "gained": List[str],
+            "lost": List[str],
+            "missed": List[str],
+            "net_change": int,
+            "tag_delta_played": int,
+            "tag_delta_best": int
+        }
+    """
+    # Filter tags by side
+    before_names = {t.get("tag_name") for t in tags_before 
+                   if t.get("side") == side or t.get("side") == "both"}
+    after_played_names = {t.get("tag_name") for t in tags_after_played
+                         if t.get("side") == side or t.get("side") == "both"}
+    best_names = {t.get("tag_name") for t in best_move_tags
+                 if t.get("side") == side or t.get("side") == "both"}
+    
+    # Calculate deltas
+    gained = list(after_played_names - before_names)
+    lost = list(before_names - after_played_names)
+    missed = list(best_names - before_names - after_played_names)
+    
+    # Net changes
+    tag_delta_played = len(gained) - len(lost)
+    tag_delta_best = len(missed) + len(best_names & before_names) - len(lost)
+    net_change = tag_delta_played
+    
+    return {
+        "gained": gained,
+        "lost": lost,
+        "missed": missed,
+        "net_change": net_change,
+        "tag_delta_played": tag_delta_played,
+        "tag_delta_best": tag_delta_best
+    }
+
+
+def classify_move_intent_from_tags(tags_before: List[Dict], themes_before: Dict, side: str) -> Dict:
+    """
+    Classify move intent from existing tags.
+    
+    Uses tag-to-intent mappings to determine what the player was trying to accomplish.
+    
+    Args:
+        tags_before: Tags from position before move
+        themes_before: Theme scores from position before move
+        side: "white" or "black"
+        
+    Returns:
+        {
+            "primary_type": str,
+            "secondary_types": List[str],
+            "confidence": float,
+            "justification": {
+                "tags_used": List[str],
+                "tag_strengths": Dict[str, float]
+            }
+        }
+    """
+    from explanation_generator import MoveIntentClassifier
+    
+    classifier = MoveIntentClassifier()
+    return classifier.classify(tags_before, themes_before, side)
+
+
+def detect_missed_opponent_move_from_pv(pv: List[str], tags_before: List[Dict],
+                                        tags_after_played: List[Dict],
+                                        engine_info: List[Dict], fen_before: str,
+                                        side_moved: str) -> Dict:
+    """
+    Detect if player missed a critical opponent move in PV.
+    
+    Args:
+        pv: Principal variation (list of UCI moves)
+        tags_before: Tags before move
+        tags_after_played: Tags after played move
+        engine_info: Engine analysis info
+        fen_before: FEN before move
+        side_moved: "white" or "black"
+        
+    Returns:
+        {
+            "detected": bool,
+            "critical_move": Optional[str],
+            "move_san": Optional[str],
+            "threat_tags": List[Dict],
+            "threat_description": Optional[str],
+            "pv_position": Optional[int],
+            "eval_swing": Optional[int]
+        }
+    """
+    from explanation_generator import PVMissedMoveDetector
+    
+    detector = PVMissedMoveDetector()
+    return detector.detect(pv, tags_before, tags_after_played, engine_info, fen_before, side_moved)
 

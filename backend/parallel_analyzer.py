@@ -21,8 +21,12 @@ from tag_detector import (
     detect_king_safety_tags, detect_pawn_tags,
     detect_center_space_tags, detect_file_tags,
     detect_diagonal_tags, detect_outpost_hole_tags,
-    detect_activity_tags, detect_lever_tags
+    detect_activity_tags, detect_lever_tags, detect_overworked_pieces_tags,
+    detect_castling_tags
 )
+
+# Import role detector
+from role_detector import detect_all_piece_roles
 
 # Import material calculator
 from material_calculator import calculate_material_balance
@@ -72,13 +76,19 @@ def compute_themes_and_tags(fen: str) -> Dict:
     all_tags.extend(detect_outpost_hole_tags(board))
     all_tags.extend(detect_activity_tags(board))
     all_tags.extend(detect_lever_tags(board))
+    all_tags.extend(detect_overworked_pieces_tags(board))
+    all_tags.extend(detect_castling_tags(board))
     
     # Material balance
     material_balance = calculate_material_balance(board)
     
+    # Detect all roles
+    roles = detect_all_piece_roles(fen)
+    
     return {
         "themes": themes,
         "tags": all_tags,
+        "roles": roles,
         "material_balance_cp": material_balance
     }
 

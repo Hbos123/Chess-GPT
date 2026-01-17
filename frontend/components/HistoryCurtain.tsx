@@ -1,5 +1,6 @@
-import { useState, useEffect, ReactNode } from 'react';
+import { useState, useEffect, useRef, ReactNode } from 'react';
 import type { ProfilePreferences } from './ProfileSetupModal';
+import HabitsDashboard from './HabitsDashboard';
 
 interface Thread {
   id: string;
@@ -130,12 +131,16 @@ interface HistoryCurtainProps {
   profileHighlights?: ProfileHighlight[] | null;
   profileGames?: ProfileGameSummary[] | null;
   profileStats?: ProfileStats | null;
+  onRefreshProfile?: () => Promise<void>;
+  onOpenProfileDashboard?: () => void;
+  onOpenPersonalReview?: () => void;
+  userId?: string | null;
 }
 
 export default function HistoryCurtain({ 
   open, 
   onClose, 
-  onSelectThread,
+  onSelectThread, 
   currentThreadId,
   onEditProfileSetup,
   profilePreferences,
@@ -143,6 +148,10 @@ export default function HistoryCurtain({
   profileHighlights,
   profileGames,
   profileStats,
+  onRefreshProfile,
+  onOpenProfileDashboard,
+  onOpenPersonalReview,
+  userId,
 }: HistoryCurtainProps) {
   const user = null; // Auth optional for now
   const [threads, setThreads] = useState<Thread[]>([]);
@@ -150,6 +159,8 @@ export default function HistoryCurtain({
   const [loading, setLoading] = useState(false);
   const [gameSearch, setGameSearch] = useState('');
   const [expandedTab, setExpandedTab] = useState<'personal' | 'settings' | null>(null);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const refreshInProgressRef = useRef(false);
 
   const linkedAccounts = (profilePreferences?.accounts ?? []).map((account, index) => ({
     id: `${account.platform}-${account.username || index}`,
@@ -969,11 +980,9 @@ export default function HistoryCurtain({
 
     const target = profileStatus.target_games || Math.max(1, profileStatus.total_games_estimate || profileStatus.games_indexed || 1);
     const fetched = profileStatus.games_indexed;
-    const light = Math.min(profileStatus.light_analyzed_games || 0, fetched);
-    const deep = Math.min(profileStatus.deep_analyzed_games || 0, light);
+    const analyzed = Math.min(profileStatus.deep_analyzed_games || 0, fetched);
     const fetchPercent = target ? Math.min(100, (fetched / target) * 100) : 0;
-    const lightPercent = fetched ? fetchPercent * (light / fetched) : 0;
-    const deepPercent = light ? lightPercent * (deep / light) : 0;
+    const analyzedPercent = fetched ? fetchPercent * (analyzed / fetched) : 0;
 
     return (
       <div className="profile-progress">
@@ -983,17 +992,15 @@ export default function HistoryCurtain({
         </div>
         <div className="profile-progress-bar">
           <div className="progress-segment segment-fetched" style={{ width: `${fetchPercent}%` }} />
-          <div className="progress-segment segment-light" style={{ width: `${lightPercent}%` }} />
-          <div className="progress-segment segment-deep" style={{ width: `${deepPercent}%` }} />
+          <div className="progress-segment segment-deep" style={{ width: `${analyzedPercent}%` }} />
         </div>
         <p className="summary-line">
-          {fetched} fetched • {light} light analysis • {deep} deep analysis
+          {fetched} fetched • {analyzed} analyzed
           {profileStatus.last_error ? ` • ${profileStatus.last_error}` : null}
         </p>
         <div className="profile-progress-legend">
           <span><span className="legend-dot fetched" /> Fetched</span>
-          <span><span className="legend-dot light" /> Light analysis</span>
-          <span><span className="legend-dot deep" /> Deep analysis</span>
+          <span><span className="legend-dot deep" /> Analyzed</span>
         </div>
         {profileStatus.background_active && (
           <p className="profile-progress-hint">Quietly indexing in the background…</p>
@@ -1018,8 +1025,16 @@ export default function HistoryCurtain({
             </button>
           )}
         </header>
-        <p className="summary-line">{formatAccounts()}</p>
-        <p className="summary-line">Time controls: {formatControls()}</p>
+        {profilePreferences ? (
+          <>
+            <p className="summary-line">{formatAccounts()}</p>
+            <p className="summary-line">Time controls: {formatControls()}</p>
+          </>
+        ) : (
+          <p className="summary-line" style={{ color: '#9ca3af', fontStyle: 'italic' }}>
+            Loading profile data... (Check console for details)
+          </p>
+        )}
       </section>
       <section className="personal-section">
         <header>
@@ -1113,13 +1128,34 @@ export default function HistoryCurtain({
 
       <section className="personal-section">
         <header>
-          <h3>Profile analysis</h3>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+            <h3 style={{ margin: 0 }}>Profile analysis</h3>
+            {onOpenPersonalReview && (
+              <button
+                type="button"
+                className="ghost small"
+                onClick={() => {
+                  onOpenPersonalReview();
+                  onClose();
+                }}
+              >
+                Personal Review
+              </button>
+            )}
+          </div>
         </header>
         {renderProgress()}
       </section>
+      
+      {/* New Habits Dashboard - replaces tag insights with richer visualization */}
+      {userId && (
+        <section className="personal-section habits-section">
+          <HabitsDashboard userId={userId} onRefresh={onRefreshProfile} />
+        </section>
+      )}
+      
       {renderStatsSummary()}
       {renderOpeningPerformance()}
-      {renderTagInsights()}
       {renderAccuracyBreakdown()}
       {renderPersonality()}
       {renderAdvancedInsights()}
@@ -1130,48 +1166,53 @@ export default function HistoryCurtain({
 
   const renderSettingsDetail = (): ReactNode => (
     <div className="curtain-content">
-      <form className="settings-grid">
+      <form className="settings-form">
         <fieldset className="settings-group">
           <legend>Profile</legend>
           <label>
             Display name
-            <input type="text" placeholder="Hugo Bosnic" />
+            <input type="text" placeholder="Hugo Bosnic" disabled title="Coming soon" />
           </label>
           <label>
             Contact email
-            <input type="email" placeholder="hugo@example.com" />
+            <input type="email" placeholder="hugo@example.com" disabled title="Coming soon" />
           </label>
           <label className="toggle-row">
-            <input type="checkbox" defaultChecked />
-            Show welcome tips
+            <input type="checkbox" defaultChecked disabled title="Coming soon" />
+            <span>Show welcome tips</span>
           </label>
           <label className="toggle-row">
-            <input type="checkbox" defaultChecked />
-            Auto-flip board to my color
+            <input type="checkbox" defaultChecked disabled title="Coming soon" />
+            <span>Auto-flip board to my color</span>
           </label>
         </fieldset>
 
         <fieldset className="settings-group">
           <legend>Chess accounts</legend>
-          <label>
-            Chess.com username
-            <input type="text" placeholder="Link your account" />
-          </label>
-          <label>
-            Lichess username
-            <input type="text" placeholder="Link your account" />
-          </label>
-          <div className="account-button-row">
-            <button type="button">Connect Chess.com</button>
-            <button type="button">Connect Lichess</button>
-          </div>
+          <p className="settings-note">
+            To link your chess accounts, use the "Personal" tab above and click "Edit profile setup".
+          </p>
+          {profilePreferences?.accounts && profilePreferences.accounts.length > 0 ? (
+            <div className="linked-accounts-list">
+              {profilePreferences.accounts.map((acc, idx) => (
+                <div key={idx} className="linked-account-item">
+                  <span className="account-platform">
+                    {acc.platform === "chesscom" ? "Chess.com" : "Lichess"}
+                  </span>
+                  <span className="account-username">{acc.username || "Not set"}</span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="settings-empty">No accounts linked yet.</p>
+          )}
         </fieldset>
 
         <fieldset className="settings-group">
           <legend>Defaults</legend>
           <label>
             Default mode
-            <select>
+            <select disabled title="Coming soon">
               <option>Discuss</option>
               <option>Analyze</option>
               <option>Play</option>
@@ -1179,15 +1220,15 @@ export default function HistoryCurtain({
           </label>
           <label>
             Engine strength
-            <select>
+            <select disabled title="Coming soon">
               <option>Adaptive</option>
               <option>Club (1800)</option>
               <option>Expert (2200)</option>
             </select>
           </label>
           <label className="toggle-row">
-            <input type="checkbox" />
-            Confirm moves before sending
+            <input type="checkbox" disabled title="Coming soon" />
+            <span>Confirm moves before sending</span>
           </label>
         </fieldset>
       </form>
@@ -1206,13 +1247,46 @@ export default function HistoryCurtain({
         </div>
 
         <div className="curtain-summary vertical">
-          <button className="summary-card summary-button" onClick={() => setExpandedTab('personal')}>
+          <button className="summary-card summary-button" onClick={async () => {
+            if (onOpenProfileDashboard) {
+              onOpenProfileDashboard();
+              onClose();
+              return;
+            }
+            // Fallback to old behavior if prop not provided
+            setExpandedTab('personal');
+            
+            // Then refresh in background (if not already refreshing)
+            if (onRefreshProfile && !refreshInProgressRef.current) {
+              refreshInProgressRef.current = true;
+              setIsRefreshing(true);
+              
+              // Refresh in background - don't block UI
+              onRefreshProfile()
+                .then(() => {
+                  console.log("✅ Profile refresh completed");
+                })
+                .catch((err) => {
+                  console.error("❌ Refresh failed:", err);
+                })
+                .finally(() => {
+                  setIsRefreshing(false);
+                  refreshInProgressRef.current = false;
+                });
+            }
+          }}>
             <div className="summary-card-head">
-              <h3>Personal</h3>
+              <h3>Personal {isRefreshing && '⟳'}</h3>
             </div>
             <div className="summary-card-body">
-              <p className="summary-line">{formatAccounts()}</p>
-              <p className="summary-line">Time controls: {formatControls()}</p>
+              {isRefreshing ? (
+                <p className="summary-line">Loading profile data...</p>
+              ) : (
+                <>
+                  <p className="summary-line">{formatAccounts()}</p>
+                  <p className="summary-line">Time controls: {formatControls()}</p>
+                </>
+              )}
             </div>
           </button>
 

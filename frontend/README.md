@@ -21,7 +21,7 @@ cp .env.local.example .env.local
 
 3. Edit `.env.local` and add your OpenAI API key:
 ```bash
-NEXT_PUBLIC_BACKEND_URL=http://localhost:8000
+NEXT_PUBLIC_BACKEND_URL=http://localhost:8001
 NEXT_PUBLIC_OPENAI_API_KEY=sk-your-actual-openai-key
 OPENAI_MODEL=gpt-4o-mini
 ```
@@ -111,7 +111,7 @@ frontend/
 
 ## Environment Variables
 
-- `NEXT_PUBLIC_BACKEND_URL` - Backend API URL (default: http://localhost:8000)
+- `NEXT_PUBLIC_BACKEND_URL` - Backend API URL (default: http://localhost:8001)
 - `NEXT_PUBLIC_OPENAI_API_KEY` - Your OpenAI API key
 - `OPENAI_MODEL` - OpenAI model to use (default: gpt-4o-mini)
 
@@ -127,7 +127,7 @@ npm run start
 ## Troubleshooting
 
 **Backend not available:**
-- Ensure backend is running on http://localhost:8000
+- Ensure backend is running on http://localhost:8001
 - Check NEXT_PUBLIC_BACKEND_URL in .env.local
 
 **Board not loading:**

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { Chessboard } from "react-chessboard";
 import { Chess } from "chess.js";
 import type { Square } from "chess.js";
@@ -23,24 +23,42 @@ export default function Board({
   orientation = "white",
   disabled = false,
 }: BoardProps) {
-  const [game, setGame] = useState(new Chess(fen));
+  // INFINITE LOOP PREVENTION:
+  // - Use refs to track previous values and only update when they actually change
+  // - Memoize array/object dependencies to prevent new references on every render
+  // - Check for actual value changes before calling setState in useEffect
+  
+  const [game, setGame] = useState(() => new Chess(fen));
   const [customSquareStyles, setCustomSquareStyles] = useState<{
     [square: string]: React.CSSProperties;
   }>({});
+  
+  // Use ref to track previous FEN to prevent unnecessary updates
+  const prevFenRef = useRef<string>(fen);
 
-  // Update game when FEN changes
+  // Update game when FEN changes - only if FEN actually changed
   useEffect(() => {
-    try {
-      const newGame = new Chess(fen);
-      setGame(newGame);
-    } catch (e) {
-      console.error("Invalid FEN:", e);
+    if (prevFenRef.current !== fen) {
+      prevFenRef.current = fen;
+      try {
+        const newGame = new Chess(fen);
+        setGame(newGame);
+      } catch (e) {
+        console.error("Invalid FEN:", e);
+      }
     }
   }, [fen]);
 
   // react-chessboard handles its own responsive sizing via ResizeObserver
 
-  // Update square styles for highlights
+  // Memoize highlights to prevent infinite loops from new array references
+  // Arrays/objects passed as props create new references on every render
+  const highlightsKey = useMemo(() => {
+    return highlights.map(h => `${h.sq}-${h.color || ''}`).join(',');
+  }, [highlights]);
+
+  // Update square styles for highlights - only when highlights actually change
+  // Use the memoized key instead of the array itself to prevent infinite loops
   useEffect(() => {
     const styles: { [square: string]: React.CSSProperties } = {};
     highlights.forEach((h) => {
@@ -50,7 +68,7 @@ export default function Board({
       };
     });
     setCustomSquareStyles(styles);
-  }, [highlights]);
+  }, [highlightsKey]);
 
   function onDrop(sourceSquare: string, targetSquare: string, piece: string) {
     if (disabled) return false;

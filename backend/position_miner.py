@@ -12,10 +12,11 @@ import json
 class PositionMiner:
     """Mines training positions from analyzed games"""
     
-    def __init__(self, openai_client=None):
+    def __init__(self, openai_client=None, llm_router=None):
         self.max_duplicates_per_motif = 3
         self.max_same_opening = 5
         self.openai_client = openai_client
+        self.llm_router = llm_router
     
     def mine_positions(
         self,

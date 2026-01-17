@@ -7,6 +7,14 @@ import LoadingMessage from './LoadingMessage';
 import InteractivePGN from './InteractivePGN';
 import GameReviewTable from './GameReviewTable';
 import PersonalReviewCharts from './PersonalReviewCharts';
+import ExpandableTable from './ExpandableTable';
+import { getBackendBase } from '@/lib/backendBase';
+
+interface ShowBoardLaunchPayload {
+  finalPgn?: string;
+  fen?: string;
+  showBoardLink?: string;
+}
 
 interface MessageBubbleProps {
   role: 'user' | 'assistant' | 'system' | 'graph' | 'button' | 'expandable_table';
@@ -18,13 +26,23 @@ interface MessageBubbleProps {
   onPreviewFEN?: (fen: string | null) => void;
   buttonAction?: string;
   buttonLabel?: string;
+  tableTitle?: string;
+  tableContent?: string;
   onButtonAction?: (action: string) => void;
   isButtonDisabled?: boolean;
   onRunFullAnalysis?: (fen: string) => void;
+  onShowBoard?: (payload: ShowBoardLaunchPayload) => void;
 }
 
-export default function MessageBubble({ role, content, rawData, timestamp, currentFEN, onApplyPGN, onPreviewFEN, buttonAction, buttonLabel, onButtonAction, isButtonDisabled, onRunFullAnalysis }: MessageBubbleProps) {
+export default function MessageBubble({ role, content, rawData, timestamp, currentFEN, onApplyPGN, onPreviewFEN, buttonAction, buttonLabel, tableTitle, tableContent, onButtonAction, isButtonDisabled, onRunFullAnalysis, onShowBoard }: MessageBubbleProps) {
   const [showRawData, setShowRawData] = useState(false);
+  const [showEvidence, setShowEvidence] = useState(false);
+  const [showLogs, setShowLogs] = useState(false);
+  const [prevLogs, setPrevLogs] = useState<string[]>([]);
+
+  const backendBase = getBackendBase();
+  const [liveLogs, setLiveLogs] = useState<string[]>([]);
+  const [logStream, setLogStream] = useState<EventSource | null>(null);
   const [showConfidence, setShowConfidence] = useState(false);
   const [showReviewTable, setShowReviewTable] = useState(false);
   const [localMoveConfidence, setLocalMoveConfidence] = useState<any>(null);
@@ -38,6 +56,7 @@ export default function MessageBubble({ role, content, rawData, timestamp, curre
   const [targetEndConf, setTargetEndConf] = useState<number>(80);
   const [maxDepth, setMaxDepth] = useState<number>(18);
   const [treeViewMode, setTreeViewMode] = useState<"nodes" | "tags">("nodes");
+  const [baselineTab, setBaselineTab] = useState<"root" | "after_best">("root");
 
   const DEFAULT_BASELINE = 80;
 
@@ -48,10 +67,64 @@ export default function MessageBubble({ role, content, rawData, timestamp, curre
     }
   }, [rawData?.miniBoard?.fen]);
 
-  const backendBase = (process.env.NEXT_PUBLIC_BACKEND_URL as string) || 'http://localhost:8000';
+  // backendBase already resolved above via getBackendBase() (LAN-safe).
   const engineData = (rawData?.rawEngineData ?? rawData) || {};
   const moveConfidence = localMoveConfidence || engineData?.confidence;
   const positionConfidence = localPositionConfidence || engineData?.position_confidence || rawData?.position_confidence;
+  const baselineIntuition = rawData?.baselineIntuition;
+
+  // Fetch previous logs when panel opens
+  useEffect(() => {
+    if (showLogs && prevLogs.length === 0) {
+      fetch(`${backendBase}/debug/backend_log_tail?lines=80`)
+        .then(res => res.json())
+        .then(data => {
+          if (data.lines) {
+            setPrevLogs(data.lines);
+          }
+        })
+        .catch(err => {
+          setPrevLogs([`[Error fetching logs: ${err.message}]`]);
+        });
+    }
+  }, [showLogs, backendBase]);
+
+  // Start/stop live log stream
+  useEffect(() => {
+    if (!showLogs) {
+      if (logStream) {
+        logStream.close();
+        setLogStream(null);
+      }
+      setLiveLogs([]);
+      return;
+    }
+
+    const es = new EventSource(`${backendBase}/debug/backend_log_stream`);
+    es.addEventListener('log', (e: MessageEvent) => {
+      try {
+        const data = JSON.parse(e.data);
+        if (data.line) {
+          setLiveLogs(prev => {
+            const updated = [...prev, data.line];
+            return updated.slice(-80); // Keep last 80 lines
+          });
+        }
+      } catch (err) {
+        console.warn('Failed to parse log event:', err);
+      }
+    });
+
+    es.addEventListener('error', () => {
+      es.close();
+    });
+
+    setLogStream(es);
+
+    return () => {
+      es.close();
+    };
+  }, [showLogs, backendBase]);
 
 
   const getConfidenceNodes = (conf: any): any[] => {
@@ -261,9 +334,11 @@ export default function MessageBubble({ role, content, rawData, timestamp, curre
         return null;
       }
       const label = buttonLabel || (content?.trim() || 'Continue');
+      const isDisabled = isButtonDisabled || rawData?.disabled;
       const handleClick = () => {
+        if (isDisabled) return;
         if (onButtonAction) {
-          onButtonAction(buttonAction);
+          onButtonAction(buttonAction, rawData?.buttonId);
         } else if (typeof window !== 'undefined') {
           window.dispatchEvent(new CustomEvent('chatButtonAction', { 
             detail: { 
@@ -274,15 +349,29 @@ export default function MessageBubble({ role, content, rawData, timestamp, curre
         }
       };
       return (
-        <div className="message-bubble message-button">
+        <div className="message-bubble message-button" style={{ background: 'transparent', border: 'none', padding: 0 }}>
           <button 
             className="inline-button" 
             onClick={handleClick}
-            disabled={isButtonDisabled}
-            style={{ opacity: isButtonDisabled ? 0.5 : 1, cursor: isButtonDisabled ? 'not-allowed' : 'pointer' }}
+            disabled={isDisabled}
+            style={{ 
+              opacity: isDisabled ? 0.4 : 1, 
+              cursor: isDisabled ? 'not-allowed' : 'pointer',
+              backgroundColor: isDisabled ? 'rgba(255, 255, 255, 0.02)' : undefined
+            }}
           >
             {label}
           </button>
+        </div>
+      );
+    }
+
+    if (role === 'expandable_table') {
+      const title = tableTitle || (rawData?.tableTitle as string) || (content?.trim() || 'Details');
+      const body = tableContent || (rawData?.tableContent as string) || '';
+      return (
+        <div className="message-bubble message-expandable" style={{ background: 'transparent', border: 'none', padding: 0 }}>
+          <ExpandableTable title={String(title)} content={String(body)} defaultOpen={false} />
         </div>
       );
     }
@@ -650,13 +739,66 @@ export default function MessageBubble({ role, content, rawData, timestamp, curre
         </span>
         
         {role === 'assistant' && rawData && (
-          <button 
-            className="raw-data-toggle"
-            onClick={() => setShowRawData(!showRawData)}
-            title="View raw analysis data"
-          >
-            Raw Data
-          </button>
+          <div className="message-header-actions">
+            {/* Evidence toggle (per-claim, evidence-locked) */}
+            <button
+              className="raw-data-toggle"
+              onClick={() => setShowEvidence(!showEvidence)}
+              title="View evidence attached to each claim"
+            >
+              Evidence
+            </button>
+
+            <button 
+              className="raw-data-toggle"
+              onClick={() => setShowLogs(!showLogs)}
+              title="View backend logs (previous + live)"
+            >
+              Logs
+            </button>
+
+            <button 
+              className="raw-data-toggle"
+              onClick={() => setShowRawData(!showRawData)}
+              title="View raw analysis data"
+            >
+              Raw Data
+            </button>
+
+            {/* NEW: Show Board button when investigation lines are available */}
+            {(() => {
+              const rawMeta = rawData as any;
+              const showBoardLink = rawMeta?.show_board_link;
+              const finalPgn = rawMeta?.final_pgn;
+              if (!showBoardLink && !finalPgn) return null;
+              
+              const handleShowBoard = () => {
+                if (onShowBoard) {
+                  const fallbackFen = rawMeta?.fen || rawMeta?.boardContext?.fen || currentFEN;
+                  onShowBoard({
+                    finalPgn,
+                    fen: fallbackFen || undefined,
+                    showBoardLink,
+                  });
+                  return;
+                }
+                
+                if (showBoardLink) {
+                  window.open(showBoardLink, '_blank');
+                }
+              };
+              
+              return (
+                <button
+                  className="raw-data-toggle"
+                  onClick={handleShowBoard}
+                  title="Add board tab with all investigated lines"
+                >
+                  Show Board
+                </button>
+              );
+            })()}
+          </div>
         )}
 
         {/* Confidence badge is shown at bottom-right below */}
@@ -675,8 +817,101 @@ export default function MessageBubble({ role, content, rawData, timestamp, curre
             <div dangerouslySetInnerHTML={toMinimalHtml(filteredContent)} />
           )}
         </div>
+
+        {role === "assistant" && baselineIntuition && (
+          <div style={{ marginTop: 12, padding: 10, border: "1px solid rgba(255,255,255,0.12)", borderRadius: 8 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, marginBottom: 8 }}>
+              <div style={{ fontWeight: 700 }}>Baseline D2/D16 Intuition</div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button
+                  type="button"
+                  className="raw-data-toggle"
+                  onClick={() => setBaselineTab("root")}
+                  style={{ opacity: baselineTab === "root" ? 1 : 0.7 }}
+                >
+                  Scan A (root)
+                </button>
+                {(() => {
+                  const bi = baselineIntuition || {};
+                  const hasScanB = Boolean(bi.scan_after_best && !bi.scan_after_best?.error);
+                  if (!hasScanB) return null;
+                  return (
+                    <button
+                      type="button"
+                      className="raw-data-toggle"
+                      onClick={() => setBaselineTab("after_best")}
+                      style={{ opacity: baselineTab === "after_best" ? 1 : 0.7 }}
+                    >
+                      Scan B (after best)
+                    </button>
+                  );
+                })()}
+              </div>
+            </div>
+
+            {(() => {
+              const bi = baselineIntuition || {};
+              const scan = baselineTab === "after_best" && bi.scan_after_best ? bi.scan_after_best : bi.scan_root;
+              const root = scan?.root || {};
+              const pgn = scan?.pgn_exploration || "";
+              const motifs = Array.isArray(scan?.motifs) ? scan.motifs : [];
+              const claims = Array.isArray(scan?.claims) ? scan.claims : [];
+              return (
+                <div>
+                  <div style={{ fontSize: 13, opacity: 0.9, marginBottom: 8 }}>
+                    D16 eval: {String(root.eval_d16)} | D2 eval: {String(root.eval_d2)} | Best D16:{" "}
+                    {String(root.best_move_d16_san)}
+                  </div>
+                  <details open>
+                    <summary style={{ cursor: "pointer", fontWeight: 600 }}>PGN (verbose)</summary>
+                    <pre style={{ whiteSpace: "pre-wrap", marginTop: 8, maxHeight: 260, overflow: "auto" }}>{String(pgn || "")}</pre>
+                  </details>
+                  <details>
+                    <summary style={{ cursor: "pointer", fontWeight: 600 }}>Claims</summary>
+                    <pre style={{ whiteSpace: "pre-wrap", marginTop: 8, maxHeight: 200, overflow: "auto" }}>
+                      {JSON.stringify(claims.slice(0, 12), null, 2)}
+                    </pre>
+                  </details>
+                  <details>
+                    <summary style={{ cursor: "pointer", fontWeight: 600 }}>Motifs</summary>
+                    <pre style={{ whiteSpace: "pre-wrap", marginTop: 8, maxHeight: 200, overflow: "auto" }}>
+                      {JSON.stringify(motifs.slice(0, 25), null, 2)}
+                    </pre>
+                  </details>
+                </div>
+              );
+            })()}
+          </div>
+        )}
       </div>
       
+      {showLogs && role === 'assistant' && (
+        <div className="logs-panel">
+          <div className="logs-header">
+            <span>Backend Logs</span>
+            <button onClick={() => setShowLogs(false)} className="copy-button">
+              Close
+            </button>
+          </div>
+          
+          <div className="logs-content">
+            <div className="logs-section">
+              <div className="logs-section-title">Previous (last 80 lines)</div>
+              <pre className="logs-previous">
+                {prevLogs.length > 0 ? prevLogs.join('\n') : 'Loading...'}
+              </pre>
+            </div>
+            
+            <div className="logs-section">
+              <div className="logs-section-title">Live (upcoming)</div>
+              <pre className="logs-live">
+                {liveLogs.length > 0 ? liveLogs.join('\n') : 'Waiting for new logs...'}
+              </pre>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showRawData && rawData && (
         <div className="raw-data-panel">
           <div className="raw-data-header">
@@ -688,6 +923,416 @@ export default function MessageBubble({ role, content, rawData, timestamp, curre
           <pre className="raw-data-content">
             {JSON.stringify(rawData, null, 2)}
           </pre>
+        </div>
+      )}
+
+      {showEvidence && role === 'assistant' && rawData && (
+        <div className="evidence-panel">
+          <div className="evidence-header">
+            <span>Evidence (by clause)</span>
+            <button onClick={() => setShowEvidence(false)} className="copy-button">
+              Close
+            </button>
+          </div>
+          {(() => {
+            const narrativeDecision = (rawData as any)?.narrativeDecision || (rawData as any)?.narrative_decision || null;
+            const claims: any[] = Array.isArray(narrativeDecision?.claims) ? narrativeDecision.claims : [];
+            const patternClaims: any[] = Array.isArray(narrativeDecision?.pattern_claims)
+              ? narrativeDecision.pattern_claims
+              : (Array.isArray(narrativeDecision?.patternClaims) ? narrativeDecision.patternClaims : []);
+            const patternSummary: string | null =
+              typeof narrativeDecision?.pattern_summary === 'string'
+                ? narrativeDecision.pattern_summary
+                : (typeof narrativeDecision?.patternSummary === 'string' ? narrativeDecision.patternSummary : null);
+            // Motifs/patterns live under baseline_intuition; surface them here as well
+            // so "Evidence" includes both clause-locked claims + recurring motifs.
+            const bi = (rawData as any)?.baseline_intuition || (rawData as any)?.baselineIntuition || null;
+            const scanRoot = bi?.scan_root || bi?.scanRoot || bi?.scan_root_result || null;
+            const motifs: any[] = Array.isArray(scanRoot?.motifs) ? scanRoot.motifs : [];
+
+            return (
+              <div className="evidence-claims">
+                {patternSummary && (
+                  <div className="evidence-motifs" style={{ marginBottom: 12 }}>
+                    <div className="evidence-row">
+                      <div className="evidence-label">Pattern summary</div>
+                      <div className="evidence-value">
+                        <pre className="evidence-json">{patternSummary}</pre>
+                      </div>
+                    </div>
+                  </div>
+                )}
+                {motifs.length > 0 && (
+                  <div className="evidence-motifs" style={{ marginBottom: 12 }}>
+                    <div className="evidence-row">
+                      <div className="evidence-label">Patterns (motifs)</div>
+                      <div className="evidence-value">
+                        {(motifs.slice(0, 10) as any[]).map((m, i) => {
+                          const sig = m?.pattern?.signature || m?.signature || "";
+                          const count = m?.location?.count_total ?? m?.count_total ?? null;
+                          const cls = m?.classification || m?.class || null;
+                          return (
+                            <div key={`motif-${i}`} className="evidence-tag-row">
+                              <span className="evidence-tags mono">
+                                {sig || "(motif)"}{count !== null ? `  (count=${count})` : ""}{cls ? `  [${cls}]` : ""}
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {!claims.length && (
+                  <div className="evidence-empty">No evidence-locked claims available for this message.</div>
+                )}
+                {patternClaims.length > 0 && (
+                  <div className="evidence-motifs" style={{ marginBottom: 12 }}>
+                    <div className="evidence-row">
+                      <div className="evidence-label">Patterns (claim format)</div>
+                      <div className="evidence-value">
+                        {patternClaims.slice(0, 10).map((pc: any, i: number) => {
+                          const payload = pc?.evidence_payload || pc?.evidencePayload || {};
+                          const evidenceMoves = Array.isArray(pc?.evidence_moves) ? pc.evidence_moves : [];
+                          const pgnMoves = Array.isArray(payload?.pgn_moves) ? payload.pgn_moves : [];
+                          const pgnLine = typeof payload?.pgn_line === 'string' ? payload.pgn_line : null;
+                          const tagsGainedNet = Array.isArray(payload?.tags_gained_net) ? payload.tags_gained_net : [];
+                          const tagsLostNet = Array.isArray(payload?.tags_lost_net) ? payload.tags_lost_net : [];
+                          const rolesGainedNet = Array.isArray(payload?.roles_gained_net) ? payload.roles_gained_net : [];
+                          const rolesLostNet = Array.isArray(payload?.roles_lost_net) ? payload.roles_lost_net : [];
+                          const toNum = (v: any): number | null => {
+                            if (typeof v === 'number' && Number.isFinite(v)) return v;
+                            if (typeof v === 'string') {
+                              const n = Number(v);
+                              if (Number.isFinite(n)) return n;
+                            }
+                            return null;
+                          };
+                          const evidenceEvalStart = toNum(payload?.evidence_eval_start);
+                          const evidenceEvalEnd = toNum(payload?.evidence_eval_end);
+                          const evidenceEvalDelta = toNum(payload?.evidence_eval_delta);
+                          const evidenceMaterialStart = toNum(payload?.evidence_material_start);
+                          const evidenceMaterialEnd = toNum(payload?.evidence_material_end);
+                          const evidencePositionalStart = toNum(payload?.evidence_positional_start);
+                          const evidencePositionalEnd = toNum(payload?.evidence_positional_end);
+                          const keyEvalBreakdown = payload?.key_eval_breakdown && typeof payload.key_eval_breakdown === 'object' ? payload.key_eval_breakdown : null;
+                          const displayMoves = (pgnMoves.length > 0 ? pgnMoves : evidenceMoves);
+                          const fmt = (n: number) => `${n >= 0 ? '+' : ''}${n.toFixed(2)}`;
+                          
+                          return (
+                            <details key={`pattern-claim-${i}`} className="evidence-clause">
+                              <summary className="evidence-summary">
+                                <span className="evidence-title">Pattern {i + 1}</span>
+                                <span className="evidence-badge evidence-badge-pattern">pattern</span>
+                                <span className="evidence-priority">P2</span>
+                              </summary>
+                              <div className="evidence-body">
+                                {typeof pc?.summary === 'string' && pc.summary && (
+                                  <div className="evidence-row">
+                                    <div className="evidence-label">Summary</div>
+                                    <div className="evidence-value">{pc.summary}</div>
+                                  </div>
+                                )}
+                                {displayMoves.length > 0 && (
+                                  <div className="evidence-row">
+                                    <div className="evidence-label">Evidence moves</div>
+                                    <div className="evidence-value mono">{displayMoves.join(' ')}</div>
+                                  </div>
+                                )}
+                                {pgnLine && (
+                                  <div className="evidence-row">
+                                    <div className="evidence-label">PGN line</div>
+                                    <div className="evidence-value mono">{pgnLine}</div>
+                                  </div>
+                                )}
+                                {(evidenceEvalStart !== null || evidenceEvalEnd !== null || evidenceEvalDelta !== null || evidenceMaterialStart !== null || evidenceMaterialEnd !== null || evidencePositionalStart !== null || evidencePositionalEnd !== null) && (
+                                  <div className="evidence-row">
+                                    <div className="evidence-label">Eval (evidence line)</div>
+                                    <div className="evidence-value">
+                                      <div className="evidence-tag-row">
+                                        <span className="evidence-tag-label">Start → End:</span>
+                                        <span className="evidence-tags mono">
+                                          {evidenceEvalStart !== null ? fmt(evidenceEvalStart) : 'n/a'} → {evidenceEvalEnd !== null ? fmt(evidenceEvalEnd) : 'n/a'}
+                                          {evidenceEvalDelta !== null ? ` (Δ ${fmt(evidenceEvalDelta)})` : ''}
+                                        </span>
+                                      </div>
+                                      {(evidenceMaterialStart !== null || evidencePositionalStart !== null || evidenceMaterialEnd !== null || evidencePositionalEnd !== null) && (
+                                        <div className="evidence-tag-row">
+                                          <span className="evidence-tag-label">Decomp:</span>
+                                          <span className="evidence-tags mono">
+                                            start mat {evidenceMaterialStart !== null ? fmt(evidenceMaterialStart) : 'n/a'} + pos {evidencePositionalStart !== null ? fmt(evidencePositionalStart) : 'n/a'}; end mat {evidenceMaterialEnd !== null ? fmt(evidenceMaterialEnd) : 'n/a'} + pos {evidencePositionalEnd !== null ? fmt(evidencePositionalEnd) : 'n/a'}
+                                          </span>
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+                                )}
+                                {(tagsGainedNet.length > 0 || tagsLostNet.length > 0 || rolesGainedNet.length > 0 || rolesLostNet.length > 0) && (
+                                  <div className="evidence-row">
+                                    <div className="evidence-label">Tags</div>
+                                    <div className="evidence-value">
+                                      {tagsGainedNet.length > 0 && (
+                                        <div className="evidence-tag-row">
+                                          <span className="evidence-tag-label">Tags gained:</span>
+                                          <span className="evidence-tags">{tagsGainedNet.join(', ')}</span>
+                                        </div>
+                                      )}
+                                      {tagsLostNet.length > 0 && (
+                                        <div className="evidence-tag-row">
+                                          <span className="evidence-tag-label">Tags lost:</span>
+                                          <span className="evidence-tags">{tagsLostNet.join(', ')}</span>
+                                        </div>
+                                      )}
+                                      {rolesGainedNet.length > 0 && (
+                                        <div className="evidence-tag-row">
+                                          <span className="evidence-tag-label">Roles gained:</span>
+                                          <span className="evidence-tags">{rolesGainedNet.join(', ')}</span>
+                                        </div>
+                                      )}
+                                      {rolesLostNet.length > 0 && (
+                                        <div className="evidence-tag-row">
+                                          <span className="evidence-tag-label">Roles lost:</span>
+                                          <span className="evidence-tags">{rolesLostNet.join(', ')}</span>
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            </details>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                )}
+                {claims.map((c, idx) => {
+                  const hints = c?.hints || {};
+                  const payload = c?.evidence_payload || c?.evidencePayload || {};
+                  const roleLabel = hints?.role || 'detail';
+                  const priority = hints?.priority ?? 2;
+                  const connector = c?.connector || null;
+                  const source = c?.evidence_source || null;
+                  const evidenceMoves = Array.isArray(c?.evidence_moves) ? c.evidence_moves : [];
+
+                  const themeTags = Array.isArray(payload?.theme_tags) ? payload.theme_tags : [];
+                  const rawTags = Array.isArray(payload?.raw_tags) ? payload.raw_tags : [];
+                  const pgnLine = typeof payload?.pgn_line === 'string' ? payload.pgn_line : null;
+                  const pgnMoves = Array.isArray(payload?.pgn_moves) ? payload.pgn_moves : [];
+                  const twoMove = payload?.two_move && typeof payload.two_move === 'object' ? payload.two_move : null;
+                  const tagsGainedNet = Array.isArray(payload?.tags_gained_net) ? payload.tags_gained_net : [];
+                  const tagsLostNet = Array.isArray(payload?.tags_lost_net) ? payload.tags_lost_net : [];
+                  const rolesGainedNet = Array.isArray(payload?.roles_gained_net) ? payload.roles_gained_net : [];  // NEW
+                  const rolesLostNet = Array.isArray(payload?.roles_lost_net) ? payload.roles_lost_net : [];  // NEW
+                  const materialChangeNet = typeof payload?.material_change_net === 'number' ? payload.material_change_net : null;
+                  const toNum = (v: any): number | null => {
+                    if (typeof v === 'number' && Number.isFinite(v)) return v;
+                    if (typeof v === 'string') {
+                      const n = Number(v);
+                      if (Number.isFinite(n)) return n;
+                    }
+                    return null;
+                  };
+                  const evidenceEvalStart = toNum(payload?.evidence_eval_start);
+                  const evidenceEvalEnd = toNum(payload?.evidence_eval_end);
+                  const evidenceEvalDelta = toNum(payload?.evidence_eval_delta);
+                  const evidenceMaterialStart = toNum(payload?.evidence_material_start);
+                  const evidenceMaterialEnd = toNum(payload?.evidence_material_end);
+                  const evidencePositionalStart = toNum(payload?.evidence_positional_start);
+                  const evidencePositionalEnd = toNum(payload?.evidence_positional_end);
+                  const keyEvalBreakdown = payload?.key_eval_breakdown && typeof payload.key_eval_breakdown === 'object' ? payload.key_eval_breakdown : null;
+
+                  const displayMoves = (pgnMoves.length > 0 ? pgnMoves : evidenceMoves);
+                  const fmt = (n: number) => `${n >= 0 ? '+' : ''}${n.toFixed(2)}`;
+
+                  return (
+                    <details key={`${idx}-${c?.summary || ''}`} className="evidence-clause">
+                      <summary className="evidence-summary">
+                        <span className="evidence-title">Claim {idx + 1}</span>
+                        <span className={`evidence-badge evidence-badge-${roleLabel}`}>{roleLabel}</span>
+                        <span className="evidence-priority">P{priority}</span>
+                      </summary>
+
+                      <div className="evidence-body">
+                        {typeof c?.summary === 'string' && c.summary && (
+                          <div className="evidence-row">
+                            <div className="evidence-label">Summary</div>
+                            <div className="evidence-value">{c.summary}</div>
+                          </div>
+                        )}
+
+                        {connector && (
+                          <div className="evidence-row">
+                            <div className="evidence-label">Connector</div>
+                            <div className="evidence-value">{String(connector)}</div>
+                          </div>
+                        )}
+
+                        {source && (
+                          <div className="evidence-row">
+                            <div className="evidence-label">Evidence source</div>
+                            <div className="evidence-value">{String(source)}</div>
+                          </div>
+                        )}
+
+                        {displayMoves.length > 0 && (
+                          <div className="evidence-row">
+                            <div className="evidence-label">Evidence moves</div>
+                            <div className="evidence-value mono">{displayMoves.join(' ')}</div>
+                          </div>
+                        )}
+
+                        {pgnLine && (
+                          <div className="evidence-row">
+                            <div className="evidence-label">PGN line</div>
+                            <div className="evidence-value mono">{pgnLine}</div>
+                          </div>
+                        )}
+
+                        {(evidenceEvalStart !== null || evidenceEvalEnd !== null || evidenceEvalDelta !== null || evidenceMaterialStart !== null || evidenceMaterialEnd !== null || evidencePositionalStart !== null || evidencePositionalEnd !== null) && (
+                          <div className="evidence-row">
+                            <div className="evidence-label">Eval (evidence line)</div>
+                            <div className="evidence-value">
+                              <div className="evidence-tag-row">
+                                <span className="evidence-tag-label">Start → End:</span>
+                                <span className="evidence-tags mono">
+                                  {evidenceEvalStart !== null ? fmt(evidenceEvalStart) : 'n/a'} → {evidenceEvalEnd !== null ? fmt(evidenceEvalEnd) : 'n/a'}
+                                  {evidenceEvalDelta !== null ? ` (Δ ${fmt(evidenceEvalDelta)})` : ''}
+                                </span>
+                              </div>
+                              {(evidenceMaterialStart !== null || evidencePositionalStart !== null || evidenceMaterialEnd !== null || evidencePositionalEnd !== null) && (
+                                <div className="evidence-tag-row">
+                                  <span className="evidence-tag-label">Decomp:</span>
+                                  <span className="evidence-tags mono">
+                                    start mat {evidenceMaterialStart !== null ? fmt(evidenceMaterialStart) : 'n/a'} + pos {evidencePositionalStart !== null ? fmt(evidencePositionalStart) : 'n/a'}; end mat {evidenceMaterialEnd !== null ? fmt(evidenceMaterialEnd) : 'n/a'} + pos {evidencePositionalEnd !== null ? fmt(evidencePositionalEnd) : 'n/a'}
+                                  </span>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        )}
+
+                        {(themeTags.length > 0 || rawTags.length > 0) && (
+                          <div className="evidence-row">
+                            <div className="evidence-label">Tags</div>
+                            <div className="evidence-value">
+                              {themeTags.length > 0 && (
+                                <div className="evidence-tag-row">
+                                  <span className="evidence-tag-label">Themes:</span>
+                                  <span className="evidence-tags">{themeTags.join(', ')}</span>
+                                </div>
+                              )}
+                              {rawTags.length > 0 && (
+                                <div className="evidence-tag-row">
+                                  <span className="evidence-tag-label">Raw tags:</span>
+                                  <span className="evidence-tags">{rawTags.join(', ')}</span>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        )}
+
+                        {twoMove && (
+                          <div className="evidence-row">
+                            <div className="evidence-label">Two-move snippet</div>
+                            <div className="evidence-value">
+                              <pre className="evidence-json">{JSON.stringify(twoMove, null, 2)}</pre>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* NEW: Eval Breakdown (fundamentally informs the claim) */}
+                        {keyEvalBreakdown && (
+                          <div className="evidence-row">
+                            <div className="evidence-label">Eval breakdown (key evidence)</div>
+                            <div className="evidence-value">
+                              {keyEvalBreakdown.material_balance_before !== null && keyEvalBreakdown.material_balance_before !== undefined && 
+                               keyEvalBreakdown.material_balance_after !== null && keyEvalBreakdown.material_balance_after !== undefined && (
+                                <div className="evidence-tag-row">
+                                  <span className="evidence-tag-label">Material balance:</span>
+                                  <span className="evidence-tags mono" style={{ fontWeight: 'bold' }}>
+                                    {fmt(keyEvalBreakdown.material_balance_before)} → {fmt(keyEvalBreakdown.material_balance_after)}
+                                    {keyEvalBreakdown.material_balance_delta !== null && keyEvalBreakdown.material_balance_delta !== undefined 
+                                      ? ` (Δ ${fmt(keyEvalBreakdown.material_balance_delta)})` 
+                                      : ''}
+                                  </span>
+                                </div>
+                              )}
+                              {keyEvalBreakdown.positional_balance_before !== null && keyEvalBreakdown.positional_balance_before !== undefined && 
+                               keyEvalBreakdown.positional_balance_after !== null && keyEvalBreakdown.positional_balance_after !== undefined && (
+                                <div className="evidence-tag-row">
+                                  <span className="evidence-tag-label">Positional balance:</span>
+                                  <span className="evidence-tags mono" style={{ fontWeight: 'bold' }}>
+                                    {fmt(keyEvalBreakdown.positional_balance_before)} → {fmt(keyEvalBreakdown.positional_balance_after)}
+                                    {keyEvalBreakdown.positional_balance_delta !== null && keyEvalBreakdown.positional_balance_delta !== undefined 
+                                      ? ` (Δ ${fmt(keyEvalBreakdown.positional_balance_delta)})` 
+                                      : ''}
+                                  </span>
+                                </div>
+                              )}
+                              {keyEvalBreakdown.eval_before !== null && keyEvalBreakdown.eval_after !== null && (
+                                <div className="evidence-tag-row">
+                                  <span className="evidence-tag-label">Total eval:</span>
+                                  <span className="evidence-tags mono">
+                                    {fmt(keyEvalBreakdown.eval_before)} → {fmt(keyEvalBreakdown.eval_after)}
+                                    {keyEvalBreakdown.eval_delta !== null && keyEvalBreakdown.eval_delta !== undefined 
+                                      ? ` (Δ ${fmt(keyEvalBreakdown.eval_delta)})` 
+                                      : ''}
+                                  </span>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        )}
+
+                        {(tagsGainedNet.length > 0 || tagsLostNet.length > 0 || rolesGainedNet.length > 0 || rolesLostNet.length > 0 || materialChangeNet !== null) && (
+                          <div className="evidence-row">
+                            <div className="evidence-label">Net changes (sequence)</div>
+                            <div className="evidence-value">
+                              {tagsGainedNet.length > 0 && (
+                                <div className="evidence-tag-row">
+                                  <span className="evidence-tag-label">Tags gained:</span>
+                                  <span className="evidence-tags">{tagsGainedNet.join(', ')}</span>
+                                </div>
+                              )}
+                              {tagsLostNet.length > 0 && (
+                                <div className="evidence-tag-row">
+                                  <span className="evidence-tag-label">Tags lost:</span>
+                                  <span className="evidence-tags">{tagsLostNet.join(', ')}</span>
+                                </div>
+                              )}
+                              {rolesGainedNet.length > 0 && (
+                                <div className="evidence-tag-row">
+                                  <span className="evidence-tag-label">Roles gained:</span>
+                                  <span className="evidence-tags">{rolesGainedNet.join(', ')}</span>
+                                </div>
+                              )}
+                              {rolesLostNet.length > 0 && (
+                                <div className="evidence-tag-row">
+                                  <span className="evidence-tag-label">Roles lost:</span>
+                                  <span className="evidence-tags">{rolesLostNet.join(', ')}</span>
+                                </div>
+                              )}
+                              {materialChangeNet !== null && (
+                                <div className="evidence-tag-row">
+                                  <span className="evidence-tag-label">Material change:</span>
+                                  <span className="evidence-tags">
+                                    {materialChangeNet > 0 ? '+' : ''}{materialChangeNet.toFixed(2)} pawns
+                                    {materialChangeNet > 0 ? ' (better for White)' : materialChangeNet < 0 ? ' (better for Black)' : ''}
+                                  </span>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </details>
+                  );
+                })}
+              </div>
+            );
+          })()}
         </div>
       )}
 
@@ -861,14 +1506,6 @@ export default function MessageBubble({ role, content, rawData, timestamp, curre
       <div className="message-badges">
         {role === 'assistant' && hasConfidence && (
           <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-            <button
-              className="confidence-badge"
-              onClick={() => setShowConfidence(!showConfidence)}
-              aria-expanded={showConfidence}
-              title="Show confidence details"
-            >
-              Confidence = {renderPercent(playedOverallValue)}
-            </button>
             {onRunFullAnalysis && (engineData?.fen || engineData?.fen_before) && engineData?.light_mode === true && (
               <button
                 className="full-analysis-badge"

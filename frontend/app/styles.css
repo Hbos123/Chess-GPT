@@ -7,12 +7,30 @@
 }
 
 :root {
-  --bg-primary: #ffffff;
-  --bg-secondary: #f8f9fa;
-  --bg-tertiary: #e9ecef;
-  --text-primary: #212529;
-  --text-secondary: #6c757d;
-  --border-color: #dee2e6;
+  --bg-primary: #0c111a;
+  --bg-secondary: #111827;
+  --bg-tertiary: #1a2335;
+  --text-primary: #e8edf5;
+  --text-secondary: #9fb3c8;
+  --border-color: #24324a;
+  --accent-color: #7dd3fc;
+  --accent-hover: #5fbce6;
+  --success-color: #4ade80;
+  --danger-color: #f87171;
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.35);
+  --shadow-md: 0 6px 20px rgba(0, 0, 0, 0.35);
+  --shadow-lg: 0 14px 40px rgba(0, 0, 0, 0.45);
+  --transition-fast: 180ms ease;
+  --transition-slow: 320ms cubic-bezier(0.4, 0.14, 0.3, 1);
+}
+
+[data-theme="day"] {
+  --bg-primary: #fdfbf7;
+  --bg-secondary: #f5f1ea;
+  --bg-tertiary: #ebe5db;
+  --text-primary: #111111;
+  --text-secondary: #5a5a5a;
+  --border-color: #d9d2c7;
   --accent-color: #0d6efd;
   --accent-hover: #0b5ed7;
   --success-color: #198754;
@@ -22,21 +40,8 @@
   --shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.1);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg-primary: #1a1a1a;
-    --bg-secondary: #2d2d2d;
-    --bg-tertiary: #3a3a3a;
-    --text-primary: #f8f9fa;
-    --text-secondary: #adb5bd;
-    --border-color: #495057;
-    --accent-color: #4dabf7;
-    --accent-hover: #339af0;
-  }
-}
-
 html {
-  font-size: 18px;
+  font-size: 17px;
 }
 
 body {
@@ -45,6 +50,16 @@ body {
   color: var(--text-primary);
   font-size: 1rem;
   line-height: 1.7;
+  transition: background-color var(--transition-fast), color var(--transition-fast);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0ms !important;
+    scroll-behavior: auto !important;
+  }
 }
 
 /* App Layout */
@@ -668,9 +683,17 @@ body {
   box-sizing: border-box;
 }
 
+/* Responsive scaling for PGN viewer in board layout */
+.chat-layout.with-board .pgn-viewer {
+  padding: clamp(0.75rem, 1vw, 1rem);
+  margin-bottom: clamp(0.75rem, 1vw, 1rem);
+  max-height: clamp(250px, 30vw, 300px);
+  border-radius: clamp(6px, 0.8vw, 8px);
+}
+
 .moves-container {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  font-size: 1rem;
+  font-size: 16px;
   line-height: 1.8;
   color: var(--text-primary);
   display: flex;
@@ -678,11 +701,24 @@ body {
   gap: 0.25rem;
 }
 
+/* Responsive font scaling for PGN moves in board layout */
+.chat-layout.with-board .moves-container {
+  font-size: clamp(0.75rem, 1.2vw, 1rem);
+  line-height: clamp(1.5, 1.8vw, 1.8);
+  gap: clamp(0.2rem, 0.3vw, 0.25rem);
+}
+
 .move-number {
   color: var(--text-secondary);
   font-weight: 600;
   margin-right: 0.25rem;
   font-size: 0.9rem;
+}
+
+/* Responsive font scaling for move numbers in board layout */
+.chat-layout.with-board .move-number {
+  font-size: clamp(0.7rem, 1.1vw, 0.9rem);
+  margin-right: clamp(0.2rem, 0.3vw, 0.25rem);
 }
 
 .move {
@@ -694,6 +730,12 @@ body {
   transition: all 0.15s;
   user-select: none;
   font-weight: 500;
+}
+
+/* Responsive font scaling for moves in board layout */
+.chat-layout.with-board .move {
+  padding: clamp(0.2rem, 0.3vw, 0.25rem) clamp(0.4rem, 0.6vw, 0.5rem);
+  font-size: clamp(0.75rem, 1.2vw, 1rem);
 }
 
 .move:hover {
@@ -1650,6 +1692,55 @@ body {
   padding: 2rem;
   overflow-y: auto;
   flex: 1;
+}
+
+.personal-review-progress {
+  width: 100%;
+  max-width: 520px;
+  margin-top: 0.5rem;
+}
+
+.personal-review-progress-overview {
+  width: 100%;
+  margin-bottom: 1.5rem;
+  padding: 1rem;
+  background: var(--bg-secondary);
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
+}
+
+.personal-review-progress-overview .personal-review-progress-meta {
+  margin-bottom: 0.5rem;
+  font-size: 0.95rem;
+}
+
+.personal-review-progress-overview .personal-review-progress-bar {
+  height: 12px;
+}
+
+.personal-review-progress-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.35rem;
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+}
+
+.personal-review-progress-bar {
+  height: 10px;
+  width: 100%;
+  border-radius: 999px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.10);
+}
+
+.personal-review-progress-fill {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, var(--accent-color), rgba(118, 75, 162, 1));
+  transition: width 250ms ease;
 }
 
 .review-section {

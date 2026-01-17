@@ -1,4 +1,7 @@
 #!/bin/bash
-cd /Users/hugobosnic/Desktop/chess-gpt/frontend
-export PATH=/Users/hugobosnic/Desktop/chess-gpt/backend/node-v20.11.0-darwin-arm64/bin:$PATH
-/Users/hugobosnic/Desktop/chess-gpt/backend/node-v20.11.0-darwin-arm64/bin/npm run dev
+cd /Users/hugobosnic/Desktop/Projects/Chess-GPT/frontend
+
+# Ensure frontend talks to the correct backend port (backend runs on 8000)
+export NEXT_PUBLIC_BACKEND_URL="http://localhost:8000"
+
+npm run dev

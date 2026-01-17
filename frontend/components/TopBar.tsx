@@ -1,3 +1,5 @@
+import { useEffect, useRef, useState } from "react";
+
 interface TopBarProps {
   onToggleHistory: () => void;
   onSignIn?: () => void;
@@ -17,6 +19,27 @@ export default function TopBar({
   userName,
   authLoading,
 }: TopBarProps) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const onDocPointerDown = (e: MouseEvent | PointerEvent) => {
+      const el = menuRef.current;
+      if (!el) return;
+      if (e.target instanceof Node && el.contains(e.target)) return;
+      setMenuOpen(false);
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setMenuOpen(false);
+    };
+    document.addEventListener("pointerdown", onDocPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", onDocPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, []);
+
   const initials = userName?.[0]?.toUpperCase() || userEmail?.[0]?.toUpperCase() || 'U';
   const greetingName = userName || userEmail || 'Player';
 
@@ -27,7 +50,7 @@ export default function TopBar({
         onClick={onToggleHistory}
         aria-label="Toggle chat history"
       >
-        <svg width="84" height="84" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round">
+        <svg width="60" height="60" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round">
           <line x1="3" y1="6" x2="21" y2="6"/>
           <line x1="3" y1="12" x2="21" y2="12"/>
           <line x1="3" y1="18" x2="21" y2="18"/>
@@ -38,29 +61,57 @@ export default function TopBar({
 
       <div className="top-bar-actions">
         {userEmail ? (
-          <div className="user-menu">
-            <button className="user-avatar" aria-label={`Signed in as ${greetingName}`}>
+          <div className="user-menu" ref={menuRef}>
+            <button
+              className="user-avatar"
+              aria-label={`Signed in as ${greetingName}`}
+              aria-haspopup="menu"
+              aria-expanded={menuOpen}
+              onClick={() => setMenuOpen((v) => !v)}
+              type="button"
+            >
               <div className="user-avatar-initial">{initials}</div>
               <div className="user-greeting">
                 <span className="user-greeting-line">Hi {greetingName}</span>
               </div>
             </button>
-            <div className="user-dropdown">
-              <div className="user-dropdown-header">
-                <div className="user-dropdown-name">{greetingName}</div>
-                <div className="user-email-label">{userEmail}</div>
+            {menuOpen && (
+              <div className="user-dropdown" role="menu">
+                <div className="user-dropdown-header">
+                  <div className="user-dropdown-name">{greetingName}</div>
+                  <div className="user-email-label">{userEmail}</div>
+                </div>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    setMenuOpen(false);
+                    await onSwitchAccount?.();
+                  }}
+                >
+                  Change account
+                </button>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    setMenuOpen(false);
+                    await onSignOut?.();
+                  }}
+                >
+                  Sign out
+                </button>
               </div>
-              <button onClick={() => onSwitchAccount?.()}>Change account</button>
-              <button onClick={() => onSignOut?.()}>Sign out</button>
-            </div>
+            )}
           </div>
         ) : (
           <button
             className="auth-button"
             onClick={onSignIn}
-            disabled={authLoading}
+            // Never disable sign-in just because initial auth hydration is in-flight.
+            // If Supabase calls are slow/blocked, we still want users to be able to retry sign-in.
+            disabled={false}
+            aria-busy={!!authLoading}
           >
-            {authLoading ? 'Loading...' : 'Sign in'}
+            Sign in
           </button>
         )}
       </div>

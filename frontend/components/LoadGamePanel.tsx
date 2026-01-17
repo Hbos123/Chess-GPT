@@ -8,7 +8,7 @@ export type LoadedGamePayload = {
   fen: string;
   pgn?: string;
   orientation?: 'white' | 'black';
-  source?: 'pgn' | 'fen' | 'link' | 'lookup';
+  source?: 'pgn' | 'fen' | 'link' | 'lookup' | 'photo';
   whitePlayer?: string;
   blackPlayer?: string;
 };
@@ -278,11 +278,12 @@ export default function LoadGamePanel({ onLoad, onClose }: LoadGamePanelProps) {
   };
 
   return (
-    <div className="load-game-panel">
-      <div className="panel-header">
-        <h3>Load Game</h3>
-        <button onClick={onClose} className="panel-close">Close</button>
-      </div>
+    <div className="load-game-modal-overlay" onClick={onClose}>
+      <div className="load-game-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="panel-header">
+          <h3>Load Game</h3>
+          <button onClick={onClose} className="panel-close">×</button>
+        </div>
 
       <div className="panel-tabs">
         <button 
@@ -488,26 +489,6 @@ export default function LoadGamePanel({ onLoad, onClose }: LoadGamePanelProps) {
               </label>
             </div>
 
-            <div className="photo-selectors">
-              <label>
-                Board type
-                <select value={photoPreset} onChange={(e) => setPhotoPreset(e.target.value as 'digital' | 'physical')}>
-                  <option value="digital">Digital (Chess GPT/online)</option>
-                  <option value="physical">Physical board</option>
-                </select>
-              </label>
-              <label>
-                Orientation hint
-                <select
-                  value={photoOrientationHint}
-                  onChange={(e) => setPhotoOrientationHint(e.target.value as 'white' | 'black')}
-                >
-                  <option value="white">White at bottom</option>
-                  <option value="black">Black at bottom</option>
-                </select>
-              </label>
-            </div>
-
             <button
               className="photo-analyze-button"
               onClick={handleAnalyzePhoto}
@@ -576,6 +557,7 @@ export default function LoadGamePanel({ onLoad, onClose }: LoadGamePanelProps) {
         <button onClick={handleLoad} className="load-button" disabled={!canLoad}>
           Use in chat
         </button>
+      </div>
       </div>
     </div>
   );

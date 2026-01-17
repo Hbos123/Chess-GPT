@@ -9,8 +9,11 @@ import json
 import re
 import os
 
+import chess
+
 from orchestration_plan import (
     OrchestrationPlan,
+    IntentPlan,
     Mode,
     ResponseStyle,
     ResponseGuidelines,
@@ -19,6 +22,7 @@ from orchestration_plan import (
     FrontendCommand,
     FrontendCommandType,
     StatusMessage,
+    InvestigationRequest,
     build_play_mode_plan,
     build_analyze_plan,
     build_review_plan,
@@ -29,7 +33,20 @@ from orchestration_plan import (
     build_pv_analysis_plan,
     build_direct_question_plan
 )
-from interpreter_prompt import INTERPRETER_SYSTEM_PROMPT, INTERPRETER_SYSTEM_PROMPT_COMPACT, MULTI_PASS_PROMPT_ADDITION
+from interpreter_prompt import (
+    INTERPRETER_SYSTEM_PROMPT,
+    INTERPRETER_SYSTEM_PROMPT_COMPACT,
+    MULTI_PASS_PROMPT_ADDITION,
+    INTENT_INTERPRETER_PROMPT,
+    CONNECTED_IDEAS_EXTRACTOR_PROMPT,
+)
+from minimal_prompts import MIN_SYSTEM_PROMPT_V1, INTERPRETER_CONTRACT_V1
+from command_protocol import render_command
+from action_schema import validate_interpreter_intent
+
+def _looks_like_quota_or_rate_limit_error(e: Exception) -> bool:
+    s = str(e).lower()
+    return ("insufficient_quota" in s) or ("exceeded your current quota" in s) or ("rate limit" in s) or ("error code: 429" in s)
 
 
 class RequestInterpreter:
@@ -46,17 +63,24 @@ class RequestInterpreter:
         use_llm_primary: bool = True,  # LLM-first by default
         enable_multi_pass: bool = False,  # Multi-pass interpreter loop
         game_fetcher = None,
-        engine_queue = None
+        engine_queue = None,
+        llm_router = None,
     ):
         self.client = openai_client
+        self.llm_router = llm_router
         self.use_compact_prompt = use_compact_prompt
         self.use_llm_primary = use_llm_primary
         self.enable_multi_pass = enable_multi_pass
         
-        # Model configuration - upgrade to GPT-4o for better reliability
-        # Can override via INTERPRETER_MODEL environment variable
-        self.model = os.getenv("INTERPRETER_MODEL", "gpt-4o")
-        print(f"   🤖 Interpreter using model: {self.model}")
+        # Model configuration - can override via INTERPRETER_MODEL environment variable
+        # Default to gpt-5-mini for speed; higher layers can stay on gpt-5.
+        self.model = os.getenv("INTERPRETER_MODEL", "gpt-5-mini")
+        # Logs should be provider-agnostic; vLLM model id is logged by LLMRouter per-call.
+        print(f"   🤖 Interpreter initialized (LLM provider=vllm)")
+        # Debug/audit: last LLM I/O (prompts + raw response texts + parsed JSON)
+        self._audit_llm_io: Dict[str, Any] = {}
+        # Small in-memory cache for connected_ideas pass (avoid repeat LLM calls for same position+query)
+        self._connected_ideas_cache: Dict[str, Any] = {}
         
         # Initialize interpreter loop if multi-pass enabled
         self._interpreter_loop = None
@@ -69,11 +93,16 @@ class RequestInterpreter:
             from interpreter_loop import InterpreterLoop
             from interpreter_action_executor import InterpreterActionExecutor
             from interpreter_budget import ResourceBudget
+            from board_simulator import BoardSimulator
+            
+            # Create board simulator for chess-specific actions
+            board_simulator = BoardSimulator(engine_queue) if engine_queue else None
             
             action_executor = InterpreterActionExecutor(
                 game_fetcher=game_fetcher,
                 engine_queue=engine_queue,
-                openai_client=self.client
+                openai_client=self.client,
+                board_simulator=board_simulator
             )
             
             self._interpreter_loop = InterpreterLoop(
@@ -81,10 +110,186 @@ class RequestInterpreter:
                 action_executor=action_executor,
                 budget=ResourceBudget.default()
             )
-            print("   🔄 Multi-pass interpreter loop initialized")
+            print("   🔄 Multi-pass interpreter loop initialized with board simulator")
         except Exception as e:
             print(f"   ⚠️ Failed to initialize interpreter loop: {e}")
+            import traceback
+            traceback.print_exc()
             self._interpreter_loop = None
+    
+    def _extract_moves_from_message(self, message: str) -> tuple[list[str], str]:
+        """
+        Extract chess moves from a message like "rate my position after e4 e5 Nf3".
+        
+        Handles patterns like:
+        - "after e4 e5 Nf3"
+        - "after 1.e4 e5 2.Nf3"
+        - "position after e4, e5, Nf3"
+        - "what about after e4 e5"
+        
+        Returns:
+            Tuple of (list of moves, cleaned message without move sequence)
+        """
+        import re
+        
+        # Pattern to detect "after [moves]" 
+        after_patterns = [
+            r'\bafter\s+(.+?)(?:\?|$|\.(?![a-h]\d))',  # "after e4 e5 Nf3?" or end of string
+            r'\bposition\s+after\s+(.+?)(?:\?|$)',
+            r'\bfollowing\s+(.+?)(?:\?|$)',
+            r'\bwhat\s+about\s+after\s+(.+?)(?:\?|$)',
+        ]
+        
+        moves_text = None
+        for pattern in after_patterns:
+            match = re.search(pattern, message, re.IGNORECASE)
+            if match:
+                moves_text = match.group(1).strip()
+                break
+        
+        if not moves_text:
+            return [], message
+        
+        # Parse the moves from the extracted text
+        # Handle formats: "e4 e5 Nf3", "1.e4 e5 2.Nf3", "e4, e5, Nf3"
+        
+        # Remove move numbers (1., 2., etc.)
+        moves_text = re.sub(r'\d+\.+', ' ', moves_text)
+        
+        # Split by whitespace or commas
+        parts = re.split(r'[\s,]+', moves_text)
+        
+        # Filter to valid SAN moves
+        san_pattern = r'^[KQRBN]?[a-h]?[1-8]?x?[a-h][1-8](?:=[QRBN])?[+#]?$|^O-O(?:-O)?$'
+        moves = []
+        for part in parts:
+            part = part.strip()
+            if part and re.match(san_pattern, part, re.IGNORECASE):
+                moves.append(part)
+        
+        # Create cleaned message (remove the move sequence)
+        cleaned_message = message
+        for pattern in after_patterns:
+            cleaned_message = re.sub(pattern, '', cleaned_message, flags=re.IGNORECASE)
+        cleaned_message = cleaned_message.strip()
+        
+        if moves:
+            print(f"   🎯 Extracted moves from message: {moves}")
+        
+        return moves, cleaned_message
+
+    def _normalize_fen_for_cache(self, fen: Optional[str]) -> str:
+        """Normalize FEN for cache keys (strip move counters)."""
+        if not fen or not isinstance(fen, str):
+            return ""
+        try:
+            return " ".join(fen.split()[:4])
+        except Exception:
+            return str(fen)
+
+    def _connected_ideas_cache_key(self, fen: Optional[str], message: str) -> str:
+        fen_norm = self._normalize_fen_for_cache(fen)
+        msg = (message or "").strip().lower()
+        return f"{fen_norm}|{msg}"
+
+    def _should_run_connected_ideas(
+        self,
+        intent_plan: IntentPlan,
+        *,
+        message: str,
+        fen_for_rel: Optional[str],
+        piece_instances: List[Dict[str, Any]],
+    ) -> bool:
+        """
+        Heuristic gate for connected-ideas pass (saves an LLM call when it won’t help).
+
+        Policy is configurable via CONNECTED_IDEAS_POLICY:
+        - ambiguity_only (default): only run when piece identity is ambiguous
+        - dependency_or_ambiguity: also run on dependency-language markers
+        """
+        try:
+            if getattr(intent_plan, "intent", None) != "discuss_position":
+                return False
+        except Exception:
+            return False
+
+        msg = (message or "").lower()
+        policy = (os.getenv("CONNECTED_IDEAS_POLICY", "ambiguity_only") or "ambiguity_only").strip().lower()
+
+        # Piece identity ambiguity (multiple candidates of a type on the relevant side)
+        def _count_instances(piece_name: str, color: str) -> int:
+            n = 0
+            for p in piece_instances or []:
+                if not isinstance(p, dict):
+                    continue
+                if p.get("piece") == piece_name and p.get("color") == color:
+                    n += 1
+            return n
+
+        side = "white"
+        try:
+            if fen_for_rel:
+                b = chess.Board(fen_for_rel)
+                side = "white" if b.turn == chess.WHITE else "black"
+        except Exception:
+            pass
+
+        for pt in ("knight", "rook", "bishop"):
+            if pt in msg and _count_instances(pt, side) >= 2:
+                return True
+
+        # Optional: dependency-language marker policy
+        if policy == "dependency_or_ambiguity":
+            dependency_markers = (
+                "to enable", "so i can", "so that", "before", "after", "if ", "then", "unless",
+                "tradeoff", "alternative", "sequence", "prerequisite", "blocks", "enables",
+                "either", " or ",
+            )
+            if any(m in msg for m in dependency_markers):
+                return True
+
+        return False
+    
+    def _apply_moves_to_fen(self, starting_fen: str, moves: list[str]) -> tuple[str, bool]:
+        """
+        Apply a sequence of moves to a FEN position.
+        
+        Args:
+            starting_fen: Starting FEN (or None for starting position)
+            moves: List of SAN moves to apply
+            
+        Returns:
+            Tuple of (resulting FEN, success boolean)
+        """
+        if not moves:
+            return starting_fen, True
+        
+        try:
+            # Use starting position if no FEN provided
+            if not starting_fen or starting_fen == "startpos":
+                board = chess.Board()
+            else:
+                board = chess.Board(starting_fen)
+            
+            for move_san in moves:
+                try:
+                    move = board.parse_san(move_san)
+                    if move in board.legal_moves:
+                        board.push(move)
+                    else:
+                        print(f"   ⚠️ Move {move_san} is not legal in current position")
+                        return starting_fen, False
+                except Exception as e:
+                    print(f"   ⚠️ Failed to parse move {move_san}: {e}")
+                    return starting_fen, False
+            
+            resulting_fen = board.fen()
+            print(f"   ✅ Applied {len(moves)} moves, resulting FEN: {resulting_fen[:50]}...")
+            return resulting_fen, True
+            
+        except Exception as e:
+            print(f"   ❌ Failed to apply moves: {e}")
+            return starting_fen, False
     
     async def interpret(
         self,
@@ -130,16 +335,33 @@ class RequestInterpreter:
                 )
             return trivial_plan
         
-        # Use LLM as PRIMARY interpreter for everything else
-        print(f"   🤖 Using LLM interpreter...")
-        if status_callback:
-            status_callback(
-                phase="interpreting",
-                message="Analyzing intent...",
-                timestamp=time.time()
+        # Use multi-pass interpreter loop if enabled, otherwise single-pass LLM interpretation
+        if self.enable_multi_pass and self._interpreter_loop:
+            print(f"   🔄 Using multi-pass interpreter loop (rigorous investigation)...")
+            if status_callback:
+                status_callback(
+                    phase="interpreting",
+                    message="Decomposing request and planning investigation...",
+                    timestamp=time.time()
+                )
+            
+            # Use the interpreter loop for multi-pass investigation
+            plan = await self._interpreter_loop.run(
+                message=message,
+                context=context,
+                status_callback=status_callback
             )
-        
-        plan = await self._llm_interpret(message, context, conversation_history)
+        else:
+            # Use LLM as PRIMARY interpreter for everything else (single-pass)
+            print(f"   🤖 Using LLM interpreter (single-pass)...")
+            if status_callback:
+                status_callback(
+                    phase="interpreting",
+                    message="Analyzing intent...",
+                    timestamp=time.time()
+                )
+            
+            plan = await self._llm_interpret(message, context, conversation_history)
         
         # POST-PROCESSING: Inject username from connected_accounts if needed
         if plan and plan.tool_sequence:
@@ -180,6 +402,610 @@ class RequestInterpreter:
                 )
         
         return plan
+    
+    async def interpret_intent(
+        self,
+        message: str,
+        context: Dict[str, Any],
+        status_callback: Optional[callable] = None,
+        session_id: Optional[str] = None,
+    ) -> IntentPlan:
+        """
+        NEW: Intent-only interpretation for 4-layer pipeline.
+        Returns IntentPlan with no chess reasoning.
+        
+        Args:
+            message: The user's message
+            context: Current context (fen, pgn, mode, etc.)
+            status_callback: Optional callback for status updates
+            
+        Returns:
+            IntentPlan with intent classification only
+        """
+        import time
+        from contextlib import nullcontext
+        from pipeline_timer import get_pipeline_timer
+        _timer = get_pipeline_timer()
+        
+        # Emit initial status
+        if status_callback:
+            status_callback(
+                phase="interpreting",
+                message="Understanding your request...",
+                timestamp=time.time()
+            )
+        
+        try:
+            # PRE-PROCESS: Extract moves from "after [moves]" patterns
+            with (_timer.span("interpreter:extract_moves") if _timer else nullcontext()):
+                extracted_moves, cleaned_message = self._extract_moves_from_message(message)
+            
+            # Apply moves to get correct FEN if moves were extracted
+            original_fen = context.get("fen") or context.get("board_state")
+            computed_fen = None
+            moves_applied = False
+            
+            if extracted_moves:
+                # Start from provided FEN or starting position
+                starting_fen = original_fen if original_fen else None
+                with (_timer.span("interpreter:apply_moves_to_fen", {"moves": len(extracted_moves)}) if _timer else nullcontext()):
+                    computed_fen, moves_applied = self._apply_moves_to_fen(starting_fen, extracted_moves)
+                
+                if moves_applied:
+                    print(f"   🎯 Updated context FEN after applying {len(extracted_moves)} moves")
+                    # Update context with computed FEN
+                    context = {**context, "fen": computed_fen, "board_state": computed_fen}
+                    context["moves_applied"] = extracted_moves  # Track for downstream use
+            
+            # Build context summary (with updated FEN if moves were applied)
+            with (_timer.span("interpreter:build_context_summary") if _timer else nullcontext()):
+                context_summary = self._build_context_summary(context)
+            
+            # LOG INPUT
+            print(f"\n{'='*80}")
+            print(f"🔍 [INTERPRETER] INPUT:")
+            print(f"   Original Message: {message}")
+            if extracted_moves:
+                print(f"   Extracted Moves: {extracted_moves}")
+                print(f"   Cleaned Message: {cleaned_message}")
+            print(f"   Context keys: {list(context.keys())}")
+            if context.get("fen"):
+                print(f"   FEN: {context.get('fen')[:50]}...")
+            if context.get("mode"):
+                print(f"   Mode: {context.get('mode')}")
+            print(f"{'='*80}\n")
+            
+            # Build user prompt - include move application info
+            moves_context = ""
+            if extracted_moves and moves_applied:
+                moves_context = f"""
+MOVES APPLIED: The user mentioned moves "{' '.join(extracted_moves)}" which have been applied.
+The FEN below is the position AFTER these moves have been played.
+Original message was: "{message}"
+The user is asking about this resulting position.
+"""
+            
+            # Build user prompt
+            with (_timer.span("interpreter:build_user_prompt") if _timer else nullcontext()):
+                user_prompt = render_command(
+                    command="FAST_CLASSIFY",
+                    input={
+                        "user_message": (cleaned_message if extracted_moves else message),
+                        "moves_context": (moves_context or "").strip(),
+                        "context_summary": (context_summary or "").strip(),
+                    },
+                    constraints={
+                        "json_only": True,
+                        "max_investigation_requests": 4,
+                    },
+                )
+
+            # Use intent-only prompt
+            # gpt-5 models don't support custom temperature, only default (1.0)
+            llm_kwargs = {
+                "model": self.model,
+                "messages": [
+                    {"role": "system", "content": INTENT_INTERPRETER_PROMPT},
+                    {"role": "user", "content": user_prompt}
+                ],
+                "response_format": {"type": "json_object"},
+            }
+            if not self.model.startswith("gpt-5"):
+                llm_kwargs["temperature"] = 0.1
+            
+            with (_timer.span("interpreter:llm_call", {"model": self.model}) if _timer else nullcontext()):
+                import time as _time
+                _t0 = _time.perf_counter()
+                response = None
+                if self.llm_router:
+                    try:
+                        result_json = self.llm_router.complete_json(
+                            session_id=session_id or "default",
+                            stage="interpreter",
+                            subsession="interpreter",
+                            system_prompt=MIN_SYSTEM_PROMPT_V1,
+                            task_seed=INTERPRETER_CONTRACT_V1,
+                            user_text=user_prompt,
+                            temperature=(0.1 if not self.model.startswith("gpt-5") else None),
+                            model=self.model,
+                            max_tokens=int(os.getenv("INTERPRETER_MAX_TOKENS", "450")),
+                        )
+                    except Exception as e:
+                        # Generic repair retry: ask for the *minimal* valid intent JSON.
+                        # This handles cases where the model output was truncated or non-JSON.
+                        print(f"   ❌ Intent interpretation error: {e}")
+                        try:
+                            minimal_prompt = render_command(
+                                command="FAST_CLASSIFY_RETRY_MINIMAL_JSON",
+                                input={
+                                    "user_message": (cleaned_message if extracted_moves else message),
+                                    "context_summary": (context_summary or "").strip(),
+                                    "notes": "Previous attempt failed to parse. Return ONLY minimal valid JSON with required keys. Do NOT include long arrays. For game_select, put selectors in game_select_params/game_select_requests and keep requests <= 8.",
+                                },
+                                constraints={"json_only": True, "max_investigation_requests": 0},
+                            )
+                            result_json = self.llm_router.complete_json(
+                                session_id=session_id or "default",
+                                stage="interpreter",
+                                subsession="interpreter_repair",
+                                system_prompt=MIN_SYSTEM_PROMPT_V1,
+                                task_seed=INTERPRETER_CONTRACT_V1,
+                                user_text=minimal_prompt,
+                                temperature=(0.0 if not self.model.startswith("gpt-5") else None),
+                                model=self.model,
+                                max_tokens=int(os.getenv("INTERPRETER_REPAIR_MAX_TOKENS", "260")),
+                            )
+                        except Exception:
+                            raise
+                    ok, errs = validate_interpreter_intent(result_json)
+                    if not ok:
+                        # Single repair retry: ask the model to output a corrected JSON object.
+                        try:
+                            repair_prompt = render_command(
+                                command="REPAIR_JSON",
+                                input={"errors": errs, "bad_json": result_json},
+                                constraints={"json_only": True},
+                            )
+                            result_json = self.llm_router.complete_json(
+                                session_id=session_id or "default",
+                                stage="interpreter",
+                                subsession="interpreter",
+                                system_prompt=MIN_SYSTEM_PROMPT_V1,
+                                task_seed=INTERPRETER_CONTRACT_V1,
+                                user_text=repair_prompt,
+                                temperature=(0.0 if not self.model.startswith("gpt-5") else None),
+                                model=self.model,
+                                max_tokens=int(os.getenv("INTERPRETER_MAX_TOKENS", "450")),
+                            )
+                        except Exception:
+                            pass
+                else:
+                    response = self.client.chat.completions.create(**llm_kwargs)
+                    result_json = None
+                _dt_intent = _time.perf_counter() - _t0
+            # Record token usage for cost audits
+            try:
+                usage = getattr(response, "usage", None) if response is not None else None
+                prompt_tokens = getattr(usage, "prompt_tokens", None) if usage is not None else None
+                completion_tokens = getattr(usage, "completion_tokens", None) if usage is not None else None
+            except Exception:
+                prompt_tokens = None
+                completion_tokens = None
+            try:
+                if _timer:
+                    _timer.record_llm("interpreter_intent", float(locals().get("_dt_intent", 0.0)), tokens_in=prompt_tokens, tokens_out=completion_tokens, model=self.model)
+            except Exception:
+                pass
+            try:
+                self._audit_llm_io = {
+                    "model": self.model,
+                    "passes": [
+                        {
+                            "pass": "intent",
+                            "messages": [
+                                {"role": "system", "content": INTENT_INTERPRETER_PROMPT},
+                                {"role": "user", "content": user_prompt},
+                            ],
+                            "raw_response_text": (
+                                response.choices[0].message.content
+                                if response is not None
+                                else json.dumps(result_json)
+                            ),
+                        }
+                    ],
+                }
+            except Exception:
+                self._audit_llm_io = {}
+            
+            # Parse response
+            with (_timer.span("interpreter:parse_json") if _timer else nullcontext()):
+                if result_json is None:
+                    result_json = json.loads(response.choices[0].message.content)
+            try:
+                if isinstance(self._audit_llm_io.get("passes"), list) and self._audit_llm_io["passes"]:
+                    self._audit_llm_io["passes"][0]["parsed_json"] = result_json
+            except Exception:
+                pass
+            
+            # Create IntentPlan
+            with (_timer.span("interpreter:build_intent_plan") if _timer else nullcontext()):
+                intent_plan = IntentPlan.from_dict(result_json)
+
+            # Hardening: vLLM sometimes returns schema-valid JSON that is semantically wrong for our pipeline
+            # (e.g., sets investigation_type="fetch_and_review_games" for a position discussion).
+            # For DISCUSS/ANALYZE with a concrete FEN, force position-style investigations and ensure FEN is attached.
+            try:
+                ctx_mode_norm = str((context or {}).get("mode") or "").upper().strip()
+                ctx_fen_norm = (context or {}).get("fen") or (context or {}).get("board_state")
+                has_fen = isinstance(ctx_fen_norm, str) and bool(str(ctx_fen_norm).strip())
+            except Exception:
+                ctx_mode_norm = ""
+                ctx_fen_norm = None
+                has_fen = False
+
+            if (
+                intent_plan
+                and getattr(intent_plan, "intent", None) == "discuss_position"
+                and has_fen
+                and ctx_mode_norm in ("DISCUSS", "ANALYZE")
+            ):
+                try:
+                    intent_plan.investigation_required = True
+                except Exception:
+                    pass
+                try:
+                    # Keep deprecated field consistent for downstream branches that still read it.
+                    intent_plan.investigation_type = "position"
+                except Exception:
+                    pass
+                try:
+                    if not isinstance(getattr(intent_plan, "investigation_requests", None), list) or not intent_plan.investigation_requests:
+                        intent_plan.investigation_requests = [
+                            InvestigationRequest(
+                                investigation_type="position",
+                                focus=None,
+                                parameters={"fen": str(ctx_fen_norm)},
+                                purpose="Analyze current position",
+                            )
+                        ]
+                except Exception:
+                    pass
+                try:
+                    for req in (intent_plan.investigation_requests or []):
+                        it = str(getattr(req, "investigation_type", "") or "").lower().strip()
+                        if it not in ("position", "move", "game"):
+                            req.investigation_type = "position"
+                        if not isinstance(getattr(req, "parameters", None), dict):
+                            req.parameters = {}
+                        if "fen" not in req.parameters:
+                            req.parameters["fen"] = str(ctx_fen_norm)
+                except Exception:
+                    pass
+
+            # NEW: LLM pass to extract connected ideas / relationships (domain-agnostic)
+            # This helps the Planner expand implied prerequisites, sequences, and verification checks.
+            try:
+                # Only run for position-discussion / planning-like intents where structure matters.
+                if intent_plan.intent == "discuss_position":
+                    # Provide FEN + piece instance inventory to preserve piece identity (e.g., distinguishing multiple knights).
+                    fen_for_rel = None
+                    try:
+                        fen_for_rel = (
+                            context.get("fen")
+                            or context.get("context_fen")
+                            or (intent_plan.investigation_requests[0].parameters.get("fen") if intent_plan.investigation_requests else None)
+                            or computed_fen
+                        )
+                    except Exception:
+                        fen_for_rel = None
+
+                    piece_instances = []
+                    try:
+                        if isinstance(fen_for_rel, str) and fen_for_rel:
+                            b = chess.Board(fen_for_rel)
+                            for sq in chess.SQUARES:
+                                p = b.piece_at(sq)
+                                if not p:
+                                    continue
+                                color = "white" if p.color == chess.WHITE else "black"
+                                piece_name = chess.piece_name(p.piece_type)
+                                sqn = chess.square_name(sq)
+                                piece_instances.append({
+                                    "id": f"{color}_{piece_name}_{sqn}",
+                                    "color": color,
+                                    "piece": piece_name,
+                                    "square": sqn
+                                })
+                    except Exception:
+                        piece_instances = []
+
+                    # Conditional second pass: only run when it adds value (ambiguity or dependency language).
+                    with (_timer.span("interpreter:connected_ideas:should_run") if _timer else nullcontext()):
+                        should_run = self._should_run_connected_ideas(
+                            intent_plan,
+                            message=(cleaned_message if extracted_moves else message),
+                            fen_for_rel=fen_for_rel,
+                            piece_instances=piece_instances,
+                        )
+                    if not should_run:
+                        intent_plan.connected_ideas = None
+                        try:
+                            # Record in audit for transparency
+                            if not isinstance(self._audit_llm_io.get("passes"), list):
+                                self._audit_llm_io["passes"] = []
+                            self._audit_llm_io["passes"].append({"pass": "connected_ideas", "skipped": True})
+                        except Exception:
+                            pass
+                    else:
+                        # Cache by (normalized FEN + cleaned message) to avoid repeated second-pass calls.
+                        cache_key = self._connected_ideas_cache_key(
+                            fen_for_rel,
+                            (cleaned_message if extracted_moves else message),
+                        )
+                        cached_ci = None
+                        try:
+                            cached_ci = self._connected_ideas_cache.get(cache_key)
+                        except Exception:
+                            cached_ci = None
+
+                        if isinstance(cached_ci, dict):
+                            intent_plan.connected_ideas = cached_ci
+                            try:
+                                if not isinstance(self._audit_llm_io.get("passes"), list):
+                                    self._audit_llm_io["passes"] = []
+                                self._audit_llm_io["passes"].append(
+                                    {"pass": "connected_ideas", "cache_hit": True, "parsed_json": cached_ci}
+                                )
+                            except Exception:
+                                pass
+                        else:
+                            rel_user_prompt = f"""Extract connected ideas from the user request.
+
+USER MESSAGE: {cleaned_message if extracted_moves else message}
+
+CONTEXT FEN (if available): {fen_for_rel}
+
+PIECE INSTANCES (for identity resolution only; do not analyze):
+{json.dumps(piece_instances, indent=2)}
+
+USER INTENT SUMMARY (from prior intent pass): {intent_plan.user_intent_summary}
+GOAL LABEL: {intent_plan.goal}
+
+INVESTIGATION REQUESTS (from prior pass):
+{json.dumps([ir.to_dict() for ir in intent_plan.investigation_requests], indent=2)}
+"""
+                            # Default to the same model as the primary interpreter pass (vLLM model name),
+                            # not an OpenAI-hosted model name (which will 404 on vLLM).
+                            connected_model = os.getenv("CONNECTED_IDEAS_MODEL", self.model)
+                            # Keep this very fast; fallback to None on timeout.
+                            try:
+                                connected_timeout_s = float(os.getenv("CONNECTED_IDEAS_TIMEOUT_S", "2.0"))
+                            except Exception:
+                                connected_timeout_s = 2.0
+
+                            rel_resp = None
+                            with (_timer.span("interpreter:connected_ideas:llm_call", {"model": connected_model, "timeout_s": connected_timeout_s}) if _timer else nullcontext()):
+                                try:
+                                    import asyncio as _asyncio
+                                    async def _run_connected_router():
+                                        import time as _time
+                                        _t0 = _time.perf_counter()
+                                        out = self.llm_router.complete_json(
+                                            session_id=session_id or "default",
+                                            stage="interpreter_connected_ideas",
+                                            subsession="interpreter_connected_ideas",
+                                            system_prompt=MIN_SYSTEM_PROMPT_V1,
+                                            user_text=rel_user_prompt,
+                                            task_seed=None,
+                                            temperature=0.0,
+                                            model=connected_model,
+                                            max_tokens=int(os.getenv("CONNECTED_IDEAS_MAX_TOKENS", "450")),
+                                        )
+                                        return out, (_time.perf_counter() - _t0)
+                                    rel_json, _dt_connected = await _asyncio.wait_for(_run_connected_router(), timeout=connected_timeout_s)
+                                    rel_resp = rel_json
+                                except Exception as e:
+                                    # Timeout or request failure: non-fatal, just skip.
+                                    print(f"   ⚠️ [INTERPRETER] connected_ideas LLM call skipped (non-fatal): {e}")
+                                    rel_resp = None
+
+                            if rel_resp is not None:
+                                # Record token usage for cost audits
+                                try:
+                                    usage = getattr(rel_resp, "usage", None)
+                                    prompt_tokens = getattr(usage, "prompt_tokens", None)
+                                    completion_tokens = getattr(usage, "completion_tokens", None)
+                                except Exception:
+                                    prompt_tokens = None
+                                    completion_tokens = None
+                                try:
+                                    if _timer:
+                                        _timer.record_llm("interpreter_connected_ideas", float(locals().get("_dt_connected", 0.0)), tokens_in=prompt_tokens, tokens_out=completion_tokens, model=connected_model)
+                                except Exception:
+                                    pass
+
+                                intent_plan.connected_ideas = rel_resp if isinstance(rel_resp, dict) else None
+                            else:
+                                intent_plan.connected_ideas = None
+                            try:
+                                if isinstance(intent_plan.connected_ideas, dict):
+                                    self._connected_ideas_cache[cache_key] = intent_plan.connected_ideas
+                            except Exception:
+                                pass
+                            try:
+                                if not isinstance(self._audit_llm_io.get("passes"), list):
+                                    self._audit_llm_io["passes"] = []
+                                self._audit_llm_io["passes"].append(
+                                    {
+                                        "pass": "connected_ideas",
+                                        "messages": [
+                                            {"role": "system", "content": CONNECTED_IDEAS_EXTRACTOR_PROMPT},
+                                            {"role": "user", "content": rel_user_prompt},
+                                        ],
+                                        "raw_response_text": json.dumps(rel_resp) if rel_resp is not None else None,
+                                        "parsed_json": intent_plan.connected_ideas,
+                                    }
+                                )
+                            except Exception:
+                                pass
+            except Exception as e:
+                print(f"   ⚠️ [INTERPRETER] connected_ideas extraction failed (non-fatal): {e}")
+                intent_plan.connected_ideas = None
+            
+            # POST-PROCESS: Inject computed FEN into investigation requests if moves were applied
+            if extracted_moves and moves_applied and computed_fen:
+                for req in intent_plan.investigation_requests:
+                    # Add the computed FEN to parameters if not already set
+                    if "fen" not in req.parameters:
+                        req.parameters["fen"] = computed_fen
+                    if "moves_applied" not in req.parameters:
+                        req.parameters["moves_applied"] = extracted_moves
+                print(f"   ✅ Injected computed FEN into {len(intent_plan.investigation_requests)} investigation request(s)")
+            
+            # POST-PROCESS: Handle game_review intent - populate game_review_params from connected_accounts
+            if intent_plan.intent == "game_review" and intent_plan.needs_game_fetch:
+                connected_accounts = context.get("connected_accounts", [])
+                if not intent_plan.game_review_params:
+                    intent_plan.game_review_params = {}
+                
+                if connected_accounts:
+                    # Use first connected account
+                    account = connected_accounts[0]
+                    if "username" not in intent_plan.game_review_params:
+                        intent_plan.game_review_params["username"] = account.get("username")
+                    if "platform" not in intent_plan.game_review_params:
+                        # Normalize platform name
+                        platform = account.get("platform", "chess.com")
+                        if platform in ("chesscom", "chess_com"):
+                            platform = "chess.com"
+                        elif platform == "lichess":
+                            platform = "lichess"
+                        intent_plan.game_review_params["platform"] = platform
+                    print(f"   ✅ Injected game_review_params from connected_accounts: {intent_plan.game_review_params}")
+                else:
+                    print(f"   ⚠️ No connected_accounts found - game_review will need username from user")
+            
+            # LOG OUTPUT
+            import sys
+            print(f"\n{'='*80}")
+            print(f"✅ [INTERPRETER] OUTPUT:")
+            print(f"   Intent: {intent_plan.intent}")
+            print(f"   Scope: {intent_plan.scope}")
+            print(f"   Goal: {intent_plan.goal}")
+            print(f"   Investigation Required: {intent_plan.investigation_required}")
+            print(f"   Investigation Type: {intent_plan.investigation_type}")
+            print(f"   Investigation Requests: {len(intent_plan.investigation_requests)}")
+            for i, req in enumerate(intent_plan.investigation_requests):
+                print(f"      [{i+1}] Type: {req.investigation_type}, Focus: {req.focus}, Purpose: {req.purpose}")
+            print(f"   Mode: {intent_plan.mode.value}")
+            print(f"   Mode Confidence: {intent_plan.mode_confidence}")
+            print(f"   User Intent Summary: {intent_plan.user_intent_summary}")
+            print(f"{'='*80}\n")
+            sys.stdout.flush()
+            
+            # VALIDATION: Ensure investigation_required matches investigation_requests
+            if intent_plan.investigation_required:
+                if not intent_plan.investigation_requests:
+                    print(f"   ⚠️ WARNING: investigation_required=True but no investigation_requests! Setting to False.")
+                    intent_plan.investigation_required = False
+                else:
+                    # Validate investigation_type consistency (if provided)
+                    if intent_plan.investigation_type:
+                        for req in intent_plan.investigation_requests:
+                            if req.investigation_type != intent_plan.investigation_type:
+                                print(f"   ⚠️ WARNING: investigation_type mismatch! Plan says '{intent_plan.investigation_type}' but request has '{req.investigation_type}'")
+            else:
+                # If investigation_required=False, clear investigation_requests
+                if intent_plan.investigation_requests:
+                    print(f"   ⚠️ WARNING: investigation_required=False but investigation_requests exist! Clearing requests.")
+                    intent_plan.investigation_requests = []
+            
+            if status_callback:
+                status_callback(
+                    phase="interpreting",
+                    message=f"Detected: {intent_plan.user_intent_summary or intent_plan.intent}",
+                    timestamp=time.time()
+                )
+            
+            return intent_plan
+            
+        except Exception as e:
+            print(f"   ❌ Intent interpretation error: {e}")
+            import traceback
+            traceback.print_exc()
+
+            # If we hit quota/rate limits, degrade gracefully for position discussion:
+            # keep the pipeline moving (Planner fallback + Investigator can still run), and
+            # surface a clear hint in the summary.
+            try:
+                fen_hint = context.get("fen") or context.get("board_state")
+                msg_lower = (message or "").lower()
+                # Generic: Detect position analysis requests (not specific keywords)
+                # Pattern: mentions position-related concepts OR asks for move suggestions
+                position_indicators = [
+                    "best move", "what do i do", "what should", "how do i", "how can i",
+                    "progress", "suggest", "recommend", "advice", "help",
+                    "position", "situation", "here", "this position"
+                ]
+                has_position_request = any(indicator in msg_lower for indicator in position_indicators)
+                
+                if fen_hint and has_position_request:
+                    # Generic: Extract piece type if mentioned (any piece, not just specific ones)
+                    piece_types = ["knight", "bishop", "rook", "queen", "pawn", "king"]
+                    focus = None
+                    for piece in piece_types:
+                        if piece in msg_lower:
+                            focus = piece
+                            break
+                    # Generic: Detect strategic goals
+                    if not focus and ("castle" in msg_lower or "castling" in msg_lower or "king" in msg_lower):
+                        focus = "king_safety"
+                    # Minimal, deterministic investigation request
+                    reqs = [
+                        InvestigationRequest(
+                            investigation_type="position",
+                            focus=focus,
+                            parameters={"fen": fen_hint},
+                            purpose="Analyze current position and suggest practical moves (LLM quota fallback)",
+                        )
+                    ]
+                    return IntentPlan(
+                        intent="discuss_position",
+                        scope="current_position",
+                        goal="suggest moves",
+                        constraints={"depth": "standard", "tone": "coach", "verbosity": "medium"},
+                        investigation_required=True,
+                        investigation_requests=reqs,
+                        investigation_type="position",
+                        mode=Mode.ANALYZE,
+                        mode_confidence=0.6,
+                        user_intent_summary=(
+                            "LLM quota/rate-limit hit in interpreter; using deterministic fallback intent to continue analysis"
+                            if _looks_like_quota_or_rate_limit_error(e)
+                            else "Using deterministic fallback intent to continue analysis"
+                        ),
+                        needs_game_fetch=False,
+                        connected_ideas=None,
+                    )
+            except Exception:
+                pass
+
+            # Default fallback to general chat
+            return IntentPlan(
+                intent="general_chat",
+                scope=None,
+                goal="answer question",
+                constraints={},
+                investigation_required=False,
+                investigation_type=None,
+                mode=Mode.CHAT,
+                mode_confidence=0.5,
+                user_intent_summary=(
+                    "LLM quota/rate-limit hit in intent classification"
+                    if _looks_like_quota_or_rate_limit_error(e)
+                    else "Error in intent classification"
+                ),
+            )
     
     def _trivial_detect(
         self,
@@ -962,15 +1788,19 @@ Output ONLY valid JSON:"""
                 else INTERPRETER_SYSTEM_PROMPT
             )
             
-            response = self.client.chat.completions.create(
-                model=self.model,  # Configurable model (default: gpt-4o for reliability)
-                messages=[
+            # gpt-5 models don't support custom temperature, only default (1.0)
+            llm_kwargs = {
+                "model": self.model,  # Configurable model (default: gpt-4o for reliability)
+                "messages": [
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt}
                 ],
-                temperature=0.3,  # Slightly higher for more natural understanding
-                max_tokens=1500   # Allow more detailed plans with expanded context
-            )
+                "max_tokens": 1500   # Allow more detailed plans with expanded context
+            }
+            if not self.model.startswith("gpt-5"):
+                llm_kwargs["temperature"] = 0.3  # Slightly higher for more natural understanding
+            
+            response = self.client.chat.completions.create(**llm_kwargs)
             
             plan_text = response.choices[0].message.content.strip()
             
@@ -1052,6 +1882,31 @@ Output ONLY valid JSON:"""
             context_summary = self._build_context_summary(context)
             
             # Build user prompt with multi-pass awareness
+            investigation_status = ""
+            if context.get('investigation_plan'):
+                plan = context['investigation_plan']
+                completed = len(context.get('completed_steps', []))
+                total = len(plan.get('steps', []))
+                investigation_status = f"""
+INVESTIGATION PLAN STATUS:
+- Plan ID: {plan.get('plan_id', 'N/A')}
+- Question: {plan.get('question', 'N/A')}
+- Steps completed: {completed}/{total}
+- Completed step IDs: {context.get('completed_steps', [])}
+"""
+            
+            # Extract FEN from context for move testing
+            accumulated_data = context.get("accumulated_data") or {}
+            current_fen = context.get('fen') or context.get('board_state')
+            if not current_fen and accumulated_data:
+                # Try to get FEN from accumulated analysis results
+                for key, value in accumulated_data.items():
+                    if isinstance(value, dict) and value.get('fen'):
+                        current_fen = value['fen']
+                        break
+            
+            fen_info = f"\nCURRENT FEN: {current_fen}" if current_fen else "\nCURRENT FEN: Not available (check context)"
+            
             user_prompt = f"""Analyze this chess assistant request (MULTI-PASS MODE):
 
 USER MESSAGE: "{message}"
@@ -1065,17 +1920,45 @@ ACCUMULATED DATA FROM PREVIOUS PASSES:
 PREVIOUS PASSES INFO:
 Pass count: {context.get('pass_count', 0)}
 Insights so far: {context.get('insights_so_far', [])}
+{investigation_status}
 
-Determine if you need more data (is_ready: false) or have enough to create a final plan (is_ready: true).
+CRITICAL INSTRUCTIONS FOR POSITION QUESTIONS:
 
-If you need data:
-- Request FETCH for games (check if connected_accounts available)
-- Request ANALYZE for position analysis
-- Request SEARCH for external info
-- Request COMPUTE for statistics
+If you have analysis results with candidate moves but NO test_move actions yet:
+1. Extract top 3-5 candidate moves from the analysis results
+2. Create test_move actions for EACH candidate move:
+   {{
+     "action_type": "test_move",
+     "params": {{
+       "fen": "{current_fen or '<get_from_context_or_accumulated_data>'}",
+       "move_san": "<candidate_move>",
+       "follow_pv": true,
+       "depth": 12
+     }},
+     "reasoning": "Test if <move> works, check consequences like doubled pawns, pins, material changes"
+   }}
+3. DO NOT set is_ready: true until move tests are complete
 
-If ready:
+For "what should I do" / "how should I progress" questions:
+- Pass 1: analyze → get candidates
+- Pass 2: test_move for each candidate → verify consequences  
+- Pass 3: synthesize → set is_ready: true
+
+Available Actions:
+- ANALYZE: Get position analysis with candidate moves
+- TEST_MOVE: Test a specific move and check consequences (REQUIRED after analyze for position questions)
+- EXAMINE_PV: See what the engine's PV suggests
+- CHECK_CONSEQUENCE: Check specific consequence (doubled_pawns, pins, captures)
+- FETCH: Get games from platforms
+- SEARCH: Web search
+- COMPUTE: Statistics
+
+If you need more data (is_ready: false):
+- Request actions above
+
+If ready (after move testing is complete):
 - Provide complete final_plan with mode, tools, guidelines
+- Include investigation_summary linking tested moves to recommendations
 
 Output ONLY valid JSON:"""
             
@@ -1087,15 +1970,23 @@ Output ONLY valid JSON:"""
             )
             system_prompt += MULTI_PASS_PROMPT_ADDITION
             
-            response = self.client.chat.completions.create(
-                model=self.model,  # Configurable model (default: gpt-4o for reliability)
-                messages=[
+            # Add message decomposition section for complex questions
+            from interpreter_prompt import MESSAGE_DECOMPOSITION_SECTION
+            system_prompt += MESSAGE_DECOMPOSITION_SECTION
+            
+            # gpt-5 models don't support custom temperature, only default (1.0)
+            llm_kwargs = {
+                "model": self.model,  # Configurable model (default: gpt-4o for reliability)
+                "messages": [
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt}
                 ],
-                temperature=0.3,
-                max_tokens=1200
-            )
+                "max_tokens": 1200
+            }
+            if not self.model.startswith("gpt-5"):
+                llm_kwargs["temperature"] = 0.3
+            
+            response = self.client.chat.completions.create(**llm_kwargs)
             
             plan_text = response.choices[0].message.content.strip()
             plan_json = self._extract_json(plan_text)
@@ -1107,6 +1998,25 @@ Output ONLY valid JSON:"""
             
             if not plan_json:
                 plan_json = {"is_ready": False, "actions": [], "insights": []}
+            
+            # Parse message_decomposition and investigation_plan if present
+            if "message_decomposition" in plan_json and plan_json["message_decomposition"]:
+                from orchestration_plan import MessageDecomposition
+                try:
+                    plan_json["message_decomposition"] = MessageDecomposition.from_dict(
+                        plan_json["message_decomposition"]
+                    ).to_dict()  # Convert back to dict for JSON serialization
+                except Exception as e:
+                    print(f"   ⚠️ Failed to parse message_decomposition: {e}")
+            
+            if "investigation_plan" in plan_json and plan_json["investigation_plan"]:
+                from orchestration_plan import InvestigationPlan
+                try:
+                    plan_json["investigation_plan"] = InvestigationPlan.from_dict(
+                        plan_json["investigation_plan"]
+                    ).to_dict()  # Convert back to dict for JSON serialization
+                except Exception as e:
+                    print(f"   ⚠️ Failed to parse investigation_plan: {e}")
             
             return SinglePassResponse(raw_json=plan_json, tokens_used=tokens_used)
             
@@ -1162,7 +2072,6 @@ Output ONLY valid JSON:"""
         if connected_accounts:
             accounts_str = ", ".join([f"{a['platform']}: {a['username']}" for a in connected_accounts])
             parts.append(f"Connected accounts: {accounts_str}")
-            parts.append("→ Can fetch and review user's games directly using fetch_and_review_games tool")
         else:
             parts.append("No connected accounts (user needs to provide username or connect via Personal tab)")
         
@@ -1752,14 +2661,18 @@ def _compute_profile_changes(
 ) -> Dict[str, Any]:
     """
     Compare piece profiles before and after a move to describe impact.
+    Now includes significance scoring for all changes.
     """
+    from significance_scorer import SignificanceScorer
+    
     changes = {
         "moved_piece": None,
         "captured_piece": None,
         "activity_changes": [],
         "role_changes": [],
         "tag_changes": [],
-        "summary": []
+        "summary": [],
+        "scored_changes": []  # NEW: Changes with significance scores
     }
     
     # Find pieces that changed position or were captured
@@ -1779,15 +2692,45 @@ def _compute_profile_changes(
             new_profile = profiles_after[new_sq]
             if (new_profile.get("piece_type") == profile.get("piece_type") and
                 new_profile.get("color") == profile.get("color")):
+                old_activity = profile.get("nnue_contribution_cp", profile.get("nnue_contribution", 0))
+                new_activity = new_profile.get("nnue_contribution_cp", new_profile.get("nnue_contribution", 0))
+                activity_delta = new_activity - old_activity
+                
+                # Score the improvement
+                piece_type = profile.get("piece_type", "unknown")
+                tags_before = profile.get("tags", [])
+                tags_after = new_profile.get("tags", [])
+                
+                improvement_score = SignificanceScorer.score_piece_improvement(
+                    nnue_delta=activity_delta,
+                    piece_type=piece_type,
+                    tags_before=tags_before,
+                    tags_after=tags_after
+                )
+                
                 changes["moved_piece"] = {
                     "piece": profile.get("piece_symbol"),
                     "from": sq,
                     "to": new_sq,
                     "old_role": profile.get("role"),
                     "new_role": new_profile.get("role"),
-                    "old_activity": profile.get("nnue_contribution", 0),
-                    "new_activity": new_profile.get("nnue_contribution", 0)
+                    "old_activity": old_activity,
+                    "new_activity": new_activity,
+                    "activity_delta": activity_delta,
+                    "improvement_score": improvement_score
                 }
+                
+                # Add to scored changes if significant
+                if improvement_score["significance_score"] > 20:
+                    changes["scored_changes"].append({
+                        "type": "piece_improvement",
+                        "piece": profile.get("piece_symbol"),
+                        "from": sq,
+                        "to": new_sq,
+                        "score": improvement_score,
+                        "description": f"{profile.get('piece_symbol')} improved by {activity_delta:.1f}cp"
+                    })
+                
                 found_new_sq = True
                 break
         
@@ -1805,17 +2748,39 @@ def _compute_profile_changes(
         after = profiles_after[sq]
         
         # Check activity change
-        activity_before = before.get("nnue_contribution", 0)
-        activity_after = after.get("nnue_contribution", 0)
+        activity_before = before.get("nnue_contribution_cp", before.get("nnue_contribution", 0))
+        activity_after = after.get("nnue_contribution_cp", after.get("nnue_contribution", 0))
         activity_delta = activity_after - activity_before
         
-        if abs(activity_delta) > 5:  # Significant change
+        if abs(activity_delta) > 2:  # Lower threshold to catch more changes
+            piece_type = before.get("piece_type", "unknown")
+            tags_before = before.get("tags", [])
+            tags_after = after.get("tags", [])
+            
+            improvement_score = SignificanceScorer.score_piece_improvement(
+                nnue_delta=activity_delta,
+                piece_type=piece_type,
+                tags_before=tags_before,
+                tags_after=tags_after
+            )
+            
             changes["activity_changes"].append({
                 "piece": before.get("piece_symbol"),
                 "square": sq,
                 "delta": activity_delta,
-                "direction": "improved" if activity_delta > 0 else "worsened"
+                "direction": "improved" if activity_delta > 0 else "worsened",
+                "improvement_score": improvement_score
             })
+            
+            # Add to scored changes if significant
+            if improvement_score["significance_score"] > 20:
+                changes["scored_changes"].append({
+                    "type": "piece_activity_change",
+                    "piece": before.get("piece_symbol"),
+                    "square": sq,
+                    "score": improvement_score,
+                    "description": f"{before.get('piece_symbol')} on {sq} {improvement_score['magnitude']}ly {'improved' if activity_delta > 0 else 'worsened'}"
+                })
         
         # Check role change
         role_before = before.get("role")
@@ -1850,9 +2815,11 @@ def _compute_profile_changes(
         summaries.append(f"{mp['piece']} moved from {mp['from']} to {mp['to']}")
         if mp["old_role"] != mp["new_role"]:
             summaries.append(f"Role changed from {mp['old_role']} to {mp['new_role']}")
-        activity_change = mp["new_activity"] - mp["old_activity"]
-        if abs(activity_change) > 5:
-            summaries.append(f"Activity {'improved' if activity_change > 0 else 'decreased'} by {abs(activity_change):.0f} cp")
+        activity_change = mp.get("activity_delta", mp["new_activity"] - mp["old_activity"])
+        if abs(activity_change) > 2:
+            improvement_score = mp.get("improvement_score", {})
+            magnitude = improvement_score.get("magnitude", "")
+            summaries.append(f"Activity {magnitude}ly {'improved' if activity_change > 0 else 'decreased'} by {abs(activity_change):.1f}cp (significance: {improvement_score.get('significance_score', 0):.1f})")
     
     if changes["captured_piece"]:
         cp = changes["captured_piece"]

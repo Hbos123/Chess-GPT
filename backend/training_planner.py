@@ -5,13 +5,16 @@ Training Planner - Converts training queries to structured training blueprints
 from typing import Dict, List, Any, Optional
 from openai import OpenAI
 import json
+import os
 
 
 class TrainingPlanner:
     """Generates training blueprints from natural language queries"""
     
-    def __init__(self, openai_client: OpenAI):
+    def __init__(self, openai_client: OpenAI, llm_router=None):
         self.client = openai_client
+        self.llm_router = llm_router
+        self.model = os.getenv("TRAINING_PLANNER_MODEL", "gpt-5")
     
     def plan_training(
         self,
@@ -80,17 +83,29 @@ Context:
 Create the training blueprint:"""
 
         try:
-            response = self.client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_message}
-                ],
-                temperature=0.3,
-                max_tokens=800
-            )
-            
-            plan_text = response.choices[0].message.content.strip()
+            response = None
+            if self.llm_router:
+                blueprint = self.llm_router.complete_json(
+                    session_id="default",
+                    stage="training_planner",
+                    system_prompt=system_prompt,
+                    user_text=user_message,
+                    temperature=0.3,
+                    model=self.model,
+                )
+                plan_text = json.dumps(blueprint, ensure_ascii=False)
+            else:
+                response = self.client.chat.completions.create(
+                    model=self.model,
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_message}
+                    ],
+                    temperature=0.3,
+                    max_tokens=800
+                )
+                
+                plan_text = response.choices[0].message.content.strip()
             
             # Parse JSON
             if "```json" in plan_text:
@@ -98,7 +113,8 @@ Create the training blueprint:"""
             elif "```" in plan_text:
                 plan_text = plan_text.split("```")[1].split("```")[0].strip()
             
-            blueprint = json.loads(plan_text)
+            if response is not None:
+                blueprint = json.loads(plan_text)
             
             # Validate and set defaults
             blueprint = self._validate_blueprint(blueprint)

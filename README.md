@@ -12,6 +12,12 @@ A minimal, clean, fully working "ChatGPT for Chess" that combines chess engine a
 - 🤖 **LLM Integration** - Natural language explanations via OpenAI API
 - 📋 **PGN Export** - Save and share your games
 
+## Pipeline documentation (new)
+
+The system now uses a **vLLM-first, session-aware router** and a **Cursor-like TaskController** (engine-first loop + early facts streaming).
+
+- See [`docs/PIPELINE.md`](docs/PIPELINE.md) for the full end-to-end pipeline, SSE events, env flags, and debugging guide.
+
 ## Stack
 
 **Backend:**

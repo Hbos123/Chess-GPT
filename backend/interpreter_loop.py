@@ -28,6 +28,11 @@ class ActionType(str, Enum):
     ANALYZE = "analyze"     # Run position/game analysis
     SEARCH = "search"       # Web search for information
     COMPUTE = "compute"     # Run calculations (baseline, correlation, etc.)
+    # Chess-specific actions:
+    TEST_MOVE = "test_move"  # Test a move, follow PV, check consequences
+    EXAMINE_PV = "examine_pv"  # Analyze PV from position
+    CHECK_CONSEQUENCE = "check_consequence"  # Check specific consequence (doubled pawns, pins)
+    SIMULATE_SEQUENCE = "simulate_sequence"  # Play out a sequence of moves
 
 
 @dataclass
@@ -144,6 +149,12 @@ class InterpreterState:
     insights: List[str] = field(default_factory=list)
     usage: ResourceUsage = field(default_factory=ResourceUsage)
     
+    # Investigation tracking (NEW)
+    message_decomposition: Optional[Any] = None  # MessageDecomposition
+    investigation_plan: Optional[Any] = None  # InvestigationPlan
+    current_step_id: Optional[str] = None
+    step_results: Dict[str, Dict[str, Any]] = field(default_factory=dict)  # step_id -> result
+    
     @classmethod
     def create(cls, message: str, context: Dict[str, Any]) -> 'InterpreterState':
         """Create initial state from message and context"""
@@ -219,6 +230,24 @@ class InterpreterState:
             json.dumps(critical, sort_keys=True).encode()
         ).hexdigest()
         return current_hash != self.context_hash
+    
+    def mark_step_completed(self, step_id: str, result: Dict[str, Any] = None, insights: List[str] = None):
+        """Mark a step as completed in the investigation plan"""
+        if self.investigation_plan:
+            self.investigation_plan.mark_step_completed(step_id, result, insights)
+        if result:
+            self.step_results[step_id] = result
+        if insights:
+            self.insights.extend(insights)
+    
+    def mark_step_completed(self, step_id: str, result: Dict[str, Any] = None, insights: List[str] = None):
+        """Mark a step as completed in the investigation plan"""
+        if self.investigation_plan:
+            self.investigation_plan.mark_step_completed(step_id, result, insights)
+        if result:
+            self.step_results[step_id] = result
+        if insights:
+            self.insights.extend(insights)
 
 
 class InterpreterLoop:
@@ -299,8 +328,53 @@ class InterpreterLoop:
                     return self._build_fallback_plan(state, reason)
                 continue
             
+            # Emit investigation step progress if available (only once per step)
+            if state.investigation_plan and status_callback:
+                if not hasattr(state, '_emitted_steps'):
+                    state._emitted_steps = set()
+                
+                for step in state.investigation_plan.steps:
+                    if step.status == "in_progress" and step.step_id not in state._emitted_steps:
+                        status_callback(
+                            phase="investigating",
+                            message=f"Step {step.step_number}/{len(state.investigation_plan.steps)}: {step.purpose}",
+                            step_id=step.step_id,
+                            step_status="in_progress",
+                            timestamp=time.time()
+                        )
+                        state._emitted_steps.add(step.step_id)
+                    elif step.status == "completed" and step.step_id not in state._emitted_steps:
+                        status_callback(
+                            phase="investigating",
+                            message=f"✓ Step {step.step_number} completed: {step.purpose}",
+                            step_id=step.step_id,
+                            step_status="completed",
+                            insights=step.insights[:3] if step.insights else [],
+                            timestamp=time.time()
+                        )
+                        state._emitted_steps.add(step.step_id)
+            
             # Check if ready
             if output.is_ready:
+                # Transfer investigation state to plan
+                if state.investigation_plan:
+                    output.final_plan.investigation_plan = state.investigation_plan
+                    # Build investigation summary
+                    if state.investigation_plan.accumulated_insights:
+                        output.final_plan.investigation_summary = "Investigation findings:\n" + "\n".join(
+                            f"- {insight}" for insight in state.investigation_plan.accumulated_insights[:10]
+                        )
+                if state.message_decomposition:
+                    output.final_plan.message_decomposition = state.message_decomposition
+                
+                # Emit final investigation summary
+                if state.investigation_plan and status_callback:
+                    status_callback(
+                        phase="synthesizing",
+                        message=f"Investigation complete: {len(state.investigation_plan.completed_steps)}/{len(state.investigation_plan.steps)} steps",
+                        timestamp=time.time()
+                    )
+                
                 if status_callback:
                     status_callback(
                         phase="ready",
@@ -335,8 +409,28 @@ class InterpreterLoop:
                     output.tokens_used
                 )
             else:
-                # No actions but not ready - LLM is confused
-                state.usage.record_validation_error()
+                # No actions but not ready - check if we should force move testing
+                # If we have analysis results but no move tests, force creation of test_move actions
+                if state.investigation_plan:
+                    # Check if we have analyze results but no test_move actions yet
+                    has_analyze_results = any(
+                        "analyze" in key.lower() for key in state.accumulated_data.keys()
+                    )
+                    has_test_moves = any(
+                        step.action_type == "test_move" 
+                        for step in state.investigation_plan.steps
+                    )
+                    
+                    if has_analyze_results and not has_test_moves:
+                        # Force the LLM to create test_move actions
+                        print("   ⚠️ Have analysis but no move tests - forcing move testing")
+                        state.usage.record_validation_error()
+                    else:
+                        # LLM is confused
+                        state.usage.record_validation_error()
+                else:
+                    # No investigation plan - LLM is confused
+                    state.usage.record_validation_error()
     
     async def _run_pass(
         self, 
@@ -376,6 +470,21 @@ class InterpreterLoop:
             # Return empty actions to trigger retry
             return InterpreterOutput(is_ready=False, actions=[], insights=[])
         
+        # Parse output and update investigation state
+        if sanitized.get("message_decomposition"):
+            from orchestration_plan import MessageDecomposition
+            try:
+                state.message_decomposition = MessageDecomposition.from_dict(sanitized["message_decomposition"])
+            except Exception as e:
+                print(f"   ⚠️ Failed to parse message_decomposition in state: {e}")
+        
+        if sanitized.get("investigation_plan"):
+            from orchestration_plan import InvestigationPlan
+            try:
+                state.investigation_plan = InvestigationPlan.from_dict(sanitized["investigation_plan"])
+            except Exception as e:
+                print(f"   ⚠️ Failed to parse investigation_plan in state: {e}")
+        
         # Parse output
         if sanitized.get("is_ready"):
             from orchestration_plan import OrchestrationPlan
@@ -398,6 +507,20 @@ class InterpreterLoop:
     ) -> Dict[str, ActionResult]:
         """Execute actions, handling parallelism and dependencies"""
         results: Dict[str, ActionResult] = {}
+        
+        # Map actions to investigation steps if investigation plan exists
+        action_to_step_map = {}
+        if state.investigation_plan:
+            for action in actions:
+                # Try to find corresponding step by matching action type and target
+                for step in state.investigation_plan.steps:
+                    if step.action_type == action.action_type.value:
+                        # Match by target if available
+                        if action.params.get("move_san") == step.target or action.params.get("target") == step.target:
+                            action_to_step_map[action.id] = step.step_id
+                            # Mark step as in_progress
+                            step.status = "in_progress"
+                            break
         
         # Separate independent and dependent actions
         independent = [a for a in actions if not a.depends_on]
@@ -432,8 +555,30 @@ class InterpreterLoop:
                             success=False,
                             error=str(result)
                         )
+                        # Mark step as failed if mapped
+                        if action.id in action_to_step_map:
+                            step_id = action_to_step_map[action.id]
+                            if state.investigation_plan:
+                                for step in state.investigation_plan.steps:
+                                    if step.step_id == step_id:
+                                        step.status = "failed"
+                                        break
                     else:
                         results[action.id] = result
+                        # Mark step as completed if mapped
+                        if action.id in action_to_step_map:
+                            step_id = action_to_step_map[action.id]
+                            insights = []
+                            if result.success and result.data:
+                                # Extract insights from result
+                                if isinstance(result.data, dict):
+                                    if "insights" in result.data:
+                                        insights = result.data["insights"]
+                                    elif "consequences" in result.data:
+                                        consequences = result.data["consequences"]
+                                        if consequences:
+                                            insights.append(f"Consequences: {consequences}")
+                            state.mark_step_completed(step_id, result.data if result.success else None, insights)
         
         # Execute dependent actions sequentially
         for action in dependent:
@@ -474,6 +619,29 @@ class InterpreterLoop:
                 action, state, status_callback, cancel_token
             )
             results[action.id] = result
+            
+            # Mark step as completed if mapped
+            if action.id in action_to_step_map:
+                step_id = action_to_step_map[action.id]
+                insights = []
+                if result.success and result.data:
+                    # Extract insights from result
+                    if isinstance(result.data, dict):
+                        if "insights" in result.data:
+                            insights = result.data["insights"]
+                        elif "consequences" in result.data:
+                            consequences = result.data["consequences"]
+                            if consequences:
+                                insights.append(f"Consequences: {consequences}")
+                state.mark_step_completed(step_id, result.data if result.success else None, insights)
+            elif not result.success and action.id in action_to_step_map:
+                # Mark step as failed
+                step_id = action_to_step_map[action.id]
+                if state.investigation_plan:
+                    for step in state.investigation_plan.steps:
+                        if step.step_id == step_id:
+                            step.status = "failed"
+                            break
         
         return results
     
@@ -547,6 +715,10 @@ class InterpreterLoop:
             return state.usage.can_search(self.budget)
         elif action.action_type == ActionType.COMPUTE:
             return state.usage.can_compute(self.budget)
+        elif action.action_type in [ActionType.TEST_MOVE, ActionType.EXAMINE_PV, 
+                                     ActionType.CHECK_CONSEQUENCE, ActionType.SIMULATE_SEQUENCE]:
+            # Chess actions count as analysis for budget purposes
+            return state.usage.can_analyze(self.budget)
         return True
     
     def _record_action_usage(
@@ -595,11 +767,20 @@ class InterpreterLoop:
             for insight in state.insights[:5]:
                 summary_parts.append(f"  - {insight}")
         
+        # Include accumulated data in selected_data so main LLM can use it
+        # Summarize instead of dumping full data to avoid token bloat
+        selected_data = {}
+        if state.accumulated_data:
+            from data_summarizer import summarize_accumulated
+            # Summarize accumulated data to keep it concise (max 2000 chars)
+            summary = summarize_accumulated(state.accumulated_data, max_chars=2000)
+            selected_data["accumulated_analysis_summary"] = summary
+        
         return OrchestrationPlan(
             mode=mode,
             user_intent_summary=state.original_message,
             mode_confidence=0.6,  # Lower confidence for fallback
-            pre_computed_analysis=state.accumulated_data,
+            selected_data=selected_data,
             system_prompt_additions="\n".join(summary_parts),
             response_guidelines=ResponseGuidelines(
                 style=ResponseStyle.CONVERSATIONAL,

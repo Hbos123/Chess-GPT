@@ -6,6 +6,12 @@ Aggregates statistics and metrics across multiple games
 from typing import List, Dict, Any, Optional
 from collections import defaultdict
 import statistics
+import sys
+import os
+
+# Add parent directory to path for imports
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from utils.personal_review_utils import GameFilter, extract_tags, extract_tag_names
 
 
 class PersonalReviewAggregator:
@@ -34,7 +40,10 @@ class PersonalReviewAggregator:
         print(f"\n🔍 AGGREGATOR.aggregate() called with {len(analyzed_games)} games")
         
         # Apply filters if provided
-        filtered_games = self._apply_filters(analyzed_games, filters) if filters else analyzed_games
+        if filters:
+            filtered_games = GameFilter.apply_filters(analyzed_games, filters)
+        else:
+            filtered_games = analyzed_games
         print(f"   After filters: {len(filtered_games)} games")
         
         if not filtered_games:
@@ -93,6 +102,12 @@ class PersonalReviewAggregator:
         print(f"   Calculating piece activity...")
         piece_activity = self._calculate_piece_activity(filtered_games)
         
+        print(f"   Calculating tilt points (accuracy vs time)...")
+        tilt_points = self._calculate_tilt_points(filtered_games)
+        
+        print(f"   Calculating diagnostic insights (relevance formula)...")
+        diagnostic_insights = self._calculate_diagnostic_insights(filtered_games, summary.get("overall_accuracy", 75))
+        
         print(f"   Building result dictionary...")
         result = {
             "summary": summary,
@@ -112,6 +127,8 @@ class PersonalReviewAggregator:
             "advantage_conversion": advantage_conversion,
             "blunder_triggers": blunder_triggers,
             "piece_activity": piece_activity,
+            "tilt_points": tilt_points,
+            "diagnostic_insights": diagnostic_insights,
             "total_games_analyzed": len(filtered_games)
         }
         
@@ -123,29 +140,6 @@ class PersonalReviewAggregator:
         print(f"   ✅ Aggregator complete - returning results")
         return result
     
-    def _apply_filters(self, games: List[Dict], filters: Dict) -> List[Dict]:
-        """Apply filters to game list"""
-        filtered = games
-        
-        if "rating_min" in filters:
-            filtered = [g for g in filtered if g.get("metadata", {}).get("player_rating", 0) >= filters["rating_min"]]
-        
-        if "rating_max" in filters:
-            filtered = [g for g in filtered if g.get("metadata", {}).get("player_rating", 9999) <= filters["rating_max"]]
-        
-        if "result" in filters:
-            filtered = [g for g in filtered if g.get("metadata", {}).get("result") == filters["result"]]
-        
-        if "player_color" in filters:
-            filtered = [g for g in filtered if g.get("metadata", {}).get("player_color") == filters["player_color"]]
-        
-        if "time_category" in filters:
-            filtered = [g for g in filtered if g.get("metadata", {}).get("time_category") == filters["time_category"]]
-        
-        if "opening_eco" in filters:
-            filtered = [g for g in filtered if g.get("opening", {}).get("eco_final", "").startswith(filters["opening_eco"])]
-        
-        return filtered
     
     def _calculate_summary(self, games: List[Dict]) -> Dict:
         """Calculate overall summary statistics"""
@@ -181,8 +175,17 @@ class PersonalReviewAggregator:
                 
                 if side_moved == player_color:
                     player_moves_in_game += 1
-                    all_accuracies.append(record.get("accuracy_pct", 0))
-                    all_cp_losses.append(record.get("cp_loss", 0))
+                    acc = record.get("accuracy_pct", 0)
+                    try:
+                        all_accuracies.append(float(acc) if acc is not None else 0.0)
+                    except Exception:
+                        all_accuracies.append(0.0)
+
+                    cpl = record.get("cp_loss", 0)
+                    try:
+                        all_cp_losses.append(float(cpl) if cpl is not None else 0.0)
+                    except Exception:
+                        all_cp_losses.append(0.0)
                     
                     if record.get("category") == "blunder":
                         blunder_count += 1
@@ -193,14 +196,17 @@ class PersonalReviewAggregator:
         
         print(f"    Total player moves collected: {len(all_accuracies)}")
         
-        overall_accuracy = statistics.mean(all_accuracies) if all_accuracies else 0
-        avg_cp_loss = statistics.mean(all_cp_losses) if all_cp_losses else 0
+        # Defensive: ensure no None sneaks in
+        all_accuracies = [x for x in all_accuracies if x is not None]
+        all_cp_losses = [x for x in all_cp_losses if x is not None]
+        overall_accuracy = statistics.mean(all_accuracies) if all_accuracies else 0.0
+        avg_cp_loss = statistics.mean(all_cp_losses) if all_cp_losses else 0.0
         
         total_moves = len(all_accuracies)
         blunder_rate = (blunder_count / total_moves * 100) if total_moves > 0 else 0
         mistake_rate = (mistake_count / total_moves * 100) if total_moves > 0 else 0
         
-        print(f"    Overall accuracy: {overall_accuracy:.1f}%, Avg CP loss: {avg_cp_loss:.1f}")
+        print(f"    Overall accuracy: {float(overall_accuracy):.1f}%, Avg CP loss: {float(avg_cp_loss):.1f}")
         
         return {
             "total_games": total_games,
@@ -236,7 +242,11 @@ class PersonalReviewAggregator:
             
             for record in ply_records:
                 if record.get("side_moved") == player_color:
-                    rating_bands[band_key]["accuracies"].append(record.get("accuracy_pct", 0))
+                    acc = record.get("accuracy_pct", 0)
+                    try:
+                        rating_bands[band_key]["accuracies"].append(float(acc) if acc is not None else 0.0)
+                    except Exception:
+                        rating_bands[band_key]["accuracies"].append(0.0)
                     rating_bands[band_key]["count"] += 1
         
         result = []
@@ -244,7 +254,7 @@ class PersonalReviewAggregator:
             if data["accuracies"]:
                 result.append({
                     "rating_range": band,
-                    "accuracy": statistics.mean(data["accuracies"]),
+                    "accuracy": statistics.mean([x for x in data["accuracies"] if x is not None]) if data["accuracies"] else 0.0,
                     "game_count": data["count"]
                 })
         
@@ -516,20 +526,6 @@ class PersonalReviewAggregator:
             'maintained_count': 0
         })
         
-        def extract_tag_names(tags):
-            """Extract tag names from list (handles dict and string formats)"""
-            names = set()
-            for tag in tags:
-                if isinstance(tag, dict):
-                    name = tag.get("tag_name", tag.get("name", tag.get("tag", "")))
-                elif isinstance(tag, str):
-                    name = tag
-                else:
-                    continue
-                if name:
-                    names.add(name)
-            return names
-        
         for game in games:
             ply_records = game.get('ply_records', [])
             player_color = game.get('metadata', {}).get('player_color', 'white')
@@ -538,11 +534,17 @@ class PersonalReviewAggregator:
                 if record.get('side_moved') != player_color:
                     continue
                 
-                accuracy = record.get('accuracy_pct', 0)
+                acc_raw = record.get('accuracy_pct', 0)
+                try:
+                    accuracy = float(acc_raw) if acc_raw is not None else 0.0
+                except Exception:
+                    accuracy = 0.0
                 
-                # Get tags before and after this move
-                tags_before = extract_tag_names(record.get('raw_before', {}).get('tags', []))
-                tags_after = extract_tag_names(record.get('raw_after', {}).get('tags', []))
+                # Get tags before and after this move using shared utility
+                raw_before_tags = record.get('raw_before', {}).get('tags', [])
+                raw_after_tags = record.get('raw_after', {}).get('tags', [])
+                tags_before = extract_tag_names(raw_before_tags)
+                tags_after = extract_tag_names(raw_after_tags)
                 
                 # Categorize each tag
                 all_tags = tags_before | tags_after
@@ -649,24 +651,15 @@ class PersonalReviewAggregator:
                 accuracy = record.get('accuracy_pct', 0)
                 quality = record.get('quality', '')
                 category = record.get('category', '')  # Also check category field
-                # Tags are nested in the 'analyse' field (or raw_before for position tags)
-                tags = record.get('analyse', {}).get('tags', [])
+                # Use shared extract_tags function
+                tags = extract_tags(record)
                 
                 if tags:
                     tags_in_game += len(tags)
                     total_tags_found += len(tags)
                 
                 # Process each tag
-                for tag in tags:
-                    # Extract tag name (tags can be dicts or strings)
-                    if isinstance(tag, dict):
-                        # Try different possible keys: tag_name, name, tag
-                        tag_name = tag.get("tag_name", tag.get("name", tag.get("tag", "")))
-                    elif isinstance(tag, str):
-                        tag_name = tag
-                    else:
-                        continue
-                    
+                for tag_name in tags:
                     if not tag_name:
                         continue
                     
@@ -686,7 +679,8 @@ class PersonalReviewAggregator:
         all_tag_results = []
         for tag, stats in tag_stats.items():
             if stats['move_count'] > 0:  # Include all tags with any occurrences
-                avg_accuracy = statistics.mean(stats['accuracies']) if stats['accuracies'] else 0
+                accs = [a for a in (stats['accuracies'] or []) if a is not None]
+                avg_accuracy = statistics.mean(accs) if accs else 0.0
                 error_rate = (stats['error_count'] / stats['move_count']) * 100 if stats['move_count'] > 0 else 0
                 
                 all_tag_results.append({
@@ -712,9 +706,9 @@ class PersonalReviewAggregator:
         
         print(f"      ✅ Analyzed {len(all_tag_results)} total tags, {len(filtered_for_summary)} with 5+ occurrences")
         if top_performing:
-            print(f"         Best: {top_performing[0]['tag']} ({top_performing[0]['accuracy']:.1f}%)")
+            print(f"         Best: {top_performing[0]['tag']} ({float(top_performing[0].get('accuracy', 0.0) or 0.0):.1f}%)")
         if bottom_performing:
-            print(f"         Worst: {bottom_performing[0]['tag']} ({bottom_performing[0]['accuracy']:.1f}%)")
+            print(f"         Worst: {bottom_performing[0]['tag']} ({float(bottom_performing[0].get('accuracy', 0.0) or 0.0):.1f}%)")
         
         return {
             'top_performing': top_performing,
@@ -731,21 +725,13 @@ class PersonalReviewAggregator:
             ply_records = game.get("ply_records", [])
             
             for record in ply_records:
-                analyse = record.get("analyse", {})
-                tags = analyse.get("tags", [])
                 quality = record.get("quality", "")
                 is_error = quality in ["blunder", "mistake", "inaccuracy"]
                 
-                for tag in tags:
-                    # Tags can be strings or dicts, handle both
-                    if isinstance(tag, dict):
-                        # Tag is a dict like {"name": "tactic.fork", "score": 1.0}
-                        tag_name = tag.get("name", tag.get("tag", ""))
-                    elif isinstance(tag, str):
-                        tag_name = tag
-                    else:
-                        continue  # Skip invalid tags
-                    
+                # Use shared extract_tags function
+                tags = extract_tags(record)
+                
+                for tag_name in tags:
                     # Extract theme name from tag (e.g., "tactic.fork" -> "fork")
                     theme_name = tag_name.split(".")[-1] if "." in tag_name else tag_name
                     if theme_name:  # Only count non-empty theme names
@@ -812,17 +798,17 @@ class PersonalReviewAggregator:
         
         result = {}
         for phase, data in phase_data.items():
-            if data["accuracies"]:
+            if data["count"] > 0:
                 result[phase] = {
                     "accuracy": statistics.mean(data["accuracies"]),
                     "avg_cp_loss": statistics.mean(data["cp_losses"]),
-                    "move_count": data["count"]  # Changed from game_count to move_count
+                    "move_count": data["count"]
                 }
             else:
                 result[phase] = {
-                    "accuracy": 0,
-                    "avg_cp_loss": 0,
-                    "move_count": 0  # Changed from game_count to move_count
+                    "accuracy": None,  # Handle as NA in UI
+                    "avg_cp_loss": None,
+                    "move_count": 0
                 }
         
         return result
@@ -969,19 +955,10 @@ class PersonalReviewAggregator:
             for record in ply_records:
                 total_plies += 1
                 
-                # Count threat tags
-                analyse = record.get("analyse", {})
-                tags = analyse.get("tags", [])
+                # Count threat tags using shared extract_tags function
+                tags = extract_tags(record)
                 
-                # Tags can be strings or dicts
-                for tag in tags:
-                    if isinstance(tag, dict):
-                        tag_name = tag.get("name", tag.get("tag", ""))
-                    elif isinstance(tag, str):
-                        tag_name = tag
-                    else:
-                        continue
-                    
+                for tag_name in tags:
                     if "threat" in tag_name.lower():
                         threat_count += 1
                 
@@ -1028,10 +1005,15 @@ class PersonalReviewAggregator:
                 if prev_eval is not None:
                     eval_swing = abs(eval_after - prev_eval)
                     if eval_swing >= 200:
+                        acc_raw = record.get('accuracy_pct', 0)
+                        try:
+                            acc_f = float(acc_raw) if acc_raw is not None else 0.0
+                        except Exception:
+                            acc_f = 0.0
                         critical_positions.append({
                             'eval_before': eval_before,
                             'eval_after': eval_after,
-                            'accuracy': record.get('accuracy_pct', 0),
+                            'accuracy': acc_f,
                             'quality': record.get('quality', ''),
                             'san': record.get('san', '')
                         })
@@ -1047,13 +1029,15 @@ class PersonalReviewAggregator:
             }
         
         total_critical = len(critical_positions)
-        avg_accuracy = statistics.mean([p['accuracy'] for p in critical_positions])
+        accs = [p.get('accuracy', 0.0) for p in critical_positions]
+        accs = [a for a in accs if a is not None]
+        avg_accuracy = statistics.mean(accs) if accs else 0.0
         
         # Count how many critical positions were handled well (accuracy > 80%)
-        positions_held = sum(1 for p in critical_positions if p['accuracy'] > 80)
+        positions_held = sum(1 for p in critical_positions if (p.get('accuracy') or 0.0) > 80)
         positions_lost = total_critical - positions_held
         
-        print(f"         Found {total_critical} critical moments, {avg_accuracy:.1f}% avg accuracy")
+        print(f"         Found {total_critical} critical moments, {float(avg_accuracy):.1f}% avg accuracy")
         
         return {
             'total_critical': total_critical,
@@ -1152,9 +1136,8 @@ class PersonalReviewAggregator:
                         triggers['after_opponent_mistake'] += 1
                     
                     # Check position complexity (count pieces from tags)
-                    analyse = record.get("analyse", {})
-                    tags = analyse.get("tags", [])
-                    piece_count = sum(1 for tag in tags if isinstance(tag, dict) and 'piece' in tag.get('tag_name', ''))
+                    tags = extract_tags(record)
+                    piece_count = sum(1 for tag_name in tags if 'piece' in tag_name.lower())
                     
                     if piece_count >= 6:
                         triggers['complex_positions'] += 1
@@ -1225,9 +1208,12 @@ class PersonalReviewAggregator:
         
         # Calculate averages
         results = []
-        for piece, stats in piece_stats.items():
-            if stats['move_count'] >= 5:  # Min 5 moves
-                avg_accuracy = statistics.mean(stats['accuracies']) if stats['accuracies'] else 0
+        # All pieces, even if 0 moves
+        all_pieces = ['Pawn', 'Knight', 'Bishop', 'Rook', 'Queen', 'King']
+        for piece in all_pieces:
+            stats = piece_stats.get(piece, {'accuracies': [], 'move_count': 0, 'error_count': 0})
+            if stats['move_count'] > 0:
+                avg_accuracy = statistics.mean(stats['accuracies'])
                 error_rate = (stats['error_count'] / stats['move_count']) * 100
                 
                 results.append({
@@ -1237,13 +1223,21 @@ class PersonalReviewAggregator:
                     'error_count': stats['error_count'],
                     'error_rate': error_rate
                 })
+            else:
+                results.append({
+                    'piece': piece,
+                    'accuracy': None, # NA
+                    'move_count': 0,
+                    'error_count': 0,
+                    'error_rate': None
+                })
         
-        # Sort by accuracy
-        results = sorted(results, key=lambda x: x['accuracy'], reverse=True)
+        # Sort by accuracy (handle None)
+        results = sorted(results, key=lambda x: x['accuracy'] if x['accuracy'] is not None else -1, reverse=True)
         
         if results:
-            print(f"         Best: {results[0]['piece']} ({results[0]['accuracy']:.1f}%)")
-            print(f"         Worst: {results[-1]['piece']} ({results[-1]['accuracy']:.1f}%)")
+            print(f"         Best: {results[0]['piece']} ({float(results[0].get('accuracy', 0.0) or 0.0):.1f}%)")
+            print(f"         Worst: {results[-1]['piece']} ({float(results[-1].get('accuracy', 0.0) or 0.0):.1f}%)")
         
         return results
     
@@ -1255,11 +1249,70 @@ class PersonalReviewAggregator:
             label = cohort.get("label", "Cohort")
             filters = cohort.get("filters", {})
             
-            # Filter games for this cohort
-            cohort_games = self._apply_filters(games, filters)
+            # Filter games for this cohort using GameFilter
+            cohort_games = GameFilter.apply_filters(games, filters)
             
             if cohort_games:
                 cohort_results[label] = self._calculate_summary(cohort_games)
         
         return cohort_results
+
+    def _calculate_tilt_points(self, games: List[Dict]) -> List[Dict]:
+        """Calculate raw (time, accuracy) points for scatter plot"""
+        points = []
+        for game in games:
+            player_color = game.get("metadata", {}).get("player_color", "white")
+            for record in game.get("ply_records", []):
+                if record.get("side_moved") == player_color:
+                    time = record.get("time_spent_s")
+                    acc = record.get("accuracy_pct")
+                    if time is not None and acc is not None:
+                        points.append({"time": time, "accuracy": acc})
+        
+        # Limit to last 500 moves for performance
+        return points[-500:]
+
+    def _calculate_diagnostic_insights(self, games: List[Dict], global_avg: float) -> List[Dict]:
+        """Apply relevance formula to identify significant weak/strong points"""
+        import math
+        
+        tag_stats = defaultdict(lambda: {"accuracies": [], "count": 0})
+        total_moves = 0
+        
+        for game in games:
+            player_color = game.get("metadata", {}).get("player_color", "white")
+            for record in game.get("ply_records", []):
+                if record.get("side_moved") == player_color:
+                    total_moves += 1
+                    tags = extract_tags(record)
+                    acc = record.get("accuracy_pct", 0)
+                    for tag_name in tags:
+                        if tag_name:
+                            tag_stats[tag_name]["accuracies"].append(acc)
+                            tag_stats[tag_name]["count"] += 1
+        
+        if not total_moves:
+            return []
+            
+        insights = []
+        for tag, data in tag_stats.items():
+            if data["count"] < 3:
+                continue
+                
+            tag_avg = statistics.mean(data["accuracies"])
+            
+            # relevance = (ABS(group_avg - global_avg) * 0.75) + (LOG(count + 1) / LOG(total_count + 1) * 0.25)
+            relevance = (abs(tag_avg - global_avg) * 0.75) + (math.log(data["count"] + 1) / math.log(total_moves + 1) * 0.25)
+            
+            insights.append({
+                "tag": tag,
+                "count": data["count"],
+                "accuracy": tag_avg,
+                "relevance": relevance,
+                "type": "strength" if tag_avg > global_avg else "weakness"
+            })
+            
+        # Sort by relevance
+        insights.sort(key=lambda x: x["relevance"], reverse=True)
+        return insights[:15]
 

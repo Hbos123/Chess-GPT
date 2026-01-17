@@ -92,11 +92,17 @@ class StockfishQueue:
         Args:
             fn: The engine method to call
             *args: Positional arguments for the method
-            **kwargs: Keyword arguments for the method
+            **kwargs: Keyword arguments for the method. Can include 'timeout' to set max wait time.
             
         Returns:
             The result of the engine call
+            
+        Raises:
+            asyncio.TimeoutError: If the request times out
         """
+        # Extract timeout from kwargs (if provided) before passing to engine function
+        timeout = kwargs.pop('timeout', 120.0)  # Default 120 seconds
+        
         future = asyncio.Future()
         current_depth = self.queue.qsize()
         
@@ -107,12 +113,20 @@ class StockfishQueue:
         await self.queue.put({
             'fn': fn,
             'args': args,
-            'kwargs': kwargs,
+            'kwargs': kwargs,  # kwargs no longer contains 'timeout'
             'future': future,
             'enqueue_time': time.time()
         })
         
-        return await future
+        # Wait for result with timeout
+        try:
+            return await asyncio.wait_for(future, timeout=timeout)
+        except asyncio.TimeoutError:
+            # Cancel the future if it's still pending
+            if not future.done():
+                future.cancel()
+            print(f"   ⚠️ [ENGINE_QUEUE] Request timed out after {timeout}s")
+            raise
     
     async def health_check(self) -> bool:
         """

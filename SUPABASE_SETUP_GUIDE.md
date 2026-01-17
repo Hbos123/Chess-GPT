@@ -288,6 +288,13 @@ This will:
 - Verify Google credentials in Supabase
 - Check Google Cloud Console project is active
 
+### Issue: "Auth stuck / can’t sign in after recent changes"
+**Fix (local dev):**
+- Clear old Supabase auth keys in Local Storage for `http://localhost:3000`:
+  - `sb-<project-ref>-auth-token`
+  - `sb-<project-ref>-auth-token-code-verifier`
+- Restart the frontend dev server after changing `.env.local` or auth settings.
+
 ### Issue: "Database connection failed"
 **Fix:**
 - Verify SUPABASE_URL is correct

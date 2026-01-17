@@ -42,18 +42,55 @@ export function generateThemeAnnotations(
   
   const chess = new Chess(fen);
   
-  // DISABLED: Theme-based annotations often fire incorrectly when LLM mentions
-  // themes in negative context (e.g., "fails to control center", "king safety concerns")
-  // Only process specific tags which have more precise semantics
+  // ENABLED: Process themes from backend investigation data
+  // Map lowercase theme names to uppercase S_ format expected by getThemeAnnotations
+  const themeMapping: Record<string, string> = {
+    'center_space': 'S_CENTER_SPACE',
+    'center': 'S_CENTER',
+    'piece_activity': 'S_ACTIVITY',
+    'activity': 'S_ACTIVITY',
+    'development': 'S_DEV',
+    'king_safety': 'S_KING',
+    'king': 'S_KING',
+    'pawn_structure': 'S_PAWN',
+    'pawn': 'S_PAWN',
+    'threats': 'S_THREATS',
+    'tactics': 'S_THREATS'
+  };
   
-  // for (const theme of themes) {
-  //   const themeAnnotations = getThemeAnnotations(theme, analysisData, chess, side);
-  //   result.arrows.push(...themeAnnotations.arrows);
-  //   result.highlights.push(...themeAnnotations.highlights);
-  // }
+  for (const theme of themes) {
+    // Map theme name to expected format
+    const mappedTheme = themeMapping[theme.toLowerCase()] || theme.toUpperCase();
+    
+    // Only process if it's a recognized theme (starts with S_)
+    if (mappedTheme.startsWith('S_')) {
+      console.log(`   🎨 Processing theme: ${theme} -> ${mappedTheme}`);
+      const themeAnnotations = getThemeAnnotations(mappedTheme, analysisData, chess, side);
+      console.log(`      Generated: ${themeAnnotations.arrows.length} arrows, ${themeAnnotations.highlights.length} highlights`);
+      result.arrows.push(...themeAnnotations.arrows);
+      result.highlights.push(...themeAnnotations.highlights);
+    } else {
+      console.log(`   ⚠️ Theme "${theme}" not recognized, skipping`);
+    }
+  }
   
+  // Process tags - normalize structure
+  if (tags.length > 0) {
+    console.log(`   🏷️ Processing ${tags.length} tags`);
+  }
   for (const tag of tags) {
-    const tagAnnotations = getTagAnnotations(tag, chess, side);
+    // Handle backend format: {"tag": "isolated_pawn", "square": "d4", ...}
+    // Convert to frontend format: {tag_name: "isolated_pawn", square: "d4", ...}
+    let normalizedTag = tag;
+    if (tag && typeof tag === 'object' && tag.tag && !tag.tag_name) {
+      normalizedTag = {
+        ...tag,
+        tag_name: tag.tag,
+        name: tag.tag
+      };
+    }
+    
+    const tagAnnotations = getTagAnnotations(normalizedTag, chess, side);
     result.arrows.push(...tagAnnotations.arrows);
     result.highlights.push(...tagAnnotations.highlights);
   }

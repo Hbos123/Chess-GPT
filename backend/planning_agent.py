@@ -116,8 +116,9 @@ Use $step_id.field to reference previous results:
 class InvestigationPlanner:
     """Creates multi-step plans for complex investigations"""
     
-    def __init__(self, openai_client=None):
+    def __init__(self, openai_client=None, llm_router=None):
         self.client = openai_client
+        self.llm_router = llm_router
         self._templates = self._load_templates()
     
     async def create_plan(
@@ -381,20 +382,30 @@ Context: {json.dumps(context, indent=2) if context else "None provided"}
 
 Return the plan as JSON."""
 
-            response = self.client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[
-                    {"role": "system", "content": PLANNER_SYSTEM_PROMPT},
-                    {"role": "user", "content": user_prompt}
-                ],
-                temperature=0.3,
-                max_tokens=2000
-            )
-            
-            content = response.choices[0].message.content.strip()
-            
-            # Extract JSON
-            plan_json = self._extract_json(content)
+            if self.llm_router:
+                plan_json = self.llm_router.complete_json(
+                    session_id="default",
+                    stage="investigation_planner",
+                    system_prompt=PLANNER_SYSTEM_PROMPT,
+                    user_text=user_prompt,
+                    temperature=0.3,
+                    model="gpt-5",
+                )
+            else:
+                response = self.client.chat.completions.create(
+                    model="gpt-5",
+                    messages=[
+                        {"role": "system", "content": PLANNER_SYSTEM_PROMPT},
+                        {"role": "user", "content": user_prompt}
+                    ],
+                    temperature=0.3,
+                    max_tokens=2000
+                )
+                
+                content = response.choices[0].message.content.strip()
+                
+                # Extract JSON
+                plan_json = self._extract_json(content)
             
             if plan_json:
                 return self._parse_plan_json(plan_json)
