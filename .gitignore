@@ -11,3 +11,6 @@ Thumbs.db
 # Logs
 *.log
 
+
+# local supabase/postgres data
+/data/supabase_local/
