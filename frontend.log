@@ -1,0 +1,9 @@
+npm ERR! code ENOENT
+npm ERR! syscall open
+npm ERR! path /Users/hugobosnic/Desktop/Desktop - Hugo's MacBook Pro/Projects/Chess-GPT/frontend/package.json
+npm ERR! errno -2
+npm ERR! enoent Could not read package.json: Error: ENOENT: no such file or directory, open '/Users/hugobosnic/Desktop/Desktop - Hugo's MacBook Pro/Projects/Chess-GPT/frontend/package.json'
+npm ERR! enoent This is related to npm not being able to find a file.
+npm ERR! enoent 
+
+npm ERR! A complete log of this run can be found in: /Users/hugobosnic/.npm/_logs/2026-01-20T15_21_20_365Z-debug-0.log
