@@ -13,15 +13,106 @@ interface RecentGamesTabProps {
 }
 
 export default function RecentGamesTab({ userId, onStartTraining, onCreateNewTab }: RecentGamesTabProps) {
-  const [games, setGames] = useState<any[]>([]);
-  const [displayedGames, setDisplayedGames] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
+  // TEMPORARY: Dummy data for formatting - REMOVE AFTER FORMATTING IS DONE
+  const DUMMY_GAMES = [
+    {
+      id: "game-1",
+      game_id: "123456789",
+      platform: "chess.com",
+      created_at: "2026-01-19T15:30:00Z",
+      date: "2026-01-19",
+      result: "win",
+      player_rating: 1650,
+      opponent_name: "Grandmaster123",
+      opponent_rating: 1720,
+      metadata: {
+        result: "win",
+        player_rating: 1650,
+        opponent_name: "Grandmaster123",
+        opponent_rating: 1720
+      }
+    },
+    {
+      id: "game-2",
+      game_id: "123456788",
+      platform: "lichess",
+      created_at: "2026-01-19T14:15:00Z",
+      date: "2026-01-19",
+      result: "loss",
+      player_rating: 1645,
+      opponent_name: "ChessMaster99",
+      opponent_rating: 1680,
+      metadata: {
+        result: "loss",
+        player_rating: 1645,
+        opponent_name: "ChessMaster99",
+        opponent_rating: 1680
+      }
+    },
+    {
+      id: "game-3",
+      game_id: "123456787",
+      platform: "chess.com",
+      created_at: "2026-01-18T20:45:00Z",
+      date: "2026-01-18",
+      result: "draw",
+      player_rating: 1640,
+      opponent_name: "TacticalKing",
+      opponent_rating: 1655,
+      metadata: {
+        result: "draw",
+        player_rating: 1640,
+        opponent_name: "TacticalKing",
+        opponent_rating: 1655
+      }
+    },
+    {
+      id: "game-4",
+      game_id: "123456786",
+      platform: "chess.com",
+      created_at: "2026-01-18T18:20:00Z",
+      date: "2026-01-18",
+      result: "win",
+      player_rating: 1635,
+      opponent_name: "EndgameExpert",
+      opponent_rating: 1600,
+      metadata: {
+        result: "win",
+        player_rating: 1635,
+        opponent_name: "EndgameExpert",
+        opponent_rating: 1600
+      }
+    },
+    {
+      id: "game-5",
+      game_id: "123456785",
+      platform: "lichess",
+      created_at: "2026-01-17T16:10:00Z",
+      date: "2026-01-17",
+      result: "win",
+      player_rating: 1630,
+      opponent_name: "OpeningMaster",
+      opponent_rating: 1620,
+      metadata: {
+        result: "win",
+        player_rating: 1630,
+        opponent_name: "OpeningMaster",
+        opponent_rating: 1620
+      }
+    }
+  ];
+
+  const [games, setGames] = useState<any[]>(DUMMY_GAMES);
+  const [displayedGames, setDisplayedGames] = useState<any[]>(DUMMY_GAMES);
+  const [loading, setLoading] = useState(false); // Set to false for dummy data
   const [loadingGameId, setLoadingGameId] = useState<string | null>(null);
   const [trainingLesson, setTrainingLesson] = useState<any>(null);
   const [gamesToShow, setGamesToShow] = useState(5);
-  const [hasMore, setHasMore] = useState(false);
+  const [hasMore, setHasMore] = useState(true); // Set to true to show "load more" button
   const backendBase = getBackendBase();
 
+  // TEMPORARY: Comment out fetch - UNCOMMENT AFTER FORMATTING IS DONE
+  /*
   useEffect(() => {
     const loadGames = async () => {
       try {
@@ -50,6 +141,7 @@ export default function RecentGamesTab({ userId, onStartTraining, onCreateNewTab
     };
     loadGames();
   }, [userId]);
+  */ // END TEMPORARY COMMENT
 
   const loadMoreGames = async () => {
     try {
@@ -277,29 +369,15 @@ export default function RecentGamesTab({ userId, onStartTraining, onCreateNewTab
                 platformLink = `https://lichess.org/${gameId}`;
               }
               
+              const result = metadata.result?.toLowerCase() || "unknown";
+              const resultClass = result === "win" ? "win" : result === "loss" ? "loss" : "draw";
+              
               return (
-                <div key={game.id || game.game_id || idx} className="game-card">
-                  <div className="game-header">
-                    <div className="game-meta">
-                      <span className="game-date">{dateDisplay}</span>
-                      <span className="game-result">{metadata.result?.toUpperCase() || "UNKNOWN"}</span>
-                      {platformLink ? (
-                        <a 
-                          href={platformLink} 
-                          target="_blank" 
-                          rel="noopener noreferrer"
-                          className="game-platform-link"
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          {platform === "chess.com" ? "Chess.com" : "Lichess"}
-                        </a>
-                      ) : (
-                        <span className="game-platform">{platform}</span>
-                      )}
-                    </div>
-                    <div className="game-opponent">
-                      vs {opponentName} ({opponentRating > 0 ? opponentRating : '?'})
-                    </div>
+                <div key={game.id || game.game_id || idx} className={`game-card ${resultClass}`}>
+                  <div className="game-info">
+                    <span className="game-date">{dateDisplay}</span>
+                    <span className="game-vs"> vs </span>
+                    <span className="game-opponent">{opponentName} ({opponentRating > 0 ? opponentRating : '?'})</span>
                   </div>
                   <div className="game-actions">
                     <button 

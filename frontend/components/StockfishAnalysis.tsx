@@ -17,14 +17,13 @@ interface StockfishAnalysisProps {
   depth?: number;
   maxLines?: number;
   onEvalUpdate?: (evalCp: number, mate?: number) => void;
+  // Optional callback used by some containers (e.g. chat) to trigger deeper analysis elsewhere.
+  // This component doesn't require it, but accepts it to keep the interface consistent.
+  onRunFullAnalysis?: (fen: string) => void;
 }
 
-export default function StockfishAnalysis({ 
-  fen, 
-  depth = 15, 
-  maxLines = 3,
-  onEvalUpdate 
-}: StockfishAnalysisProps) {
+export default function StockfishAnalysis(props: StockfishAnalysisProps) {
+  const { fen, depth = 15, maxLines = 3, onEvalUpdate } = props;
   // Ensure depth is always defined and stable to prevent dependency array size changes
   const targetDepth = useMemo(() => depth ?? 15, [depth]);
   const [lines, setLines] = useState<StockfishLine[]>([]);

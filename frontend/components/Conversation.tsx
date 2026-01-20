@@ -52,7 +52,7 @@ interface ConversationProps {
   currentFEN?: string;
   onApplyPGN?: (fen: string, pgn: string) => void;
   onPreviewFEN?: (fen: string | null) => void;
-  onButtonAction?: (action: string) => void;
+  onButtonAction?: (action: string, buttonId?: string) => void;
   isProcessingButton?: boolean;
   loadingIndicators?: LoadingIndicator[];
   // New: Live status tracking
@@ -156,10 +156,20 @@ export default function Conversation({
 
   return (
     <div className="conversation-container">
-      {onToggleBoard && (
-        <button className="board-toggle-chat" onClick={onToggleBoard}>
-          {isBoardOpen ? 'Hide' : 'Show'} chessboard
-        </button>
+      {/* Toolbar with buttons in flow */}
+      {(onToggleBoard || onLoadGame) && (
+        <div className="conversation-toolbar">
+          {onLoadGame && (
+            <button className="toolbar-button" onClick={onLoadGame}>
+              Load game
+            </button>
+          )}
+          {onToggleBoard && (
+            <button className="toolbar-button" onClick={onToggleBoard}>
+              {isBoardOpen ? 'Hide' : 'Show'} chessboard
+            </button>
+          )}
+        </div>
       )}
       
       <div className="conversation-stream">
@@ -322,6 +332,7 @@ export default function Conversation({
                     isButtonDisabled={isProcessingButton || msg.meta?.disabled || msg.meta?.loading}
                     onRunFullAnalysis={onRunFullAnalysis}
                     onShowBoard={onShowBoardTab}
+                    graphData={msg.graphData}
                   />
                   {nextMsg?.role === 'button' && (
                     <MessageBubble
@@ -338,6 +349,7 @@ export default function Conversation({
                       isButtonDisabled={isProcessingButton || nextMsg.meta?.disabled || nextMsg.meta?.loading}
                       onRunFullAnalysis={onRunFullAnalysis}
                       onShowBoard={onShowBoardTab}
+                      graphData={nextMsg.graphData}
                     />
                   )}
                 </div>
@@ -358,6 +370,8 @@ export default function Conversation({
                   isButtonDisabled={msg.role === 'button' ? (isProcessingButton || msg.meta?.disabled || msg.meta?.loading) : undefined}
                   onRunFullAnalysis={onRunFullAnalysis}
                   onShowBoard={onShowBoardTab}
+                  image={msg.image}
+                  graphData={msg.graphData}
                 />
               )}
             </div>
@@ -406,12 +420,6 @@ export default function Conversation({
         
         <div ref={bottomRef} />
       </div>
-      
-      {onLoadGame && (
-        <button className="load-game-chat" onClick={onLoadGame}>
-          Load game
-        </button>
-      )}
     </div>
   );
 }

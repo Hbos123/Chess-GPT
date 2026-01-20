@@ -9,7 +9,10 @@ import type {
 import { buildLearningHeaders, flushNextActionForLastInteraction, noteInteractionCompleted } from "@/lib/learningClient";
 import { getBackendBase } from "@/lib/backendBase";
 
-const BACKEND_URL = getBackendBase();
+// Get backend URL dynamically to handle ngrok HTTPS detection
+function getBackendUrl(): string {
+  return getBackendBase();
+}
 
 /**
  * Retry a fetch with exponential backoff - useful for handling backend restarts
@@ -62,7 +65,7 @@ async function fetchWithRetry(
 }
 
 export async function getMeta(): Promise<MetaResponse> {
-  const response = await fetchWithRetry(`${BACKEND_URL}/meta`);
+  const response = await fetchWithRetry(`${getBackendUrl()}/meta`);
   if (!response.ok) {
     throw new Error(`Failed to fetch meta: ${response.statusText}`);
   }
@@ -98,7 +101,7 @@ export async function analyzePosition(
   try {
     await flushNextActionForLastInteraction("requested_line");
     const { interactionId, headers } = await buildLearningHeaders();
-    const response = await fetch(`${BACKEND_URL}/analyze_position?${params}`, {
+    const response = await fetch(`${getBackendUrl()}/analyze_position?${params}`, {
       signal: controller.signal,
       headers,
     });
@@ -141,7 +144,7 @@ export async function playMove(
     requestBody.engine_elo = engineElo;
   }
   
-  const response = await fetch(`${BACKEND_URL}/play_move`, {
+  const response = await fetch(`${getBackendUrl()}/play_move`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -189,7 +192,7 @@ export async function openingLookup(
   const params = new URLSearchParams({ fen });
   await flushNextActionForLastInteraction("navigation");
   const { interactionId, headers } = await buildLearningHeaders();
-  const response = await fetch(`${BACKEND_URL}/opening_lookup?${params}`, { headers });
+  const response = await fetch(`${getBackendUrl()}/opening_lookup?${params}`, { headers });
   if (!response.ok) {
     throw new Error(`Failed to lookup opening: ${response.statusText}`);
   }
@@ -205,9 +208,10 @@ export async function tacticsNext(
   const params = new URLSearchParams();
   if (ratingMin !== undefined) params.append("rating_min", ratingMin.toString());
   if (ratingMax !== undefined) params.append("rating_max", ratingMax.toString());
+  const backendUrl = getBackendUrl();
   const url = params.toString()
-    ? `${BACKEND_URL}/tactics_next?${params}`
-    : `${BACKEND_URL}/tactics_next`;
+    ? `${backendUrl}/tactics_next?${params}`
+    : `${backendUrl}/tactics_next`;
   await flushNextActionForLastInteraction("navigation");
   const { interactionId, headers } = await buildLearningHeaders();
   const response = await fetch(url, { headers });
@@ -220,7 +224,7 @@ export async function tacticsNext(
 }
 
 export async function annotate(annotation: Annotation): Promise<Annotation> {
-  const response = await fetch(`${BACKEND_URL}/annotate`, {
+  const response = await fetch(`${getBackendUrl()}/annotate`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -235,7 +239,7 @@ export async function annotate(annotation: Annotation): Promise<Annotation> {
 
 export async function reviewGame(pgnString: string): Promise<any> {
   const params = new URLSearchParams({ pgn_string: pgnString });
-  const response = await fetch(`${BACKEND_URL}/review_game?${params}`, {
+  const response = await fetch(`${getBackendUrl()}/review_game?${params}`, {
     method: "POST",
   });
   if (!response.ok) {
@@ -272,7 +276,7 @@ export async function lookupGames(
     params.append("opponent", opponent);
   }
 
-  const response = await fetch(`${BACKEND_URL}/game_lookup?${params.toString()}`);
+  const response = await fetch(`${getBackendUrl()}/game_lookup?${params.toString()}`);
   if (!response.ok) {
     throw new Error(`Failed to lookup games: ${response.statusText}`);
   }
@@ -295,7 +299,7 @@ export interface VisionBoardResponse {
 }
 
 export async function analyzeBoardPhoto(formData: FormData): Promise<VisionBoardResponse> {
-  const response = await fetch(`${BACKEND_URL}/vision/board`, {
+  const response = await fetch(`${getBackendUrl()}/vision/board`, {
     method: "POST",
     body: formData,
   });
@@ -380,7 +384,7 @@ export interface SaveProfilePreferencesPayload {
 export async function saveProfilePreferences(
   payload: SaveProfilePreferencesPayload
 ): Promise<ProfileOverviewResponse> {
-  const response = await fetch(`${BACKEND_URL}/profile/preferences`, {
+  const response = await fetch(`${getBackendUrl()}/profile/preferences`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -400,7 +404,7 @@ export async function saveProfilePreferences(
 
 export async function fetchProfileOverview(userId: string): Promise<ProfileOverviewResponse> {
   const params = new URLSearchParams({ user_id: userId });
-  const response = await fetchWithRetry(`${BACKEND_URL}/profile/overview?${params.toString()}`);
+  const response = await fetchWithRetry(`${getBackendUrl()}/profile/overview?${params.toString()}`);
   if (!response.ok) {
     const detail = await response.text();
     throw new Error(`Failed to fetch profile overview: ${detail}`);
@@ -489,7 +493,7 @@ export interface ProfileStatsResponse {
 
 export async function fetchProfileStats(userId: string): Promise<ProfileStatsResponse> {
   const params = new URLSearchParams({ user_id: userId });
-  const response = await fetchWithRetry(`${BACKEND_URL}/profile/stats?${params.toString()}`);
+  const response = await fetchWithRetry(`${getBackendUrl()}/profile/stats?${params.toString()}`);
   if (!response.ok) {
     const detail = await response.text();
     throw new Error(`Failed to fetch profile stats: ${detail}`);
@@ -557,7 +561,7 @@ export interface ProfileHabitsResponse {
 export async function fetchProfileHabits(userId: string): Promise<ProfileHabitsResponse> {
   // No timeout for habits - computation can take time, and data is saved to Supabase
   // so it can be fetched later even if the request is slow or cancelled
-  const response = await fetch(`${BACKEND_URL}/profile/habits/${userId}`);
+  const response = await fetch(`${getBackendUrl()}/profile/habits/${userId}`);
   if (!response.ok) {
     const detail = await response.text();
     throw new Error(`Failed to fetch profile habits: ${detail}`);
@@ -623,7 +627,7 @@ export interface OpeningLessonResponse {
 export async function generateOpeningLesson(
   payload: OpeningLessonRequestPayload
 ): Promise<OpeningLessonResponse> {
-  const response = await fetch(`${BACKEND_URL}/lessons/opening`, {
+  const response = await fetch(`${getBackendUrl()}/lessons/opening`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",

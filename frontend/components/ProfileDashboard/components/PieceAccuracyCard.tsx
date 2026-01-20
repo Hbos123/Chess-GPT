@@ -29,7 +29,7 @@ export default function PieceAccuracyCard({ pieceData }: PieceAccuracyCardProps)
 
   if (sortedPieces.length === 0) {
     return (
-      <ExpandableAnalyticsCard title="Piece Accuracy">
+      <ExpandableAnalyticsCard title="Piece Accuracy" hideControls={true}>
         <p style={{ color: '#cbd5e1', fontSize: '14px' }}>No piece accuracy data available yet.</p>
       </ExpandableAnalyticsCard>
     );
@@ -58,7 +58,7 @@ export default function PieceAccuracyCard({ pieceData }: PieceAccuracyCardProps)
     if (!pieceData.per_game || pieceData.per_game.length === 0) return undefined;
     
     const piecesToTrack = sortedPieces.slice(0, 5).map(p => p.name);
-    const seriesMap = new Map<string, { name: string; data: number[]; color: string }>();
+    const seriesMap = new Map<string, { name: string; data: (number | null)[]; color: string }>();
     
     piecesToTrack.forEach(pieceName => {
       const piece = sortedPieces.find(p => p.name === pieceName);
@@ -97,6 +97,7 @@ export default function PieceAccuracyCard({ pieceData }: PieceAccuracyCardProps)
       title="Piece Accuracy"
       significanceScore={overallSignificance}
       trendData={trendData}
+      hideControls={true}
     >
       
       {/* Best and Worst Highlights */}

@@ -135,7 +135,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     let subscription: { unsubscribe: () => void } | null = null;
     try {
       if (supabase) {
-        const { data } = supabase.auth.onAuthStateChange((_event, session) => {
+        const { data } = supabase.auth.onAuthStateChange((_event: any, session: any) => {
           if (isMounted) {
             clearTimeout(timeoutId);
             setSession(session);

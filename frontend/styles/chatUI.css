@@ -74,15 +74,26 @@
 }
 
 /* ========================================
+   APP SHELL (Viewport Container)
+   ======================================== */
+
+.app-shell {
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  /* Safe area support */
+  padding-top: max(env(safe-area-inset-top), 12px); /* fallback for iOS when env() returns 0 */
+  padding-bottom: 0; /* Let bottom-composer handle bottom safe area */
+}
+
+/* ========================================
    TOP BAR
    ======================================== */
 
 .top-bar {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 100px;
+  position: relative; /* NOT fixed - in flex flow */
+  flex-shrink: 0; /* Never shrink */
   background: rgba(12, 17, 26, 0.9);
   backdrop-filter: blur(12px);
   border-bottom: 1px solid var(--border-color);
@@ -90,8 +101,33 @@
   align-items: center;
   justify-content: space-between;
   padding: 0 var(--shell-gutter);
+  height: 100px; /* No safe-area padding - handled by app-shell */
   z-index: 100;
   box-shadow: 0 12px 36px rgba(0, 0, 0, 0.35);
+}
+
+.top-bar-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.topbar-shortcut {
+  height: 52px;
+  padding: 0 18px;
+  border-radius: 999px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  font-size: 14px;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.topbar-shortcut:hover {
+  border-color: var(--border-hover);
+  background: var(--bg-tertiary);
 }
 
 .history-toggle {
@@ -377,6 +413,9 @@
   display: block;
   box-sizing: border-box;
   field-sizing: content;
+  /* Prevent zoom on focus (iOS) */
+  -webkit-text-size-adjust: 100%;
+  touch-action: manipulation; /* Prevent double-tap zoom */
 }
 
 /* Custom animated placeholder overlay */
@@ -465,6 +504,28 @@
 
 /* Responsive adjustments for landing page */
 @media (max-width: 768px) {
+  /* Mobile font sizes */
+  .wordmark {
+    font-size: 24px;
+  }
+
+  .top-bar {
+    height: 60px;
+    padding: 0 16px;
+  }
+
+  .history-toggle {
+    width: 44px;
+    height: 44px;
+    font-size: 20px;
+  }
+
+  .auth-button {
+    padding: 10px 16px;
+    font-size: 14px;
+    min-height: 44px;
+  }
+
   .initial-layout {
     padding: 1.5rem 1rem;
   }
@@ -480,7 +541,7 @@
   }
 
   .hero-input {
-    font-size: 0.9375rem;
+    font-size: 16px; /* 16px prevents iOS zoom on focus */
   }
 
   .custom-placeholder {
@@ -496,21 +557,54 @@
   .board-toggle-link,
   .load-game-link-external {
     font-size: 0.8125rem;
+    min-height: 44px;
+    padding: 10px 16px;
   }
 
-  .send-button {
-    padding: 0.5rem 1.25rem;
-    font-size: 0.8125rem;
+  .send-button,
+  .options-button {
+    padding: 12px 20px;
+    font-size: 15px;
+    min-height: 44px;
+  }
+
+  .board-toggle-chat,
+  .load-game-chat {
+    min-height: 44px;
+    padding: 10px 16px;
+    font-size: 14px;
+  }
+
+  /* Chat layout - no padding needed, header is in flow */
+  .chat-layout {
+    padding-top: 0;
+  }
+
+  .chat-layout.with-board {
+    padding-top: 0;
+  }
+
+  .conversation-container {
+    padding-top: 0;
+  }
+
+  /* Mobile font size adjustments */
+  body {
+    font-size: 16px;
+  }
+
+  .conversation-container {
+    font-size: 15px;
   }
 
   /* Mobile Layout - Vertical Board and Chat */
   /* Change layout from horizontal to vertical */
   .chat-layout.with-board {
-    flex-direction: column;
-    padding: 124px 0 0;
-    min-height: 100vh;
-    overflow-y: auto;
-    height: auto;
+    flex-direction: column; /* IMPORTANT: Vertical on mobile */
+    padding: 0; /* No padding - header is in flow now */
+    flex: 1; /* Fill remaining space */
+    min-height: 0; /* ABSOLUTELY REQUIRED */
+    overflow: hidden; /* Prevent page scroll */
   }
 
   /* Remove fixed heights - let content determine height */
@@ -533,21 +627,29 @@
   /* Chat column - full width, scrollable */
   .chat-layout.with-board .chat-column {
     padding: 16px 12px;
-    overflow-y: visible;
+    overflow: hidden; /* Changed from overflow-y: visible */
     flex: 1;
+    min-height: 0; /* CRITICAL: Allows flex child to shrink */
+    display: flex;
+    flex-direction: column;
   }
 
-  /* Hide column resizer on mobile (not needed for vertical layout) */
+  /* Hide vertical resizer on mobile (we use a horizontal row resizer instead) */
   .chat-layout.with-board .column-resizer {
     display: none;
   }
 
   /* Adjust conversation container for mobile */
   .chat-layout.with-board .conversation-container {
-    height: auto;
-    max-height: none;
-    padding: 16px 12px;
-    padding-bottom: 140px;
+    /* Content area: flex: 1, min-height: 0, overflow: hidden (NO SCROLL) */
+    flex: 1;
+    min-height: 0; /* ABSOLUTELY REQUIRED */
+    padding: 0 12px; /* Horizontal padding only */
+    padding-bottom: 0; /* No padding, handled by conversation-stream */
+    overflow: hidden; /* CRITICAL: Do NOT scroll here */
+    display: flex;
+    flex-direction: column;
+    box-sizing: border-box;
   }
 
   /* Adjust board dock for mobile */
@@ -572,25 +674,31 @@
 /* Mobile mode class - applies mobile styles regardless of screen size */
 /* This allows testing mobile layout on desktop by adding ?mobile=true to URL */
 .chat-layout.mobile-mode {
-  justify-content: flex-end;
-  align-items: center;
-  padding-left: 0;
-  padding-right: 0;
-  padding-top: 0;
-  gap: 0px;
-  vertical-align: bottom;
-  box-sizing: content-box;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  align-items: stretch;
+  padding: 0; /* No padding - header is in flow now */
+  gap: 0; /* No gap - spacing handled by inner components */
+  vertical-align: top;
+  box-sizing: border-box;
   text-align: left;
+  flex: 1; /* Fill remaining space */
+  min-height: 0; /* ABSOLUTELY REQUIRED */
+  overflow: hidden; /* Prevent page scroll */
+  position: relative; /* Establish positioning context */
 }
 
 .chat-layout.with-board.mobile-mode {
+  display: flex;
   flex-direction: column;
-  padding: 124px 0 0;
-  min-height: 100vh;
-  overflow-y: auto;
-  height: auto;
-  justify-content: center;
-  align-items: center;
+  padding: 0; /* No padding - header is in flow now */
+  flex: 1; /* Fill remaining space */
+  min-height: 0; /* ABSOLUTELY REQUIRED */
+  overflow: hidden; /* Prevent page scroll */
+  justify-content: flex-start;
+  align-items: stretch;
+  position: relative; /* Establish positioning context */
 }
 
 .chat-layout.with-board.mobile-mode .board-column,
@@ -610,8 +718,13 @@
 
 .chat-layout.with-board.mobile-mode .chat-column {
   padding: 16px 12px;
-  overflow-y: visible;
+  padding-bottom: 0; /* Remove bottom padding, footer is fixed */
+  overflow: hidden; /* Changed from overflow-y: visible */
   flex: 1;
+  min-height: 0; /* CRITICAL: Allows flex child to shrink */
+  display: flex;
+  flex-direction: column;
+  position: relative; /* For absolute positioned children */
 }
 
 .chat-layout.with-board.mobile-mode .column-resizer {
@@ -620,17 +733,18 @@
 
 .chat-layout.with-board.mobile-mode .conversation-container,
 .chat-layout.mobile-mode .conversation-container {
-  height: auto;
-  max-height: none;
-  width: 550px;
-  padding: 16px 12px;
-  padding-top: 1px;
-  padding-bottom: 1px;
-  margin-right: 0;
-  margin-left: 0;
-  margin-top: 0px;
-  vertical-align: bottom;
-  box-sizing: content-box;
+  /* Content area: flex: 1, min-height: 0, overflow: hidden (NO SCROLL HERE) */
+  flex: 1;
+  min-height: 0; /* ABSOLUTELY REQUIRED */
+  width: 100%;
+  max-width: 100%;
+  padding: 0; /* No padding - handled by inner components */
+  margin: 0;
+  box-sizing: border-box;
+  overflow: hidden; /* CRITICAL: Do NOT scroll here */
+  position: relative;
+  display: flex;
+  flex-direction: column; /* Make it a flex container for chat structure */
 }
 
 .chat-layout.with-board.mobile-mode .board-dock {
@@ -645,20 +759,50 @@
 
 .chat-layout.with-board.mobile-mode .bottom-composer,
 .chat-layout.mobile-mode .bottom-composer {
-  position: fixed;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  top: auto;
+  position: relative; /* NOT fixed - in flex flow */
+  flex-shrink: 0; /* Never shrink */
   width: 100%;
-  padding: 12px;
+  padding: 8px 16px; /* Compact padding */
+  padding-bottom: max(8px, env(safe-area-inset-bottom)); /* Fill to bottom without adding "dead space" */
   border-top: 1px solid var(--border-color);
+  z-index: 50;
+  box-shadow: 0 -1px 4px rgba(0,0,0,0.05); /* Very subtle shadow */
+  box-sizing: border-box;
+  margin-bottom: 0; /* Ensure no gap at bottom */
 }
 
 .chat-layout.with-board.mobile-mode .composer-inner,
 .chat-layout.mobile-mode .composer-inner {
   max-width: 100%;
-  padding: 0 12px;
+  padding: 0;
+  gap: 8px; /* Tighter gap for compact look */
+}
+
+.chat-layout.mobile-mode .bottom-input {
+  font-size: 16px; /* Prevents iOS zoom */
+  padding: 10px 14px;
+  min-height: 44px; /* Standard tap target */
+}
+
+.chat-layout.mobile-mode .send-button,
+.chat-layout.mobile-mode .options-button {
+  padding: 10px 18px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  border-radius: 12px;
+  font-size: 14px;
+  font-weight: 500;
+  min-height: 44px; /* Standard tap target */
+  transition: all 0.2s;
+}
+
+.chat-layout.mobile-mode .send-button:hover:not(:disabled),
+.chat-layout.mobile-mode .options-button:hover:not(:disabled) {
+  background: var(--bg-secondary);
+  border-color: var(--border-hover);
+  opacity: 1;
+  transform: none;
 }
 
 /* ========================================
@@ -669,13 +813,15 @@
   width: 100%;
   background: var(--bg-primary);
   color: var(--text-primary);
-  min-height: 100vh;
-  padding: 132px var(--shell-gutter) 0;
+  flex: 1; /* Fill remaining space */
+  min-height: 0; /* ABSOLUTELY REQUIRED */
+  padding: 0; /* No padding - spacing handled by inner components */
   max-width: var(--shell-max);
   margin: 0 auto;
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  gap: 0; /* No gap - spacing handled by inner components */
+  overflow: hidden; /* Prevent page scroll */
 }
 
 .chat-layout.with-board {
@@ -683,62 +829,78 @@
   flex-direction: row;
   gap: 0;
   align-items: stretch;
-  padding: 124px 0 0;
+  padding: 0; /* No padding - header is in flow now */
   max-width: 100%;
-  min-height: 100vh;
+  flex: 1; /* Fill remaining space */
+  min-height: 0; /* ABSOLUTELY REQUIRED */
+  background: var(--bg-primary);
+  overflow: hidden; /* Prevent page scroll */
+}
+
+/* ========================================
+   CONVERSATION TOOLBAR (Replaces absolute buttons)
+   ======================================== */
+
+.conversation-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--border-color);
+  flex-shrink: 0; /* Never shrink */
   background: var(--bg-primary);
 }
 
-.board-toggle-chat {
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  padding: 8px 16px;
+.chat-layout.with-board .conversation-toolbar {
+  display: none; /* Hide when board is open */
+}
+
+.toolbar-button {
+  padding: 6px 12px;
   margin: 0;
   background: transparent;
   border: 1px solid var(--border-color);
   border-radius: 6px;
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: 13px;
   cursor: pointer;
   font-weight: 500;
-  z-index: 10;
   transition: all 0.2s ease;
+  white-space: nowrap;
 }
 
-.board-toggle-chat:hover {
+.toolbar-button:hover {
   color: var(--text-primary);
   background: var(--bg-secondary);
+  border-color: var(--border-hover);
 }
 
-.chat-layout.with-board .board-toggle-chat {
-  display: none;
+.toolbar-button:active {
+  background: var(--bg-tertiary);
 }
 
+/* Desktop toolbar - subtle styling */
+.chat-layout:not(.mobile-mode) .conversation-toolbar {
+  padding: 10px 20px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+/* Mobile toolbar */
+.chat-layout.mobile-mode .conversation-toolbar {
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.chat-layout.mobile-mode .toolbar-button {
+  min-height: 36px;
+  padding: 8px 14px;
+  font-size: 14px;
+}
+
+/* Legacy absolute button styles - hidden (use toolbar instead) */
+.board-toggle-chat,
 .load-game-chat {
-  position: absolute;
-  top: 8px;
-  left: 8px;
-  padding: 8px 20px;
-  margin: 0;
-  background: transparent;
-  border: 1px solid var(--border-color);
-  border-radius: 6px;
-  color: var(--text-secondary);
-  font-size: 12px;
-  cursor: pointer;
-  font-weight: 500;
-  z-index: 10;
-  transition: all 0.2s ease;
-}
-
-.load-game-chat:hover {
-  color: var(--text-primary);
-  background: var(--bg-secondary);
-}
-
-.chat-layout.with-board .load-game-chat {
-  display: none;
+  display: none; /* Hidden - use toolbar instead */
 }
 
 .layout-column {
@@ -751,11 +913,11 @@
 .chat-layout.with-board .board-column,
 .chat-layout.with-board .load-column,
 .chat-layout.with-board .chat-column {
-  height: calc(100vh - 124px);
-  min-height: calc(100vh - 124px);
-  max-height: calc(100vh - 124px);
+  flex: 1; /* Use flex instead of fixed height */
+  min-height: 0; /* CRITICAL: Allows flex child to shrink */
   display: flex;
   flex-direction: column;
+  overflow: hidden; /* Prevent column overflow */
 }
 
 .chat-layout.with-board .board-column {
@@ -785,6 +947,7 @@
   flex: 0 0 12px;
   cursor: col-resize;
   position: relative;
+  touch-action: none;
 }
 
 .column-resizer::after {
@@ -803,6 +966,34 @@
 .column-resizer:hover::after {
   background: var(--border-hover);
   opacity: 0.9;
+}
+
+/* Horizontal resizer (used in mobile vertical board/chat layout) */
+.row-resizer {
+  height: 12px;
+  flex: 0 0 12px;
+  cursor: row-resize;
+  position: relative;
+  width: 100%;
+  touch-action: none;
+}
+
+.row-resizer::after {
+  content: "";
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  top: 5px;
+  height: 2px;
+  background: var(--border-color);
+  opacity: 0.55;
+  border-radius: 999px;
+  transition: background 0.2s ease, opacity 0.2s ease;
+}
+
+.row-resizer:hover::after {
+  background: var(--border-hover);
+  opacity: 0.95;
 }
 
 .load-game-sidebar {
@@ -894,28 +1085,59 @@
 }
 
 .conversation-container {
-  order: 0;
   flex: 1;
-  display: block;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
   width: 100%;
+  max-width: 100%;
+  margin: 0; /* IMPORTANT */
+  padding: 0; /* IMPORTANT */
+  overflow: hidden; /* no scroll here */
+  position: relative;
+  box-sizing: border-box; /* IMPORTANT: not content-box */
+}
+
+/* Desktop card styling - only when NOT mobile */
+.chat-layout:not(.mobile-mode) .conversation-container {
   max-width: min(1080px, var(--shell-max));
-  margin: 100px auto 70px;
-  padding: 48px clamp(20px, 3vw, 40px);
-  padding-bottom: 180px; /* ensure last message clears fixed composer */
+  margin: 0 auto;
+  padding: 0; /* No padding on container - handled by inner components */
   background: var(--surface-card);
   border-radius: var(--radius-lg);
   border: 1px solid var(--border-color);
   box-shadow: var(--shadow-soft);
-  position: relative;
-  box-sizing: content-box;
 }
 
-/* Guaranteed spacer so fixed composer never covers last message */
-.conversation-container::after {
-  content: "";
-  display: block;
-  height: 140px; /* matches approximate composer height */
+/* Desktop conversation-stream padding (inside card) */
+.chat-layout:not(.mobile-mode) .conversation-stream {
+  padding: 48px clamp(20px, 3vw, 40px);
 }
+
+/* Desktop toolbar styling */
+.chat-layout:not(.mobile-mode) .conversation-toolbar {
+  padding: 10px 20px;
+  border-bottom: 1px solid var(--border-color);
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0; /* Match card top radius */
+}
+
+/* Mobile mode: Override default styles for rigid layout */
+.chat-layout.mobile-mode .conversation-container {
+  margin: 0; /* Remove auto margins */
+  background: transparent; /* No card background on mobile - edge-to-edge */
+  border-radius: 0;
+  border: none;
+  box-shadow: none;
+  padding: 0; /* No padding - handled by conversation-stream */
+  /* CRITICAL: This is the content area - NO SCROLL */
+  flex: 1;
+  min-height: 0;
+  overflow: hidden; /* Do NOT scroll here */
+  display: flex;
+  flex-direction: column;
+}
+
+/* No ::after spacers needed - composer is in-flow now */
 
 .chat-layout.with-board .conversation-container {
   flex: 1;
@@ -923,29 +1145,56 @@
   width: 100%;
   margin: 0;
   padding: 24px clamp(12px, 2vw, 20px);
-  padding-top: 24px;
-  padding-bottom: 1px; /* room for bottom composer */
   order: 1;
-  height: calc(100vh - 124px);
-  max-height: calc(100vh - 124px);
+  min-height: 0; /* CRITICAL: Allows flex child to shrink */
   border-radius: var(--radius-md);
   box-shadow: none;
   border: none;
-  overflow-y: auto;
+  overflow: hidden; /* CRITICAL: Do NOT scroll here */
+  display: flex;
+  flex-direction: column; /* Make it a flex container for chat structure */
+  box-sizing: border-box;
 }
 
-.chat-layout.with-board .conversation-container::after {
-  content: "";
-  display: block;
-  height: 180px;
+/* Mobile mode: Use flex, not calc() height */
+.chat-layout.with-board.mobile-mode .conversation-container {
+  /* Content area: flex: 1, min-height: 0, overflow: hidden (NO SCROLL) */
+  flex: 1;
+  min-height: 0; /* ABSOLUTELY REQUIRED */
+  padding-bottom: 0; /* No padding, handled by conversation-stream */
+  overflow: hidden; /* CRITICAL: Do NOT scroll here */
+  display: flex;
+  flex-direction: column;
 }
+
+/* No ::after spacers needed - composer is in-flow now */
 
 .conversation-stream {
   display: flex;
   flex-direction: column;
-  justify-content: flex-end;
+  justify-content: flex-start; /* IMPORTANT: not flex-end */
   gap: 10px;
   flex: 1;
+  min-height: 0; /* ABSOLUTELY REQUIRED for flex scrolling */
+  overflow-y: auto; /* ONLY this element scrolls */
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch; /* iOS smooth scrolling */
+  scroll-behavior: auto; /* No smooth scroll - avoids jank with programmatic scrolling */
+  padding: 16px; /* Consistent internal padding */
+  box-sizing: border-box;
+}
+
+/* Mobile mode: Ensure conversation-stream is the scrollable area */
+.chat-layout.mobile-mode .conversation-container .conversation-stream,
+.chat-layout.with-board.mobile-mode .conversation-container .conversation-stream {
+  flex: 1;
+  min-height: 0; /* ABSOLUTELY REQUIRED */
+  overflow-y: auto; /* Scroll ONLY here */
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+  scroll-behavior: auto; /* No smooth scroll - avoids jank */
+  padding: 16px; /* Consistent internal padding */
+  box-sizing: border-box;
 }
 
 .conversation-loaders {
@@ -1382,21 +1631,20 @@
    ======================================== */
 
 .bottom-composer {
-  position: fixed;
-  bottom: 0;
-  left: 0;
-  right: 0;
+  position: relative; /* NOT fixed - in flex flow */
+  flex-shrink: 0; /* Never shrink */
   background: rgba(12, 17, 26, 0.92);
   backdrop-filter: blur(8px);
   border-top: 1px solid var(--border-color);
-  padding: 20px 0;
+  padding: 12px 0; /* Reduced vertical padding for compact look */
   z-index: 90;
-  box-shadow: 0 -10px 40px rgba(0,0,0,0.35);
+  box-shadow: 0 -2px 8px rgba(0,0,0,0.1); /* Subtle shadow */
+  font-size: 14px;
 }
 
 .chat-layout.with-board .bottom-composer {
-  left: var(--composer-offset, 48%);
-  right: 0;
+  /* No position adjustments needed - it's in flex flow */
+  width: 100%;
 }
 
 .load-game-link-bottom {
@@ -1418,13 +1666,18 @@
 }
 
 .composer-inner {
-  max-width: var(--shell-max);
+  max-width: min(1080px, var(--shell-max));
   margin: 0 auto;
-  padding: 0 var(--shell-gutter);
+  padding: 0 clamp(20px, 3vw, 40px);
   display: flex;
   align-items: center;
   gap: 12px;
   font-size: 18px;
+}
+
+.chat-layout.with-board .bottom-composer .composer-inner {
+  max-width: 100%;
+  padding: 0 clamp(12px, 2vw, 20px);
 }
 
 .bottom-input {
@@ -1434,13 +1687,16 @@
   color: var(--text-primary);
   padding: 12px 16px;
   border-radius: 12px;
-  font-size: 17px;
+  font-size: 16px; /* 16px prevents iOS zoom on focus */
   font-family: inherit;
   min-height: 48px;
   resize: none;
   outline: none;
   line-height: 1.4;
   max-height: 72px;
+  /* Prevent zoom on focus (iOS) */
+  -webkit-text-size-adjust: 100%;
+  touch-action: manipulation; /* Prevent double-tap zoom */
 }
 
 .bottom-input:focus {
@@ -3290,14 +3546,18 @@
   z-index: 201;
   display: flex;
   flex-direction: column;
+  height: 100dvh; /* Fixed height for PWA */
+  overflow: hidden; /* Prevent page scroll */
 }
 
 .curtain-header {
   padding: 20px;
+  padding-top: max(20px, calc(20px + env(safe-area-inset-top)));
   border-bottom: 1px solid var(--border-color);
   display: flex;
   justify-content: space-between;
   align-items: center;
+  flex-shrink: 0; /* Prevent header from shrinking */
 }
 
 .curtain-header h2 {
@@ -4217,6 +4477,7 @@
 @media (max-width: 768px) {
   .history-curtain {
     width: 100%;
+    height: 100dvh; /* Dynamic viewport height for PWA */
   }
   
   .board-dock-inner {
@@ -4224,7 +4485,7 @@
   }
   
   .hero-stage {
-    padding-top: 60px;
+    padding-top: calc(60px + env(safe-area-inset-top));
   }
 }
 
@@ -4266,7 +4527,7 @@
   border: 1px solid var(--border-color);
   background: var(--bg-secondary);
   color: var(--text-secondary);
-  font-size: 16px;
+  font-size: 14px;
   font-weight: 500;
   cursor: pointer;
   transition: background 0.2s ease, color 0.2s ease, border 0.2s ease;
@@ -4287,7 +4548,7 @@
   padding: 0 18px;
   height: 46px;
   border-radius: 12px;
-  font-size: calc(15px * var(--font-scale));
+  font-size: 14px;
   background: var(--text-primary);
   color: var(--bg-primary);
   border: none;
@@ -4527,6 +4788,19 @@
 .request-options-buttons button:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+}
+
+.request-options-buttons button.cancel-button {
+  padding: 10px 14px;
+  font-size: 14px;
+  border: 1.5px solid rgba(255, 255, 255, 0.15);
+  background: rgba(255, 255, 255, 0.03);
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.request-options-buttons button.cancel-button:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.85);
 }
 
 .message-button {

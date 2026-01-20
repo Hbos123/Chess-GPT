@@ -1373,6 +1373,10 @@ class ProfileIndexingManager:
         return "unknown", "Unknown"
 
     def _schedule_analysis(self, user_id: str) -> None:
+        # TEMPORARY: Disable analysis to save PC resources
+        print(f"🚫 [SCHEDULE_ANALYSIS] Analysis disabled for user {user_id} (temporary guard)")
+        return
+        
         if not self.review_fn:
             print(f"⚠️ [SCHEDULE_ANALYSIS] No review_fn available for user {user_id}")
             return
@@ -1387,6 +1391,10 @@ class ProfileIndexingManager:
 
     async def _run_analysis_pipeline(self, user_id: str) -> None:
         """Run deep analysis pipeline - only full analysis, no light analysis"""
+        # TEMPORARY: Disable analysis to save PC resources
+        print(f"🚫 [ANALYSIS_PIPELINE] Analysis disabled for user {user_id} (temporary guard)")
+        return
+        
         print(f"🔬 [ANALYSIS_PIPELINE] Starting analysis pipeline for user {user_id}")
         try:
             await self._run_deep_analysis(user_id)

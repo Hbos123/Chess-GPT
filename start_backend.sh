@@ -3,7 +3,8 @@
 lsof -ti:8000 | xargs kill -9 2>/dev/null
 sleep 1
 # Start the backend
-cd /Users/hugobosnic/Desktop/Projects/Chess-GPT/backend
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR/backend"
 # Activate backend virtualenv so uvicorn + deps are available.
 if [ -f ".venv/bin/activate" ]; then
   source .venv/bin/activate

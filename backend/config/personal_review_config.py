@@ -52,3 +52,4 @@ class PersonalReviewConfig:
 # Global config instance
 config = PersonalReviewConfig()
 
+

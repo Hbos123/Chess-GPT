@@ -24,3 +24,4 @@ def format_error(code: ErrorCode, *, detail: Optional[str] = None) -> dict:
 
 
 
+

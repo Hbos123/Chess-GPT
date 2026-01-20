@@ -147,3 +147,4 @@ export interface GenerateReportRequest {
   data: AggregatedStats;
 }
 
+

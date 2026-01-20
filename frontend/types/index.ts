@@ -139,12 +139,25 @@ export interface Annotation {
 
 export type Mode = "PLAY" | "ANALYZE" | "TACTICS" | "DISCUSS";
 
+export interface ChatGraphData {
+  graph_id: string;
+  series: Array<{
+    id: string;
+    name: string;
+    color: string;
+    rawValues: Array<number | null>;
+    normalizedValues: Array<number | null>;
+  }>;
+  xLabels: string[];
+  grouping: "game" | "day" | "batch5";
+}
+
 export interface ChatMessage {
   id?: string;
   role: "user" | "assistant" | "system" | "graph" | "button" | "expandable_table" | "board";
   content: string;
   meta?: any;
-  graphData?: any[];
+  graphData?: ChatGraphData; // Updated to use proper type
   buttonAction?: string;
   buttonLabel?: string;
   tableTitle?: string;
@@ -152,6 +165,13 @@ export interface ChatMessage {
   timestamp?: Date;
   fen?: string;  // Track which position this message was sent from
   tabId?: string; // Scope messages to a specific board tab
+  image?: {
+    data: string; // base64 or URL
+    filename?: string;
+    mimeType?: string;
+    uploading?: boolean; // true while uploading
+    uploadProgress?: number; // 0-100
+  };
 }
 
 export interface AppState {

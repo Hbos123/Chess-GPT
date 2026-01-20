@@ -8,7 +8,9 @@ import InteractivePGN from './InteractivePGN';
 import GameReviewTable from './GameReviewTable';
 import PersonalReviewCharts from './PersonalReviewCharts';
 import ExpandableTable from './ExpandableTable';
+import ChatGraph from './ChatGraph';
 import { getBackendBase } from '@/lib/backendBase';
+import type { ChatGraphData } from '@/types';
 
 interface ShowBoardLaunchPayload {
   finalPgn?: string;
@@ -17,7 +19,7 @@ interface ShowBoardLaunchPayload {
 }
 
 interface MessageBubbleProps {
-  role: 'user' | 'assistant' | 'system' | 'graph' | 'button' | 'expandable_table';
+  role: 'user' | 'assistant' | 'system' | 'graph' | 'button' | 'expandable_table' | 'board';
   content: string;
   rawData?: any;
   timestamp?: Date;
@@ -28,13 +30,21 @@ interface MessageBubbleProps {
   buttonLabel?: string;
   tableTitle?: string;
   tableContent?: string;
-  onButtonAction?: (action: string) => void;
+  onButtonAction?: (action: string, buttonId?: string) => void;
   isButtonDisabled?: boolean;
   onRunFullAnalysis?: (fen: string) => void;
   onShowBoard?: (payload: ShowBoardLaunchPayload) => void;
+  image?: {
+    data: string;
+    filename?: string;
+    mimeType?: string;
+    uploading?: boolean;
+    uploadProgress?: number;
+  };
+  graphData?: ChatGraphData;
 }
 
-export default function MessageBubble({ role, content, rawData, timestamp, currentFEN, onApplyPGN, onPreviewFEN, buttonAction, buttonLabel, tableTitle, tableContent, onButtonAction, isButtonDisabled, onRunFullAnalysis, onShowBoard }: MessageBubbleProps) {
+export default function MessageBubble({ role, content, rawData, timestamp, currentFEN, onApplyPGN, onPreviewFEN, buttonAction, buttonLabel, tableTitle, tableContent, onButtonAction, isButtonDisabled, onRunFullAnalysis, onShowBoard, image, graphData }: MessageBubbleProps) {
   const [showRawData, setShowRawData] = useState(false);
   const [showEvidence, setShowEvidence] = useState(false);
   const [showLogs, setShowLogs] = useState(false);
@@ -805,18 +815,65 @@ export default function MessageBubble({ role, content, rawData, timestamp, curre
       </div>
       
       <div className="message-content">
-        <div className="message-text">
-          {currentFEN ? (
-            <InteractivePGN
-              text={filteredContent}
-              currentFEN={currentFEN}
-              onApplySequence={onApplyPGN}
-              onHoverMove={onPreviewFEN}
+        {graphData && (
+          <ChatGraph graphData={graphData} />
+        )}
+        {image && (
+          <div 
+            style={{ 
+              marginBottom: content ? '12px' : '0',
+              position: 'relative',
+              display: 'inline-block',
+              maxWidth: '100%',
+            }}
+          >
+            <img
+              src={image.data}
+              alt={image.filename || 'Uploaded image'}
+              style={{
+                maxWidth: '100%',
+                maxHeight: '400px',
+                borderRadius: '8px',
+                display: 'block',
+                opacity: image.uploading ? 0.5 : 1,
+                filter: image.uploading ? 'grayscale(0.3)' : 'none',
+                transition: 'opacity 0.3s ease, filter 0.3s ease',
+                border: '1px solid rgba(255, 255, 255, 0.1)',
+              }}
             />
-          ) : (
-            <div dangerouslySetInnerHTML={toMinimalHtml(filteredContent)} />
-          )}
-        </div>
+            {image.uploading && (
+              <div
+                style={{
+                  position: 'absolute',
+                  top: '8px',
+                  right: '8px',
+                  background: 'rgba(0, 0, 0, 0.7)',
+                  color: 'white',
+                  padding: '4px 8px',
+                  borderRadius: '4px',
+                  fontSize: '12px',
+                  fontWeight: 500,
+                }}
+              >
+                Uploading... {image.uploadProgress || 0}%
+              </div>
+            )}
+          </div>
+        )}
+        {content && (
+          <div className="message-text">
+            {currentFEN ? (
+              <InteractivePGN
+                text={filteredContent}
+                currentFEN={currentFEN}
+                onApplySequence={onApplyPGN}
+                onHoverMove={onPreviewFEN}
+              />
+            ) : (
+              <div dangerouslySetInnerHTML={toMinimalHtml(filteredContent)} />
+            )}
+          </div>
+        )}
 
         {role === "assistant" && baselineIntuition && (
           <div style={{ marginTop: 12, padding: 10, border: "1px solid rgba(255,255,255,0.12)", borderRadius: 8 }}>

@@ -224,47 +224,19 @@ async def lifespan(app: FastAPI):
     # Initialize Lichess explorer client
     explorer_client = LichessExplorerClient()
     
-    # Initialize Supabase or Local PostgreSQL
+    # Initialize Supabase
     supabase_url = os.getenv("SUPABASE_URL")
     supabase_service_role_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
-    local_postgres_url = os.getenv("LOCAL_POSTGRES_URL")
     
-    # Check if using local PostgreSQL
-    if local_postgres_url:
+    if supabase_url and supabase_service_role_key:
         try:
-            from local_postgres_client import LocalPostgresClient
-            supabase_client = LocalPostgresClient(local_postgres_url)
-            print("✅ Using local PostgreSQL database")
+            supabase_client = SupabaseClient(supabase_url, supabase_service_role_key)
+            print("✅ Supabase client initialized")
         except Exception as exc:
-            print(f"⚠️  Failed to initialize local PostgreSQL client: {exc}")
+            print(f"⚠️  Failed to initialize Supabase client: {exc}")
             supabase_client = None
-    elif supabase_url and supabase_service_role_key:
-        # Check if URL points to localhost (local Supabase)
-        if "localhost" in supabase_url or "127.0.0.1" in supabase_url:
-            # Try to use local PostgreSQL if connection string provided
-            if local_postgres_url:
-                try:
-                    from local_postgres_client import LocalPostgresClient
-                    supabase_client = LocalPostgresClient(local_postgres_url)
-                    print("✅ Using local PostgreSQL database (detected from SUPABASE_URL)")
-                except Exception as exc:
-                    print(f"⚠️  Failed to initialize local PostgreSQL client: {exc}")
-                    supabase_client = None
-            else:
-                # Fall back to Supabase client (for local Supabase CLI instance)
-                try:
-                    supabase_client = SupabaseClient(supabase_url, supabase_service_role_key)
-                except Exception as exc:
-                    print(f"⚠️  Failed to initialize Supabase client: {exc}")
-                    supabase_client = None
-        else:
-            # Remote Supabase
-            try:
-                supabase_client = SupabaseClient(supabase_url, supabase_service_role_key)
-            except Exception as exc:
-                print(f"⚠️  Failed to initialize Supabase client: {exc}")
-                supabase_client = None
     else:
+        print("⚠️  SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY not set - database features will be unavailable")
         supabase_client = None
 
     # Initialize Personal Review components
@@ -423,6 +395,22 @@ async def lifespan(app: FastAPI):
                             status.message = f"Analyzed {saved_count} of {total_games} games..."
                             status.last_updated = _utc_now()
                         
+                        # Extract and save critical positions from this game
+                        ply_records = review_result.get("ply_records", [])
+                        if ply_records:
+                            try:
+                                positions_saved = await _save_error_positions(
+                                    ply_records,
+                                    game_id,
+                                    user_id,
+                                    supabase_client,
+                                    player_color
+                                )
+                                if positions_saved > 0:
+                                    print(f"   💾 [INDEXING_CALLBACK] Saved {positions_saved} critical positions from game {idx}")
+                            except Exception as pos_err:
+                                print(f"   ⚠️ [INDEXING_CALLBACK] Error saving positions for game {idx}: {pos_err}")
+                        
                         # Don't invalidate cache after every game - too aggressive
                         # We'll invalidate once at the end of indexing instead
                         # This prevents multiple concurrent recalculations during bulk indexing
@@ -452,6 +440,29 @@ async def lifespan(app: FastAPI):
             if profile_analytics_engine and saved_count > 0:
                 profile_analytics_engine.invalidate_cache(user_id)
                 print(f"🔄 [INDEXING_CALLBACK] Invalidated analytics cache after completing {saved_count} game saves")
+            
+            # Pre-compute and save detailed analytics cache after batch completion (non-blocking, non-fatal)
+            if supabase_client and saved_count > 0:
+                try:
+                    def compute_and_save_cache():
+                        # Fetch 60 most recent games for detailed analytics
+                        games = supabase_client.get_active_reviewed_games(user_id, limit=60, include_full_review=True)
+                        if not games:
+                            print(f"   ℹ️ [INDEXING_CALLBACK] No games found for detailed analytics cache")
+                            return
+                        
+                        from profile_analytics.detailed_analytics import DetailedAnalyticsAggregator
+                        aggregator = DetailedAnalyticsAggregator()
+                        analytics_data = aggregator.aggregate(games)
+                        
+                        # Save to cache
+                        supabase_client._save_detailed_analytics_cache(user_id, analytics_data, len(games))
+                    
+                    # Run in thread pool to avoid blocking
+                    await asyncio.to_thread(compute_and_save_cache)
+                except Exception as e:
+                    print(f"   ⚠️ [INDEXING_CALLBACK] Failed to save detailed analytics cache: {e}")
+                    # Non-fatal - games are still saved
             
             print(f"✅ [INDEXING_CALLBACK] Completed processing games for user {user_id}: {saved_count} saved, {error_count} errors")
             
@@ -630,22 +641,30 @@ app = FastAPI(title="Chess GPT Backend", version="1.0.0", lifespan=lifespan)
 async def health():
     return {"status": "ok"}
 
-# CORS - Allow local development origins
+# CORS - Allow local development origins and production domains (Vercel, Render, etc.)
 # Note: Cannot use allow_origins=["*"] with allow_credentials=True per CORS spec.
-# We whitelist common local dev origins explicitly, and additionally allow common LAN origins via regex.
+# We whitelist common local dev origins explicitly, and additionally allow common LAN origins and Vercel domains via regex.
+
+# Get allowed origins from environment variable (comma-separated) or use defaults
+allowed_origins_env = os.getenv("ALLOWED_ORIGINS", "")
+allowed_origins = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://localhost:3001",
+    "http://127.0.0.1:3001",
+    "http://localhost",  # No port (defaults to 80, but some browsers might send this)
+    "http://127.0.0.1",  # No port
+]
+if allowed_origins_env:
+    # Add custom origins from environment variable
+    allowed_origins.extend([origin.strip() for origin in allowed_origins_env.split(",") if origin.strip()])
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-        "http://localhost:3001",
-        "http://127.0.0.1:3001",
-        "http://localhost",  # No port (defaults to 80, but some browsers might send this)
-        "http://127.0.0.1",  # No port
-    ],
-    # Allow LAN IPs (192.168.x.x, 10.x.x.x, 172.16-31.x.x) and localhost on any port (including no port).
-    # This regex matches: http://localhost, http://localhost:3000, http://192.168.1.1:3000, etc.
-    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2[0-9]|3[0-1])\.\d+\.\d+)(:\d+)?/?$",
+    allow_origins=allowed_origins,
+    # Allow LAN IPs (192.168.x.x, 10.x.x.x, 172.16-31.x.x), localhost on any port, and Vercel domains.
+    # This regex matches: http://localhost, http://localhost:3000, http://192.168.1.1:3000, https://*.vercel.app, etc.
+    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2[0-9]|3[0-1])\.\d+\.\d+|.*\.vercel\.app|.*\.onrender\.com)(:\d+)?/?$",
     allow_credentials=True,
     allow_methods=["*"],  # Allow all methods
     allow_headers=["*"],  # Allow all headers
@@ -2758,25 +2777,89 @@ async def _save_error_positions(
         tags_before_list = extract_tag_names(tags_before)
         tags_after_played_list = extract_tag_names(tags_after_played)
         
+        # Extract best move tags if available
+        best_move_tags = record.get("best_move_tags", [])
+        tags_after_best_list = extract_tag_names(best_move_tags)
+        
+        # Compute tag transitions
+        tags_start_set = set(tags_before_list)
+        tags_after_played_set = set(tags_after_played_list)
+        tags_after_best_set = set(tags_after_best_list)
+        
+        tags_gained = list(tags_after_played_set - tags_start_set)
+        tags_lost = list(tags_start_set - tags_after_played_set)
+        
+        # Extract piece information
+        fen_before = record.get("fen_before")
+        move_uci = record.get("uci")
+        best_move_san = record.get("engine", {}).get("best_move_san")
+        
+        # Helper to extract piece name from move
+        def piece_name_from_move(fen: str, uci: str) -> str:
+            if not fen or not uci or len(uci) < 4:
+                return None
+            try:
+                from chess import Board
+                board = Board(fen)
+                from_square = uci[:2]
+                piece = board.piece_at(getattr(__import__('chess'), from_square.upper()))
+                if piece:
+                    return piece.symbol().upper() if piece.color else piece.symbol().lower()
+            except:
+                pass
+            return None
+        
+        def piece_name_from_san(fen: str, san: str) -> str:
+            if not fen or not san:
+                return None
+            try:
+                from chess import Board
+                board = Board(fen)
+                move = board.parse_san(san)
+                piece = board.piece_at(move.from_square)
+                if piece:
+                    return piece.symbol().upper() if piece.color else piece.symbol().lower()
+            except:
+                pass
+            return None
+        
+        piece_blundered = piece_name_from_move(fen_before, move_uci) if fen_before and move_uci else None
+        piece_best_move = piece_name_from_san(fen_before, best_move_san) if fen_before and best_move_san else None
+        
+        # Extract time data
+        time_spent_s = record.get("time_spent_s")
+        
+        # Determine error category
+        error_category = category  # "mistake" or "blunder"
+        
         position_data = {
-            "fen": record.get("fen_before"),
+            "fen": fen_before,
             "side_to_move": side_moved,
             "from_game_id": game_id,  # Primary source game
             "source_ply": record.get("ply"),
             "move_san": record.get("san"),
-            "move_uci": record.get("uci"),
-            "best_move_san": record.get("engine", {}).get("best_move_san"),
+            "move_uci": move_uci,
+            "best_move_san": best_move_san,
             "best_move_uci": record.get("engine", {}).get("best_move_uci"),
-            "tags": tags_before_list,
-            "tags_after_played": tags_after_played_list,
-            "tags_after_best": [],  # Computed lazily when needed
             "eval_cp": record.get("engine", {}).get("eval_before_cp"),
             "cp_loss": cp_loss,
             "phase": record.get("phase"),
-            "error_side": error_side,
+            "opening_name": record.get("opening_name"),  # Add opening_name if available
+            "error_category": error_category,
             "is_critical": cp_loss >= 200,
             "error_note": f"{category.capitalize()}: {record.get('san')} (cp_loss: {cp_loss})",
-            "source_game_ids": [game_id]  # Array for tracking multiple sources
+            "source_game_ids": [game_id],  # Array for tracking multiple sources
+            # Tag transition metadata
+            "tags_start": tags_before_list,
+            "tags_after_played": tags_after_played_list,
+            "tags_after_best": tags_after_best_list,
+            "tags_gained": tags_gained,
+            "tags_lost": tags_lost,
+            # Piece information
+            "piece_blundered": piece_blundered,
+            "piece_best_move": piece_best_move,
+            # Time data
+            "time_spent_s": time_spent_s,
         }
         positions_to_save.append(position_data)
     
@@ -5907,6 +5990,33 @@ async def profile_overview(user_id: str):
     }
 
 
+@app.get("/profile/overview/snapshot")
+async def profile_overview_snapshot(user_id: str, limit: int = 60):
+    """
+    Lightweight Overview snapshot (last N games).
+    Designed for fast UI rendering: record, accuracy, rating trend, time-style, openings snapshot, momentum.
+    """
+    if not supabase_client:
+        raise HTTPException(status_code=503, detail="Supabase client not initialized")
+
+    try:
+        from profile_overview_snapshot import build_overview_snapshot
+
+        def fetch_games():
+            if hasattr(supabase_client, "get_recent_games_for_overview_snapshot"):
+                return supabase_client.get_recent_games_for_overview_snapshot(user_id, limit=int(limit))
+            # Fallback (should not happen): use active reviewed games without PGN clocks
+            return supabase_client.get_active_reviewed_games(user_id, limit=int(limit), include_full_review=False)
+
+        games = await asyncio.to_thread(fetch_games)
+        return build_overview_snapshot(games or [], window=int(limit))
+    except Exception as e:
+        import traceback
+        print(f"❌ [OVERVIEW_SNAPSHOT] Error: {e}")
+        print(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"Failed to build overview snapshot: {str(e)}")
+
+
 @app.get("/profile/stats")
 async def profile_stats(user_id: str):
     if not profile_indexer:
@@ -5938,6 +6048,68 @@ async def profile_habits(user_id: str):
         raise HTTPException(status_code=500, detail=f"Failed to fetch profile habits: {str(e)}")
 
 
+@app.get("/profile/analyzed_games")
+async def get_analyzed_games(user_id: str, limit: int = 5):
+    """
+    Get recently analyzed games for a user.
+    Returns minimal game metadata for the RecentGamesTab.
+    """
+    if not supabase_client:
+        raise HTTPException(status_code=503, detail="Supabase client not initialized")
+    
+    try:
+        print(f"📊 [ANALYZED_GAMES_ENDPOINT] Request received for user_id: {user_id}, limit: {limit}")
+        
+        def fetch_games():
+            # Fetch games without full review data (faster)
+            games = supabase_client.get_active_reviewed_games(user_id, limit=limit, include_full_review=False)
+            
+            if not games:
+                print(f"⚠️ [ANALYZED_GAMES_ENDPOINT] No games found for user_id: {user_id}")
+                return []
+            
+            # Format games for frontend
+            formatted_games = []
+            for game in games:
+                formatted_games.append({
+                    "id": game.get("id"),
+                    "game_id": game.get("external_id") or game.get("id"),
+                    "platform": game.get("platform", "manual"),
+                    "external_id": game.get("external_id"),
+                    "game_date": game.get("game_date"),
+                    "created_at": game.get("created_at"),
+                    "analyzed_at": game.get("analyzed_at"),
+                    "result": game.get("result", "unknown"),
+                    "opponent_name": game.get("opponent_name", "Unknown"),
+                    "user_rating": game.get("user_rating"),
+                    "opponent_rating": game.get("opponent_rating"),
+                    "opening_name": game.get("opening_name"),
+                    "opening_eco": game.get("opening_eco"),
+                    "time_control": game.get("time_control"),
+                    "metadata": {
+                        "result": game.get("result", "unknown"),
+                        "player_rating": game.get("user_rating"),
+                        "opponent_name": game.get("opponent_name", "Unknown"),
+                        "opponent_rating": game.get("opponent_rating"),
+                    }
+                })
+            
+            return formatted_games
+        
+        games = await asyncio.to_thread(fetch_games)
+        
+        print(f"✅ [ANALYZED_GAMES_ENDPOINT] Returning {len(games)} games for user_id: {user_id}")
+        return {"games": games}
+        
+    except Exception as e:
+        import traceback
+        error_trace = traceback.format_exc()
+        print(f"❌ [ANALYZED_GAMES_ENDPOINT] Error fetching analyzed games for user_id: {user_id}")
+        print(f"   Error: {str(e)}")
+        print(f"   Traceback: {error_trace}")
+        raise HTTPException(status_code=500, detail=f"Failed to fetch analyzed games: {str(e)}")
+
+
 # IMPORTANT: This route must come BEFORE /profile/analytics/{user_id} to avoid route conflicts
 @app.get("/profile/analytics/{user_id}/detailed")
 async def get_detailed_analytics(user_id: str):
@@ -5948,6 +6120,9 @@ async def get_detailed_analytics(user_id: str):
     - Piece accuracy breakdown
     - Tag transition analytics
     - Time bucket performance
+    
+    Fetches from pre-computed detailed_analytics_cache table for fast response.
+    Falls back to on-demand computation if cache is missing.
     """
     if not supabase_client:
         raise HTTPException(status_code=503, detail="Supabase client not initialized")
@@ -5955,7 +6130,40 @@ async def get_detailed_analytics(user_id: str):
     try:
         print(f"📊 [DETAILED_ANALYTICS_ENDPOINT] Request received for user_id: {user_id}")
         
-        # Use asyncio.to_thread to prevent blocking the event loop
+        # Try to fetch from pre-computed cache first (much faster)
+        def fetch_cache():
+            try:
+                result = supabase_client.client.table("detailed_analytics_cache")\
+                    .select("*")\
+                    .eq("user_id", user_id)\
+                    .maybe_single()\
+                    .execute()
+                return result.data if result.data else None
+            except Exception as e:
+                # Table might not exist yet (migration not run)
+                error_str = str(e).lower()
+                if "does not exist" in error_str or "relation" in error_str:
+                    print(f"   ℹ️ [DETAILED_ANALYTICS_ENDPOINT] detailed_analytics_cache table not found, falling back to computation")
+                else:
+                    print(f"   ⚠️ [DETAILED_ANALYTICS_ENDPOINT] Error fetching cache: {e}")
+                return None
+        
+        cached = await asyncio.to_thread(fetch_cache)
+        
+        # If we have cached data, return it immediately
+        if cached is not None:
+            # Both Supabase and LocalPostgres return dict format
+            analytics_data = cached.get("analytics_data")
+            games_count = cached.get("games_count")
+            computed_at = cached.get("computed_at")
+            
+            if analytics_data:
+                print(f"✅ [DETAILED_ANALYTICS_ENDPOINT] Returning cached detailed analytics for user_id: {user_id} ({games_count} games, computed: {computed_at})")
+                return analytics_data
+        
+        # Fallback: compute on-demand if cache not available
+        print(f"   ℹ️ [DETAILED_ANALYTICS_ENDPOINT] No cached data found, computing on-demand for user_id: {user_id}")
+        
         def fetch_and_aggregate():
             games = supabase_client.get_active_reviewed_games(user_id, limit=60, include_full_review=True)
             if not games:
@@ -5973,7 +6181,7 @@ async def get_detailed_analytics(user_id: str):
         # Run in thread pool to avoid blocking
         detailed_analytics = await asyncio.to_thread(fetch_and_aggregate)
         
-        print(f"✅ [DETAILED_ANALYTICS_ENDPOINT] Returning detailed analytics for user_id: {user_id}")
+        print(f"✅ [DETAILED_ANALYTICS_ENDPOINT] Returning computed detailed analytics for user_id: {user_id}")
         return detailed_analytics
         
     except Exception as e:
@@ -5983,6 +6191,106 @@ async def get_detailed_analytics(user_id: str):
         print(f"   Error: {str(e)}")
         print(f"   Traceback: {error_trace}")
         raise HTTPException(status_code=500, detail=f"Failed to fetch detailed analytics: {str(e)}")
+
+
+# IMPORTANT: This route must come BEFORE /profile/analytics/{user_id} to avoid route conflicts
+@app.get("/profile/analytics/{user_id}/graph-data")
+async def get_graph_data(
+    user_id: str,
+    limit: int = 60
+):
+    """
+    Get compact per-game graphable data for the most recent reviewed games.
+    Fetches from pre-computed game_graph_data table for fast response.
+    Falls back to on-demand computation if pre-computed data is missing.
+    """
+    if not supabase_client:
+        raise HTTPException(status_code=503, detail="Supabase client not initialized")
+
+    try:
+        from datetime import datetime
+        
+        # Try to fetch from pre-computed table first (much faster)
+        def fetch_precomputed():
+            try:
+                result = supabase_client.client.table("game_graph_data")\
+                    .select("*")\
+                    .eq("user_id", user_id)\
+                    .order("game_date", desc=False)\
+                    .limit(int(limit))\
+                    .execute()
+                return result.data if result.data else []
+            except Exception as e:
+                # Table might not exist yet (migration not run)
+                error_str = str(e).lower()
+                if "does not exist" in error_str or "relation" in error_str:
+                    print(f"   ℹ️ [GRAPH_DATA_ENDPOINT] game_graph_data table not found, falling back to computation")
+                else:
+                    print(f"   ⚠️ [GRAPH_DATA_ENDPOINT] Error fetching pre-computed data: {e}")
+                return None
+
+        precomputed = await asyncio.to_thread(fetch_precomputed)
+        
+        # If we have pre-computed data, format and return it
+        if precomputed is not None and len(precomputed) > 0:
+            formatted = []
+            for idx, point in enumerate(precomputed):
+                formatted.append({
+                    "index": idx,
+                    "game_id": point.get("game_id"),
+                    "game_date": point.get("game_date"),
+                    "result": point.get("result"),
+                    "opening_name": point.get("opening_name"),
+                    "opening_eco": point.get("opening_eco"),
+                    "time_control": point.get("time_control"),
+                    "overall_accuracy": float(point.get("overall_accuracy")) if point.get("overall_accuracy") is not None else None,
+                    "piece_accuracy": point.get("piece_accuracy") or {},
+                    "time_bucket_accuracy": point.get("time_bucket_accuracy") or {},
+                    "tag_transitions": point.get("tag_transitions") or {"gained": {}, "lost": {}},
+                })
+            
+            print(f"✅ [GRAPH_DATA_ENDPOINT] Returning {len(formatted)} pre-computed graph points for user_id: {user_id}")
+            return {
+                "user_id": user_id,
+                "generated_at": datetime.now().isoformat(),
+                "limit": limit,
+                "games": formatted,
+            }
+        
+        # Fallback: compute on-demand if pre-computed data not available
+        print(f"   ℹ️ [GRAPH_DATA_ENDPOINT] No pre-computed data found, computing on-demand for user_id: {user_id}")
+        from profile_analytics.graph_data import build_graph_game_point
+
+        def fetch_games():
+            return supabase_client.get_active_reviewed_games(
+                user_id, limit=int(limit), include_full_review=True
+            )
+
+        games = await asyncio.to_thread(fetch_games)
+        if not games:
+            return {"user_id": user_id, "generated_at": datetime.now().isoformat(), "limit": limit, "games": []}
+
+        # Sort by date if present, else preserve returned order (typically updated_at desc).
+        def _date_key(g):
+            gd = g.get("game_date")
+            if isinstance(gd, str):
+                return gd
+            return ""
+
+        games_sorted = sorted(games, key=_date_key)
+        points = [build_graph_game_point(g, idx) for idx, g in enumerate(games_sorted)]
+
+        return {
+            "user_id": user_id,
+            "generated_at": datetime.now().isoformat(),
+            "limit": limit,
+            "games": points,
+        }
+    except Exception as e:
+        import traceback
+        print(f"❌ [GRAPH_DATA_ENDPOINT] Error for user_id={user_id}: {e}")
+        print(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"Failed to fetch graph data: {str(e)}")
 
 
 @app.get("/profile/analytics/{user_id}")
@@ -6085,21 +6393,6 @@ async def get_pattern_history(
         from datetime import datetime, timedelta
         cutoff_date = (datetime.now() - timedelta(days=days)).date().isoformat()
         
-        # Check if it's LocalPostgresClient
-        if hasattr(supabase_client, '_execute_query'):
-            # Use direct SQL query
-            query = """
-                SELECT * FROM public.pattern_snapshots
-                WHERE user_id = %s AND snapshot_date >= %s
-                ORDER BY snapshot_date ASC
-            """
-            patterns = supabase_client._execute_query(query, (user_id, cutoff_date))
-            return {
-                "patterns": patterns if patterns else [],
-                "days": days
-            }
-        
-        # Otherwise use Supabase client
         result = supabase_client.client.table("pattern_snapshots")\
             .select("*")\
             .eq("user_id", user_id)\
@@ -6460,6 +6753,250 @@ async def mine_positions_endpoint(request: MinePositionsRequest):
         raise HTTPException(status_code=500, detail=f"Failed to mine positions: {str(e)}")
 
 
+@app.get("/profile/positions/by-tag-transition")
+async def get_positions_by_tag_transition(
+    user_id: str,
+    tag_name: str,
+    transition_type: str = Query(..., pattern="^(gained|lost|missed)$"),
+    limit: int = Query(20, ge=1, le=50),
+    min_cp_loss: int = Query(100, ge=0)
+):
+    """
+    Query critical positions filtered by tag transitions.
+    
+    Args:
+        user_id: User ID to query positions for
+        tag_name: Name of the tag to filter by
+        transition_type: Type of transition to filter by
+            - 'gained': Positions where tag_name was gained after played move
+            - 'lost': Positions where tag_name was lost after played move  
+            - 'missed': Positions where tag_name exists in best_move but not in played move
+        limit: Maximum number of positions to return
+        min_cp_loss: Minimum centipawn loss to filter by (default: 100)
+    
+    Returns:
+        List of positions matching the tag transition filter
+    """
+    if not supabase_client:
+        raise HTTPException(status_code=503, detail="Supabase client not initialized")
+    
+    try:
+        print(f"🔍 [TAG_TRANSITION_QUERY] Querying positions for user {user_id}, tag: {tag_name}, type: {transition_type}")
+        
+        # Map transition_type to search parameters
+        tags_gained_filter = None
+        tags_lost_filter = None
+        tags_missed_filter = None
+        
+        if transition_type == "gained":
+            tags_gained_filter = tag_name
+        elif transition_type == "lost":
+            tags_lost_filter = tag_name
+        elif transition_type == "missed":
+            tags_missed_filter = tag_name
+        
+        # First, get total count of available positions (for display)
+        total_count_result = await asyncio.to_thread(
+            supabase_client.count_user_positions,
+            user_id=user_id,
+            tags_gained_filter=tags_gained_filter,
+            tags_lost_filter=tags_lost_filter,
+            tags_missed_filter=tags_missed_filter,
+            min_cp_loss=min_cp_loss,
+            error_categories=["blunder", "mistake"]
+        )
+        total_count = total_count_result.get("count", 0)
+        
+        # Query positions using enhanced search method (prioritizes unseen/oldest)
+        positions = await asyncio.to_thread(
+            supabase_client.search_user_positions,
+            user_id=user_id,
+            tags_gained_filter=tags_gained_filter,
+            tags_lost_filter=tags_lost_filter,
+            tags_missed_filter=tags_missed_filter,
+            min_cp_loss=min_cp_loss,
+            error_categories=["blunder", "mistake"],
+            limit=limit,
+            prioritize_fresh=True  # Prioritize unseen/oldest positions
+        )
+        
+        # Calculate average accuracy from positions (if available)
+        avg_accuracy = None
+        if positions:
+            accuracies = []
+            for pos in positions:
+                # Try to get accuracy from various sources
+                acc = pos.get("accuracy_pct") or pos.get("accuracy")
+                if acc is not None:
+                    accuracies.append(float(acc))
+            if accuracies:
+                avg_accuracy = sum(accuracies) / len(accuracies)
+        
+        # Mark positions as used (update last_used_in_drill timestamp)
+        if positions:
+            position_ids = [pos.get("id") for pos in positions if pos.get("id")]
+            if position_ids:
+                await asyncio.to_thread(
+                    supabase_client.mark_positions_used,
+                    position_ids=position_ids
+                )
+        
+        accuracy_str = f"{avg_accuracy:.1f}%" if avg_accuracy is not None else "N/A"
+        print(f"✅ [TAG_TRANSITION_QUERY] Found {len(positions)}/{total_count} positions matching filter (avg accuracy: {accuracy_str})")
+        
+        return {
+            "positions": positions,
+            "count": len(positions),
+            "total_available": total_count,
+            "average_accuracy": round(avg_accuracy, 1) if avg_accuracy is not None else None,
+            "tag_name": tag_name,
+            "transition_type": transition_type
+        }
+    
+    except Exception as e:
+        import traceback
+        error_detail = f"Tag transition query error: {str(e)}\n{traceback.format_exc()}"
+        print(error_detail)
+        raise HTTPException(status_code=500, detail=f"Failed to query positions by tag transition: {str(e)}")
+
+
+@app.get("/profile/positions/by-filter")
+async def get_positions_by_filter(
+    user_id: str,
+    filter_type: str = Query(..., pattern="^(phase|opening|piece|tag_transition|time_bucket)$"),
+    filter_value: str = Query(...),
+    transition_type: Optional[str] = Query(None, pattern="^(gained|lost|missed)$"),
+    limit: int = Query(20, ge=1, le=50),
+    min_cp_loss: int = Query(100, ge=0)
+):
+    """
+    Unified endpoint to query critical positions by various filter types.
+    
+    Args:
+        user_id: User ID to query positions for
+        filter_type: Type of filter ("phase", "opening", "piece", "tag_transition", "time_bucket")
+        filter_value: The specific value to filter by
+            - For "phase": "opening", "middlegame", or "endgame"
+            - For "opening": Opening name (e.g., "Italian Game")
+            - For "piece": Piece type (e.g., "Bishop", "Knight")
+            - For "tag_transition": Tag name (e.g., "pawn_structure")
+            - For "time_bucket": Time bucket (e.g., "5-15s", "<5s", "5min+")
+        transition_type: Only for tag_transition filter ("gained" | "lost" | "missed")
+        limit: Maximum number of positions to return
+        min_cp_loss: Minimum centipawn loss to filter by (default: 100)
+    
+    Returns:
+        List of positions matching the filter, with total_available count and average_accuracy
+    """
+    if not supabase_client:
+        raise HTTPException(status_code=503, detail="Supabase client not initialized")
+    
+    try:
+        print(f"🔍 [FILTER_QUERY] Querying positions for user {user_id}, filter_type: {filter_type}, filter_value: {filter_value}")
+        
+        # Map filter_type to search parameters
+        phase_filter = None
+        opening_name_filter = None
+        piece_type_filter = None
+        time_bucket_filter = None
+        tags_gained_filter = None
+        tags_lost_filter = None
+        tags_missed_filter = None
+        
+        if filter_type == "phase":
+            phase_filter = filter_value
+        elif filter_type == "opening":
+            opening_name_filter = filter_value
+        elif filter_type == "piece":
+            piece_type_filter = filter_value
+        elif filter_type == "time_bucket":
+            time_bucket_filter = filter_value
+        elif filter_type == "tag_transition":
+            if not transition_type:
+                raise HTTPException(status_code=400, detail="transition_type is required for tag_transition filter")
+            if transition_type == "gained":
+                tags_gained_filter = filter_value
+            elif transition_type == "lost":
+                tags_lost_filter = filter_value
+            elif transition_type == "missed":
+                tags_missed_filter = filter_value
+        
+        # Get total count of available positions
+        total_count_result = await asyncio.to_thread(
+            supabase_client.count_user_positions,
+            user_id=user_id,
+            tags_gained_filter=tags_gained_filter,
+            tags_lost_filter=tags_lost_filter,
+            tags_missed_filter=tags_missed_filter,
+            min_cp_loss=min_cp_loss,
+            error_categories=["blunder", "mistake"],
+            phase_filter=phase_filter,
+            opening_name_filter=opening_name_filter,
+            piece_type_filter=piece_type_filter,
+            time_bucket_filter=time_bucket_filter
+        )
+        total_count = total_count_result.get("count", 0)
+        
+        # Query positions using enhanced search method (prioritizes unseen/oldest)
+        positions = await asyncio.to_thread(
+            supabase_client.search_user_positions,
+            user_id=user_id,
+            tags_gained_filter=tags_gained_filter,
+            tags_lost_filter=tags_lost_filter,
+            tags_missed_filter=tags_missed_filter,
+            min_cp_loss=min_cp_loss,
+            error_categories=["blunder", "mistake"],
+            limit=limit,
+            prioritize_fresh=True,  # Prioritize unseen/oldest positions
+            phase_filter=phase_filter,
+            opening_name_filter=opening_name_filter,
+            piece_type_filter=piece_type_filter,
+            time_bucket_filter=time_bucket_filter
+        )
+        
+        # Calculate average accuracy from positions (if available)
+        avg_accuracy = None
+        if positions:
+            accuracies = []
+            for pos in positions:
+                # Try to get accuracy from various sources
+                acc = pos.get("accuracy_pct") or pos.get("accuracy")
+                if acc is not None:
+                    accuracies.append(float(acc))
+            if accuracies:
+                avg_accuracy = sum(accuracies) / len(accuracies)
+        
+        # Mark positions as used (update last_used_in_drill timestamp)
+        if positions:
+            position_ids = [pos.get("id") for pos in positions if pos.get("id")]
+            if position_ids:
+                await asyncio.to_thread(
+                    supabase_client.mark_positions_used,
+                    position_ids=position_ids
+                )
+        
+        accuracy_str = f"{avg_accuracy:.1f}%" if avg_accuracy is not None else "N/A"
+        print(f"✅ [FILTER_QUERY] Found {len(positions)}/{total_count} positions matching filter (avg accuracy: {accuracy_str})")
+        
+        return {
+            "positions": positions,
+            "count": len(positions),
+            "total_available": total_count,
+            "average_accuracy": round(avg_accuracy, 1) if avg_accuracy is not None else None,
+            "filter_type": filter_type,
+            "filter_value": filter_value,
+            "transition_type": transition_type
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        error_detail = f"Filter query error: {str(e)}\n{traceback.format_exc()}"
+        print(error_detail)
+        raise HTTPException(status_code=500, detail=f"Failed to query positions by filter: {str(e)}")
+
+
 class GenerateDrillsRequest(BaseModel):
     positions: List[Dict]
     drill_types: List[str] = ["tactics"]
@@ -6715,5 +7252,7 @@ async def get_srs_queue_endpoint(username: str, max_cards: int = 20):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    # Use PORT environment variable (set by Render/Heroku/etc.) or default to 8000
+    port = int(os.getenv("PORT", "8000"))
+    uvicorn.run(app, host="0.0.0.0", port=port)
 

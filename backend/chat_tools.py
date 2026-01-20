@@ -289,6 +289,67 @@ TOOL_SELECT_GAMES = {
     }
 }
 
+TOOL_ADD_PERSONAL_REVIEW_GRAPH = {
+    "type": "function",
+    "function": {
+        "name": "add_personal_review_graph",
+        "description": "Add a personal review graph to the chat showing performance trends. Multiple calls can layer series on the same graph. Graph appears above the final message. Use when user asks about trends, performance over time, or wants to visualize their progress.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "data_type": {
+                    "type": "string",
+                    "enum": [
+                        "win_rate_pct",
+                        "overall_accuracy",
+                        "opening_frequency_pct",
+                        "opening_accuracy",
+                        "piece_accuracy",
+                        "time_bucket_accuracy",
+                        "tag_transition_count",
+                        "tag_transition_accuracy"
+                    ],
+                    "description": "Type of data to graph. win_rate_pct: Win rate percentage. overall_accuracy: Overall move accuracy. opening_frequency_pct: Frequency of specific opening. opening_accuracy: Accuracy with specific opening. piece_accuracy: Accuracy with specific piece type. time_bucket_accuracy: Accuracy in specific time ranges. tag_transition_count: Count of tag transitions. tag_transition_accuracy: Accuracy during tag transitions."
+                },
+                "series_name": {
+                    "type": "string",
+                    "description": "Display name for this series (e.g., 'Overall Accuracy', 'Sicilian Defense Win Rate', 'Knight Accuracy')"
+                },
+                "params": {
+                    "type": "object",
+                    "properties": {
+                        "openingName": {"type": "string", "description": "Opening name (required for opening_frequency_pct, opening_accuracy)"},
+                        "piece": {"type": "string", "enum": ["Pawn", "Knight", "Bishop", "Rook", "Queen", "King"], "description": "Piece type (required for piece_accuracy)"},
+                        "bucket": {"type": "string", "description": "Time bucket (required for time_bucket_accuracy, e.g., '<5s', '5-15s', '15-30s', '30s-1min', '1min-2min30', '2min30-5min', '5min+')"},
+                        "tag": {"type": "string", "description": "Tag name (required for tag_transition_count, tag_transition_accuracy)"},
+                        "dir": {"type": "string", "enum": ["gained", "lost"], "description": "Tag transition direction (required for tag_transition_count, tag_transition_accuracy)"}
+                    },
+                    "description": "Additional parameters for specific data types. Required based on data_type."
+                },
+                "grouping": {
+                    "type": "string",
+                    "enum": ["game", "day", "batch5"],
+                    "description": "How to group data points. 'game' = one point per game (most granular), 'day' = group by date, 'batch5' = group by 5-game batches. Default 'game'.",
+                    "default": "game"
+                },
+                "x_axis_range": {
+                    "type": "object",
+                    "properties": {
+                        "start_game": {"type": "integer", "description": "Starting game index (0-based). If not provided, starts from first game."},
+                        "end_game": {"type": "integer", "description": "Ending game index (0-based, exclusive). If not provided, uses all available games."}
+                    },
+                    "description": "X-axis range to focus on. Optional - if not provided, uses all available games."
+                },
+                "color": {
+                    "type": "string",
+                    "description": "Hex color for the line (e.g., '#3b82f6', '#10b981'). Auto-assigned if not provided."
+                }
+            },
+            "required": ["data_type", "series_name"]
+        }
+    }
+}
+
 TOOL_GENERATE_TRAINING = {
     "type": "function",
     "function": {
@@ -867,6 +928,7 @@ ALL_TOOLS = [
     TOOL_CREATE_COLLECTION,
     TOOL_SETUP_POSITION,
     TOOL_SET_AI_GAME,
+    TOOL_ADD_PERSONAL_REVIEW_GRAPH,
     # Investigation tools
     TOOL_INVESTIGATE,
     TOOL_WEB_SEARCH
@@ -874,7 +936,7 @@ ALL_TOOLS = [
 
 # Tool categories for selective availability
 ANALYSIS_TOOLS = [TOOL_ANALYZE_POSITION, TOOL_ANALYZE_MOVE, TOOL_REVIEW_FULL_GAME, TOOL_EXTEND_BASELINE_INTUITION, TOOL_TREE_SEARCH]
-WORKFLOW_TOOLS = [TOOL_FETCH_AND_REVIEW_GAMES, TOOL_SELECT_GAMES, TOOL_GENERATE_TRAINING, TOOL_GET_LESSON, TOOL_GENERATE_OPENING_LESSON, TOOL_SET_AI_GAME]
+WORKFLOW_TOOLS = [TOOL_FETCH_AND_REVIEW_GAMES, TOOL_SELECT_GAMES, TOOL_GENERATE_TRAINING, TOOL_GET_LESSON, TOOL_GENERATE_OPENING_LESSON, TOOL_SET_AI_GAME, TOOL_ADD_PERSONAL_REVIEW_GRAPH]
 DATA_TOOLS = [TOOL_QUERY_GAMES, TOOL_GET_GAME_DETAILS, TOOL_QUERY_POSITIONS, TOOL_GET_TRAINING_STATS]
 WRITE_TOOLS = [TOOL_SAVE_POSITION, TOOL_CREATE_COLLECTION]
 INVESTIGATION_TOOLS = [

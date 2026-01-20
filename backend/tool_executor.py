@@ -262,6 +262,8 @@ class ToolExecutor:
                 return self._setup_position(arguments, context)
             elif tool_name == "set_ai_game":
                 return self._set_ai_game(arguments, context)
+            elif tool_name == "add_personal_review_graph":
+                return await self._add_personal_review_graph(arguments, context)
             # Investigation tools
             elif tool_name == "investigate":
                 return await self._investigate(arguments, context)
@@ -3392,4 +3394,145 @@ Write your response now based on the game data provided."""
                 }
             }
         }
+    
+    async def _add_personal_review_graph(self, args: Dict, context: Dict) -> Dict:
+        """
+        Add a personal review graph to the chat.
+        Fetches game data, groups it, builds series, and returns graph structure.
+        """
+        import uuid
+        from profile_analytics.graph_utils import (
+            group_by_game, group_by_day, group_by_batch5,
+            build_series, assign_color
+        )
+        from profile_analytics.graph_data import build_graph_game_point
+        
+        user_id = context.get("user_id")
+        if not user_id:
+            return {"error": "User ID not found in context"}
+        
+        if not self.supabase_client:
+            return {"error": "Database client not available"}
+        
+        # Get tool arguments
+        data_type = args.get("data_type")
+        series_name = args.get("series_name", "Series")
+        params = args.get("params", {})
+        grouping = args.get("grouping", "game")
+        x_range = args.get("x_axis_range")
+        color = args.get("color")
+        
+        # Fetch game data
+        limit = 60
+        try:
+            # Try to fetch from pre-computed table first
+            if hasattr(self.supabase_client, 'client'):
+                result = self.supabase_client.client.table("game_graph_data")\
+                    .select("*")\
+                    .eq("user_id", user_id)\
+                    .order("game_date", desc=False)\
+                    .limit(limit)\
+                    .execute()
+                games_data = result.data if result.data else []
+            elif hasattr(self.supabase_client, '_execute_query'):
+                query = """
+                    SELECT * FROM public.game_graph_data
+                    WHERE user_id = %s
+                    ORDER BY game_date ASC NULLS LAST
+                    LIMIT %s
+                """
+                games_data = self.supabase_client._execute_query(query, (user_id, limit))
+            else:
+                games_data = []
+            
+            # If no pre-computed data, fetch games and build points
+            if not games_data:
+                games = self.supabase_client.get_active_reviewed_games(
+                    user_id, limit=limit, include_full_review=True
+                )
+                if not games:
+                    return {"error": "No analyzed games found for user"}
+                
+                # Sort by date
+                def _date_key(g):
+                    gd = g.get("game_date")
+                    if isinstance(gd, str):
+                        return gd
+                    return ""
+                
+                games_sorted = sorted(games, key=_date_key)
+                games_data = [build_graph_game_point(g, idx) for idx, g in enumerate(games_sorted)]
+            
+            # Format games data
+            games = []
+            for idx, point in enumerate(games_data):
+                games.append({
+                    "index": idx,
+                    "game_id": point.get("game_id") or point.get("id", ""),
+                    "game_date": point.get("game_date"),
+                    "result": point.get("result"),
+                    "opening_name": point.get("opening_name"),
+                    "opening_eco": point.get("opening_eco"),
+                    "time_control": point.get("time_control"),
+                    "overall_accuracy": float(point.get("overall_accuracy")) if point.get("overall_accuracy") is not None else None,
+                    "piece_accuracy": point.get("piece_accuracy") or {},
+                    "time_bucket_accuracy": point.get("time_bucket_accuracy") or {},
+                    "tag_transitions": point.get("tag_transitions") or {"gained": {}, "lost": {}},
+                })
+            
+            # Apply x-axis range filter if provided
+            if x_range:
+                start = x_range.get("start_game", 0)
+                end = x_range.get("end_game", len(games))
+                games = games[start:end]
+            
+            if not games:
+                return {"error": "No games in specified range"}
+            
+            # Group games based on grouping mode
+            if grouping == "game":
+                time_points = group_by_game(games)
+            elif grouping == "day":
+                time_points = group_by_day(games)
+            elif grouping == "batch5":
+                time_points = group_by_batch5(games)
+            else:
+                return {"error": f"Unknown grouping mode: {grouping}"}
+            
+            # Build series entry
+            series_id = str(uuid.uuid4())
+            series_entry = {
+                "id": series_id,
+                "label": series_name,
+                "kind": data_type,
+                "color": color or assign_color(0),
+                "params": params
+            }
+            
+            # Build series
+            built_series = build_series(series_entry, time_points)
+            
+            # Build x labels
+            x_labels = [p.get("label", "") for p in time_points]
+            
+            # Return graph data structure
+            graph_id = str(uuid.uuid4())
+            return {
+                "graph_id": graph_id,
+                "series": [{
+                    "id": built_series["entry"]["id"],
+                    "name": built_series["entry"]["label"],
+                    "color": built_series["entry"]["color"],
+                    "rawValues": built_series["rawValues"],
+                    "normalizedValues": built_series["normalizedValues"],
+                }],
+                "xLabels": x_labels,
+                "grouping": grouping,
+            }
+            
+        except Exception as e:
+            import traceback
+            print(f"   ❌ Error building graph: {e}")
+            traceback.print_exc()
+            return {"error": f"Failed to build graph: {str(e)}"}
 

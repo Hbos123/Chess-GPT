@@ -205,3 +205,4 @@ class AnalysisCache:
             "has_supabase": self.supabase_client is not None
         }
 
+

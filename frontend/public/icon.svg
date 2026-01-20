@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <rect width="512" height="512" fill="#1e3a8a" rx="80"/>
+  <g stroke="white" stroke-width="20" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <!-- Knight head profile facing right -->
+    <path d="M 130 100 Q 100 70 90 100 Q 90 130 110 140" />
+    <!-- Head outline -->
+    <path d="M 110 140 Q 110 160 130 180 Q 150 195 165 205" />
+    <!-- Eye (closed, curved line) -->
+    <path d="M 100 130 Q 115 125 130 130" />
+    <!-- Nostril -->
+    <circle cx="130" cy="150" r="8" fill="white"/>
+    <!-- Mouth -->
+    <path d="M 120 160 Q 135 165 150 160" />
+    <!-- Mane along back of neck -->
+    <path d="M 165 195 Q 195 160 215 185" />
+    <!-- Neck curves down -->
+    <path d="M 165 205 Q 195 245 215 280" />
+    <!-- Body curves -->
+    <path d="M 215 280 Q 245 330 256 370" />
+    <path d="M 256 370 Q 267 330 297 280" />
+    <path d="M 297 280 Q 317 245 347 205" />
+    <!-- Chest detail line -->
+    <path d="M 215 255 Q 256 280 297 255" />
+    <!-- Base rectangle -->
+    <rect x="110" y="370" width="292" height="50" rx="10" fill="white"/>
+  </g>
+</svg>
+

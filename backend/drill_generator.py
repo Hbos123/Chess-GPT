@@ -2,7 +2,7 @@
 Drill Generator - Creates training drills from mined positions
 """
 
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 import chess
 import chess.engine
 import hashlib
@@ -152,23 +152,50 @@ class DrillGenerator:
             return {}
     
     def _create_drill_card(self, position: Dict, drill_type: str) -> Dict:
-        """Create drill card from position"""
+        """Create drill card from position with tag transition context"""
         # Generate unique card ID
         card_id = hashlib.md5(
             f"{position['fen']}{position['best_move_san']}".encode()
         ).hexdigest()[:12]
         
         # Extract tags for hints
-        tags = position.get("tags", [])
+        tags = position.get("tags", []) or position.get("tags_start", [])
         tag_names = []
         for tag in tags:
             if isinstance(tag, dict):
-                tag_names.append(tag.get("name", ""))
+                tag_names.append(tag.get("name", tag.get("tag_name", "")))
             else:
                 tag_names.append(str(tag))
         
-        # Generate hint based on tags
-        hint = self._generate_hint(tag_names, drill_type)
+        # Extract tag transition data
+        tags_gained = position.get("tags_gained", [])
+        tags_lost = position.get("tags_lost", [])
+        tags_after_best = position.get("tags_after_best", [])
+        tags_after_played = position.get("tags_after_played", [])
+        
+        # Extract piece information
+        piece_blundered = position.get("piece_blundered")
+        piece_best_move = position.get("piece_best_move")
+        move_san = position.get("move_san") or position.get("player_move_san")
+        
+        # Generate contextual question and hint based on tag transitions
+        question, hint = self._generate_contextual_prompt(
+            drill_type, 
+            position["side_to_move"],
+            tags_lost,
+            tags_gained,
+            tags_after_best,
+            tags_after_played,
+            move_san,
+            piece_blundered,
+            piece_best_move
+        )
+        
+        # Fallback to default if no contextual prompt generated
+        if not question:
+            question = self._generate_question(drill_type, position["side_to_move"])
+        if not hint:
+            hint = self._generate_hint(tag_names, drill_type)
         
         # Build drill card
         drill = {
@@ -176,9 +203,9 @@ class DrillGenerator:
             "type": drill_type,
             "fen": position["fen"],
             "side_to_move": position["side_to_move"],
-            "question": self._generate_question(drill_type, position["side_to_move"]),
-            "best_move_san": position.get("verified_best_san", position["best_move_san"]),
-            "best_move_uci": position.get("verified_best_uci", position["best_move_uci"]),
+            "question": question,
+            "best_move_san": position.get("verified_best_san", position.get("best_move_san")),
+            "best_move_uci": position.get("verified_best_uci", position.get("best_move_uci")),
             "alternatives": position.get("alternatives", []),
             "eval_cp": position.get("verified_eval_cp", position.get("eval_before_cp", 0)),
             "tags": tag_names,
@@ -191,13 +218,85 @@ class DrillGenerator:
             },
             "source": {
                 "type": "own_game",
-                "game_id": position.get("source_game_id"),
-                "ply": position.get("ply")
+                "game_id": position.get("source_game_id") or position.get("from_game_id"),
+                "ply": position.get("ply") or position.get("source_ply")
             },
-            "explanation": ""  # Filled after user attempts
+            "explanation": "",  # Filled after user attempts
+            # Tag transition metadata
+            "tag_transitions": {
+                "gained": tags_gained,
+                "lost": tags_lost,
+                "missed": list(set(tags_after_best) - set(tags_after_played)) if tags_after_best and tags_after_played else []
+            },
+            "piece_context": {
+                "blundered": piece_blundered,
+                "best_move": piece_best_move
+            }
         }
         
         return drill
+    
+    def _generate_contextual_prompt(
+        self,
+        drill_type: str,
+        side: str,
+        tags_lost: List[str],
+        tags_gained: List[str],
+        tags_after_best: List[str],
+        tags_after_played: List[str],
+        move_san: Optional[str],
+        piece_blundered: Optional[str],
+        piece_best_move: Optional[str]
+    ) -> Tuple[str, str]:
+        """
+        Generate contextual question and hint based on tag transitions.
+        Returns (question, hint) tuple.
+        """
+        color = "White" if side == "white" else "Black"
+        question = ""
+        hint = ""
+        
+        # Check for missed opportunities (tag in best_move but not in played)
+        missed_tags = []
+        if tags_after_best and tags_after_played:
+            missed_tags = list(set(tags_after_best) - set(tags_after_played))
+        
+        # Priority 1: Lost tags (most common case for mistakes/blunders)
+        if tags_lost:
+            primary_tag = tags_lost[0]  # Use first lost tag
+            tag_display = primary_tag.replace("_", " ").title()
+            
+            if move_san:
+                question = f"{color} to move — You mistakenly played {move_san}, losing {tag_display}. Find the better move that maintains this advantage."
+            else:
+                question = f"{color} to move — Find the move that maintains {tag_display} (your move lost this advantage)."
+            
+            if piece_blundered and piece_best_move and piece_blundered != piece_best_move:
+                hint = f"💡 Consider moving your {piece_best_move} instead of your {piece_blundered}. The best move maintains {tag_display}."
+            else:
+                hint = f"💡 The best move maintains {tag_display} that your move lost."
+        
+        # Priority 2: Missed opportunities
+        elif missed_tags:
+            primary_tag = missed_tags[0]
+            tag_display = primary_tag.replace("_", " ").title()
+            
+            question = f"{color} to move — The best move would gain {tag_display}, but your move missed this opportunity. Find the move that secures this advantage."
+            
+            if piece_best_move:
+                hint = f"💡 Consider moving your {piece_best_move} to gain {tag_display}."
+            else:
+                hint = f"💡 The best move gains {tag_display}."
+        
+        # Priority 3: Gained tags (less common for errors, but still useful context)
+        elif tags_gained:
+            primary_tag = tags_gained[0]
+            tag_display = primary_tag.replace("_", " ").title()
+            
+            question = f"{color} to move — Find the best move (your move gained {tag_display}, but there may be a better option)."
+            hint = f"💡 Consider if there's a better way to gain {tag_display}."
+        
+        return (question, hint)
     
     def _generate_question(self, drill_type: str, side: str) -> str:
         """Generate question text for drill"""

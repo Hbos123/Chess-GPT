@@ -35,6 +35,13 @@ npm run dev
 
 The app will be available at `http://localhost:3000`
 
+## Dev Routes
+
+Use these dev-only pages to compare analytics overview UIs:
+
+- `http://localhost:3000/dev/analytics-overview-v1`
+- `http://localhost:3000/dev/analytics-overview-v2`
+
 ## Features
 
 ### Modes

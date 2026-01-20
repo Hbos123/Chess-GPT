@@ -17,3 +17,4 @@ ON DELETE CASCADE;
 COMMENT ON CONSTRAINT positions_from_game_id_fkey ON public.positions IS 
 'Foreign key with CASCADE delete: positions are automatically deleted when games are deleted';
 
+

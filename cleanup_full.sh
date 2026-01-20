@@ -74,3 +74,4 @@ echo "View backend logs: tail -f /tmp/chess_backend.log"
 
 
 
+

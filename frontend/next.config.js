@@ -3,7 +3,27 @@ const webpack = require('webpack');
 
 const nextConfig = {
   reactStrictMode: true,
+  /**
+   * Capacitor-friendly static output.
+   *
+   * When CAPACITOR_EXPORT=1:
+   * - Next will emit a static site into `frontend/out`
+   * - Capacitor `webDir` should point at `out`
+   *
+   * Note: Next "export" mode does NOT run Next server features (API routes, headers()).
+   * This app is primarily client-side and talks to the Python backend directly.
+   */
+  ...(process.env.CAPACITOR_EXPORT === "1"
+    ? {
+        output: "export",
+        trailingSlash: true,
+        images: { unoptimized: true },
+      }
+    : {}),
   // Enable SharedArrayBuffer for stockfish.wasm
+  // Disable source maps in production to avoid CORS issues
+  productionBrowserSourceMaps: false,
+  
   async headers() {
     return [
       {
@@ -42,6 +62,16 @@ const nextConfig = {
           {
             key: 'Cross-Origin-Resource-Policy',
             value: 'same-origin',
+          },
+        ],
+      },
+      {
+        // Allow source maps to load (for development)
+        source: '/_next/static/:path*',
+        headers: [
+          {
+            key: 'Access-Control-Allow-Origin',
+            value: '*',
           },
         ],
       },

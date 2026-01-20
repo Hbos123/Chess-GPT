@@ -21,4 +21,3 @@ WHERE accuracy_pct IS NOT NULL;
 -- Comments
 COMMENT ON COLUMN public.games.compressed_at IS 'Timestamp when game was compressed (full details removed, pattern data preserved).';
 COMMENT ON COLUMN public.positions.accuracy_pct IS 'Accuracy percentage for this position when analyzed (optional, may be null).';
-

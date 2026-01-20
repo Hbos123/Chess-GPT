@@ -1,0 +1,32 @@
+services:
+  - type: web
+    name: chess-gpt-backend
+    env: python
+    region: oregon  # Change to your preferred region (oregon, frankfurt, singapore, etc.)
+    buildCommand: |
+      pip install --upgrade pip
+      pip install -r requirements.txt
+      # Download Stockfish if not present (for Linux x64)
+      if [ ! -f stockfish ]; then
+        echo "Downloading Stockfish..."
+        wget -q https://github.com/official-stockfish/Stockfish/releases/download/sf_16/stockfish_16_linux_x64_avx2.zip -O stockfish.zip
+        unzip -q stockfish.zip
+        chmod +x stockfish_16_linux_x64_avx2/stockfish
+        mv stockfish_16_linux_x64_avx2/stockfish ./stockfish
+        rm -rf stockfish_16_linux_x64_avx2 stockfish.zip
+        echo "Stockfish downloaded and ready"
+      fi
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    plan: starter  # Change to 'standard' or 'pro' for production
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.0
+      - key: PORT
+        value: 10000  # Render sets this automatically, but good to have a default
+      # Add your environment variables in Render dashboard:
+      # - OPENAI_API_KEY
+      # - SUPABASE_URL
+      # - SUPABASE_SERVICE_ROLE_KEY
+      # - STOCKFISH_PATH (optional, defaults to ./stockfish)
+      # - ALLOWED_ORIGINS (optional, comma-separated list of allowed origins)

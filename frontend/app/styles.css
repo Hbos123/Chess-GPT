@@ -42,6 +42,11 @@
 
 html {
   font-size: 17px;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  overflow: hidden; /* CRITICAL: Prevent page-level scroll */
+  -webkit-text-size-adjust: 100%; /* Prevent iOS text size adjustment */
 }
 
 body {
@@ -51,6 +56,22 @@ body {
   font-size: 1rem;
   line-height: 1.7;
   transition: background-color var(--transition-fast), color var(--transition-fast);
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  overflow: hidden; /* CRITICAL: Prevent page-level scroll */
+  /* Safe area handled by .app-shell */
+  -webkit-text-size-adjust: 100%; /* Prevent iOS text size adjustment */
+  -webkit-tap-highlight-color: transparent; /* Remove tap highlight */
+}
+
+/* Prevent zoom on all inputs and textareas (iOS) */
+input,
+textarea,
+select {
+  font-size: 16px !important; /* iOS won't zoom if font-size is 16px or larger */
+  -webkit-text-size-adjust: 100%;
+  touch-action: manipulation; /* Prevent double-tap zoom */
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -60,6 +81,17 @@ body {
     transition-duration: 0ms !important;
     scroll-behavior: auto !important;
   }
+}
+
+/* PWA Safe Area Support */
+.app-root {
+  min-height: 100vh;
+  min-height: -webkit-fill-available;
+  /* IMPORTANT:
+     Safe-area padding is handled by per-screen shells (e.g. `.app-shell` in chatUI.css).
+     Leaving safe-area padding here creates "dead space" and pushes header/footer off-screen on iOS PWAs. */
+  padding: 0;
+  overflow: hidden;
 }
 
 /* App Layout */

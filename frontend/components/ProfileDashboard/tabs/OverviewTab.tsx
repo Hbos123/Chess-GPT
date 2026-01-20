@@ -1,10 +1,6 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import PhasePerformanceCard from "../components/PhasePerformanceCard";
-import PieceAccuracyCard from "../components/PieceAccuracyCard";
-import TagTransitionsCard from "../components/TagTransitionsCard";
-import TimeManagementCard from "../components/TimeManagementCard";
 
 interface OverviewTabProps {
   data: any;
@@ -28,12 +24,13 @@ export default function OverviewTab({ data, profileStatus, onOpenPersonalReview,
   const [validationError, setValidationError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   
-  // Detailed analytics state
-  const [detailedAnalytics, setDetailedAnalytics] = useState<any>(null);
-  const [loadingDetailed, setLoadingDetailed] = useState(false);
-  
   // Diagnostic insights caching
   const [diagnosticInsights, setDiagnosticInsights] = useState<any[] | null>(null);
+
+  // Lightweight overview snapshot (new Overview UI)
+  const [snapshot, setSnapshot] = useState<any | null>(null);
+  const [snapshotLoading, setSnapshotLoading] = useState(false);
+  const [snapshotError, setSnapshotError] = useState<string | null>(null);
   
   // Load linked accounts from profile overview
   useEffect(() => {
@@ -55,41 +52,46 @@ export default function OverviewTab({ data, profileStatus, onOpenPersonalReview,
     loadAccounts();
   }, [userId, backendBase]);
   
-  // Load detailed analytics (parallel with main analytics fetch)
-  useEffect(() => {
-    if (!userId || !backendBase) return;
-    
-    const loadDetailedAnalytics = async () => {
-      setLoadingDetailed(true);
-      try {
-        const baseUrl = backendBase.replace(/\/$/, "");
-        console.log(`[OverviewTab] Fetching detailed analytics from: ${baseUrl}/profile/analytics/${userId}/detailed`);
-        const response = await fetch(`${baseUrl}/profile/analytics/${userId}/detailed`, { cache: 'no-store' });
-        console.log(`[OverviewTab] Response status: ${response.status}`);
-        if (response.ok) {
-          const data = await response.json();
-          console.log(`[OverviewTab] Received detailed analytics:`, data);
-          setDetailedAnalytics(data);
-        } else {
-          const errorText = await response.text();
-          console.error(`[OverviewTab] Failed to load detailed analytics: ${response.status} - ${errorText}`);
-        }
-      } catch (e) {
-        console.error("[OverviewTab] Failed to load detailed analytics:", e);
-      } finally {
-        setLoadingDetailed(false);
-      }
-    };
-    
-    loadDetailedAnalytics();
-  }, [userId, backendBase]);
-  
   // Cache diagnostic insights
   useEffect(() => {
     if (data?.strength_profile?.diagnostic_insights && Array.isArray(data.strength_profile.diagnostic_insights)) {
       setDiagnosticInsights(data.strength_profile.diagnostic_insights);
     }
   }, [data?.strength_profile?.diagnostic_insights]);
+
+  // Fetch lightweight snapshot for the new Overview layout
+  useEffect(() => {
+    if (!userId || !backendBase) return;
+    let cancelled = false;
+
+    const loadSnapshot = async () => {
+      setSnapshotLoading(true);
+      setSnapshotError(null);
+      try {
+        const baseUrl = backendBase.replace(/\/$/, "");
+        const url = `${baseUrl}/profile/overview/snapshot?user_id=${userId}&limit=60`;
+        const res = await fetch(url, { cache: "no-store" });
+        if (!res.ok) {
+          const t = await res.text();
+          throw new Error(`${res.status} ${t}`);
+        }
+        const payload = await res.json();
+        if (!cancelled) setSnapshot(payload);
+      } catch (e: any) {
+        if (!cancelled) {
+          setSnapshot(null);
+          setSnapshotError(e?.message || "Failed to load snapshot");
+        }
+      } finally {
+        if (!cancelled) setSnapshotLoading(false);
+      }
+    };
+
+    loadSnapshot();
+    return () => {
+      cancelled = true;
+    };
+  }, [userId, backendBase]);
   
   // Validate account before adding
   const validateAccount = async (username: string, platform: "chess.com" | "lichess"): Promise<boolean> => {
@@ -513,309 +515,154 @@ export default function OverviewTab({ data, profileStatus, onOpenPersonalReview,
         )}
       </div>
 
-      {isComputing && (
-        <div style={{ 
-          padding: '12px 16px', 
-          background: '#1e3a5f', 
-          borderRadius: '8px', 
-          marginBottom: '24px',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '12px'
-        }}>
-          <div className="spinner" style={{ width: '16px', height: '16px', borderWidth: '2px', margin: 0 }}></div>
-          <span style={{ fontSize: '14px', color: '#93c5fd' }}>
-            Computing analytics... This page will update automatically.
-          </span>
-        </div>
-      )}
-      
-      {hasError && (
-        <div className="error-message" style={{ marginBottom: '24px' }}>
-          <p>Error loading analytics: {data.error}</p>
-        </div>
-      )}
-
-      {/* Rolling window (last 60) snapshot - show even if computing or no data */}
-      {(rolling_window?.status === "ok" || rolling_window?.status === "computing" || !rolling_window?.status) && (
-        <div className="tab-section">
-          <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
-            <div>
-              <h2 style={{ marginBottom: 6 }}>Last {rolling_window.window || 60} Games</h2>
-              <div style={{ opacity: 0.85 }}>
-                Rolling snapshot (auto-updated): performance, patterns, and critical positions.
-              </div>
-            </div>
-            {onOpenPersonalReview && (
-              <button
-                type="button"
-                onClick={onOpenPersonalReview}
-                className="generate-training-btn"
-                style={{ whiteSpace: "nowrap" }}
-              >
-                Personal Review
-              </button>
-            )}
-          </div>
-
-          <div className="stats-grid" style={{ marginTop: 12 }}>
-            <div className="stat-card">
-              <span className="stat-label">Avg accuracy</span>
-              <span className="stat-value">
-                {typeof rolling_window?.avg_accuracy === "number" ? `${rolling_window.avg_accuracy}%` : "---"}
-                {typeof deltas?.accuracy_delta === "number" ? (
-                  <span style={{ marginLeft: 8, fontSize: 12, opacity: 0.8 }}>
-                    ({deltas.accuracy_delta >= 0 ? "+" : ""}{deltas.accuracy_delta} vs lifetime)
-                  </span>
-                ) : null}
-              </span>
-            </div>
-            <div className="stat-card">
-              <span className="stat-label">Win rate</span>
-              <span className="stat-value">
-                {typeof rolling_window?.win_rate === "number" ? `${rolling_window.win_rate}%` : "---"}
-                {typeof deltas?.win_rate_delta === "number" ? (
-                  <span style={{ marginLeft: 8, fontSize: 12, opacity: 0.8 }}>
-                    ({deltas.win_rate_delta >= 0 ? "+" : ""}{deltas.win_rate_delta} vs lifetime)
-                  </span>
-                ) : null}
-              </span>
-            </div>
-            <div className="stat-card">
-              <span className="stat-label">Time style</span>
-              <span className="stat-value">
-                {rolling_window?.patterns?.time_management?.time_usage_style
-                  ? String(rolling_window.patterns.time_management.time_usage_style).toUpperCase()
-                  : "---"}
-              </span>
-            </div>
-            <div className="stat-card">
-              <span className="stat-label">Clutch (last 10 plies)</span>
-              <span className="stat-value">
-                {typeof rolling_window?.patterns?.clutch_performance === "number"
-                  ? `${rolling_window.patterns.clutch_performance}%`
-                  : "---"}
-              </span>
-            </div>
-          </div>
-
-          {Array.isArray(rolling_window?.critical_positions) && rolling_window.critical_positions.length > 0 && (
-            <div style={{ marginTop: 16 }}>
-              <h3 style={{ marginBottom: 8 }}>Critical Positions (Last {rolling_window.window || 60})</h3>
-              <div style={{ display: "grid", gap: 8 }}>
-                {rolling_window.critical_positions.slice(0, 6).map((p: any, idx: number) => (
-                  <div
-                    key={`${p.game_id || "g"}-${idx}`}
-                    className="stat-card"
-                    style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}
-                  >
-                    <div style={{ display: "grid", gap: 2 }}>
-                      <div style={{ fontWeight: 600 }}>
-                        {p.category?.toUpperCase?.() || "CRITICAL"} • {p.san}
-                      </div>
-                      <div style={{ opacity: 0.8, fontSize: 12 }}>
-                        {typeof p.cp_loss === "number" ? `≈${p.cp_loss}cp` : ""}{p.game_date ? ` • ${String(p.game_date).slice(0, 10)}` : ""}
-                      </div>
-                    </div>
-                    <div style={{ fontFamily: "monospace", fontSize: 10, opacity: 0.7, maxWidth: 280, textAlign: "right" }}>
-                      {typeof p.fen_before === "string" ? p.fen_before.slice(0, 48) + "…" : ""}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {onOpenPersonalReview && (
-        <div className="tab-section" style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center' }}>
-          <div>
-            <h2 style={{ marginBottom: 6 }}>Personal Review</h2>
-            <div style={{ opacity: 0.85 }}>
-              Link accounts, fetch games, and run the 60-game rolling analysis.
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={onOpenPersonalReview}
-            className="generate-training-btn"
-            style={{ whiteSpace: 'nowrap' }}
-          >
-            Open Personal Review
-          </button>
-        </div>
-      )}
-
       <div className="tab-section">
-        <h2>At a Glance</h2>
+        <h2>Rating Context</h2>
         <div className="stats-grid">
           <div className="stat-card">
-            <span className="stat-label">Peak Rating</span>
-            <span className="stat-value">{lifetime_stats?.peak_rating || '---'}</span>
-          </div>
-          <div className="stat-card">
-            <span className="stat-label">Win Rate</span>
-            <span className="stat-value">
-              {lifetime_stats?.win_rates?.blitz?.win_rate || 
-               lifetime_stats?.win_rates?.rapid?.win_rate || '---'}%
-            </span>
-          </div>
-          <div className="stat-card">
-            <span className="stat-label">Best Win Streak</span>
-            <span className="stat-value">{lifetime_stats?.best_win_streak || 0}</span>
+            <span className="stat-label">Current Rating</span>
+            <span className="stat-value">{snapshot?.rating?.current ?? "---"}</span>
           </div>
           <div className="stat-card">
             <span className="stat-label">Trend</span>
-            <span className={`stat-value stat-trend ${lifetime_stats?.improvement_velocity?.trend || 'stable'}`}>
-              {lifetime_stats?.improvement_velocity?.trend?.toUpperCase() || 'STABLE'}
+            <span className="stat-value">
+              {snapshot?.rating?.trend === "up"
+                ? "↑ Improving"
+                : snapshot?.rating?.trend === "down"
+                ? "↓ Declining"
+                : snapshot?.rating?.trend === "stable"
+                ? "→ Stable"
+                : "—"}
             </span>
           </div>
         </div>
       </div>
 
       <div className="tab-section">
-        <h2>Diagnostic Insights</h2>
-        <div className="insights-grid">
-          {diagnosticInsights && diagnosticInsights.length > 0 ? (
-            diagnosticInsights.slice(0, 6).map((insight: any, idx: number) => (
-              <div key={idx} className={`insight-card ${insight.relevance_score > 15 ? 'high-relevance' : ''}`}>
-                <div className="insight-header">
-                  <span className="insight-tag">{insight.tag.replace('tag.', '').replace('.', ' ')}</span>
-                  <span className="insight-score">{Math.round(insight.relevance_score * 10) / 10} Relevance</span>
-                </div>
-                <div className="insight-body">
-                  <span className={`insight-accuracy ${insight.tag_avg > 75 ? 'good' : 'poor'}`}>
-                    {Math.round(insight.tag_avg)}% Accuracy
-                  </span>
-                  <span className="insight-count">{insight.tag_count} occurrences</span>
-                </div>
-                <div className="insight-label">
-                  {insight.tag_avg > 80 ? '🌟 Significant Strength' : 
-                   insight.tag_avg < 65 ? '⚠️ Critical Weakness' : '📈 Area for Improvement'}
-                </div>
-              </div>
-            ))
-          ) : (
-            <div className="no-data-placeholder">Complete more games to unlock diagnostic insights.</div>
-          )}
-        </div>
-      </div>
-
-      <div className="tab-section">
-        <h2>Strengths & Weaknesses</h2>
+        <h2>Player Snapshot</h2>
         <div className="stats-grid">
+          <div className="stat-card">
+            <span className="stat-label">Time Style</span>
+            <span className="stat-value">{snapshot?.time_style?.label ?? "---"}</span>
+          </div>
           <div className="stat-card highlight-card green">
             <span className="stat-label">Top Strength</span>
             <span className="stat-value">
-              {strength_profile?.phase_proficiency?.opening > 80 ? 'Opening Mastery' : 
-               strength_profile?.tactical_accuracy > 85 ? 'Tactical Sharpness' : 'Consistent Play'}
+              {snapshot?.identity?.note ? `Emerging Pattern: ${snapshot?.identity?.top_strength}` : snapshot?.identity?.top_strength ?? "---"}
             </span>
           </div>
           <div className="stat-card highlight-card red">
             <span className="stat-label">Focus Area</span>
             <span className="stat-value">
-              {strength_profile?.phase_proficiency?.endgame < 70 ? 'Endgame Technique' : 
-               strength_profile?.positional_accuracy < 75 ? 'Positional Strategy' : 'Time Management'}
+              {snapshot?.identity?.note ? `Emerging Pattern: ${snapshot?.identity?.focus_area}` : snapshot?.identity?.focus_area ?? "---"}
             </span>
           </div>
         </div>
       </div>
 
       <div className="tab-section">
-        <h2>Recent Performance</h2>
-        <div className="repertoire-list">
-          {patterns?.opening_repertoire?.length > 0 ? (
-            patterns.opening_repertoire.slice(0, 3).map((opening: any, idx: number) => (
-              <div key={idx} className="repertoire-item">
-                <div className="opening-main">
-                  <span className="opening-name">{opening.name}</span>
-                  <span className="opening-eco">{opening.eco}</span>
-                </div>
-                <div className="opening-stats">
-                  <span className={`win-rate ${opening.win_rate >= 50 ? 'positive' : 'negative'}`}>
-                    {opening.win_rate}% WR
-                  </span>
-                  <span className="frequency">{opening.frequency} games</span>
-                </div>
-              </div>
-            ))
-          ) : (
-            <div className="no-data-placeholder">Analyze more games to see your repertoire performance.</div>
-          )}
+        <h2>Openings Snapshot</h2>
+        <div className="stats-grid">
+          <div className="stat-card">
+            <span className="stat-label">As White</span>
+            <span className="stat-value">
+              {snapshot?.openings?.as_white?.name
+                ? `${snapshot.openings.as_white.name} (${snapshot.openings.as_white.pct ?? 0}%)`
+                : "---"}
+            </span>
+          </div>
+          <div className="stat-card">
+            <span className="stat-label">As Black (Faced)</span>
+            <span className="stat-value">
+              {snapshot?.openings?.as_black_faced?.name
+                ? `${snapshot.openings.as_black_faced.name} (${snapshot.openings.as_black_faced.pct ?? 0}%)`
+                : "---"}
+            </span>
+          </div>
         </div>
       </div>
 
-      {/* Detailed Analytics Section */}
       <div className="tab-section">
-        <h2>Detailed Analytics</h2>
-        {loadingDetailed ? (
-          <div style={{ padding: '20px', textAlign: 'center', color: '#93c5fd' }}>
-            Loading detailed analytics...
+        <h2>Streak & Momentum</h2>
+        <div className="stats-grid">
+          <div className="stat-card">
+            <span className="stat-label">Best Win Streak</span>
+            <span className="stat-value">{snapshot?.momentum?.best_win_streak ?? 0}</span>
           </div>
-        ) : detailedAnalytics ? (
-            <>
-              {detailedAnalytics.phase_analytics && (
-                <PhasePerformanceCard phaseAnalytics={detailedAnalytics.phase_analytics} />
-              )}
-              
-              {detailedAnalytics.opening_detailed && Object.keys(detailedAnalytics.opening_detailed).length > 0 && (
-                <div style={{
-                  padding: '20px',
-                  background: '#1e3a5f',
-                  borderRadius: '8px',
-                  border: '1px solid rgba(147, 197, 253, 0.2)',
-                  marginBottom: '20px'
-                }}>
-                  <h3 style={{ margin: '0 0 16px 0', fontSize: '18px', fontWeight: 600, color: '#e0e7ff' }}>
-                    Opening Repertoire
-                  </h3>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                    {Object.entries(detailedAnalytics.opening_detailed)
-                      .slice(0, 5)
-                      .map(([opening, data]: [string, any]) => (
-                        <div key={opening} style={{
-                          padding: '12px',
-                          background: 'rgba(59, 130, 246, 0.1)',
-                          borderRadius: '6px',
-                          border: '1px solid rgba(147, 197, 253, 0.2)'
-                        }}>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                            <span style={{ fontSize: '14px', fontWeight: 600, color: '#93c5fd' }}>
-                              {opening}
-                            </span>
-                            <span style={{ fontSize: '14px', fontWeight: 600, color: '#e0e7ff' }}>
-                              {data.avg_accuracy.toFixed(1)}% accuracy
-                            </span>
-                          </div>
-                          <div style={{ display: 'flex', gap: '16px', fontSize: '12px', color: '#cbd5e1' }}>
-                            <span>Frequency: {data.frequency}</span>
-                            <span>Win Rate: {(data.win_rate * 100).toFixed(1)}%</span>
-                            <span>Wins: {data.wins}</span>
-                            <span>Losses: {data.losses}</span>
-                            {data.draws > 0 && <span>Draws: {data.draws}</span>}
-                          </div>
-                        </div>
-                      ))}
-                  </div>
-                </div>
-              )}
-              
-              {detailedAnalytics.piece_accuracy_detailed && (
-                <PieceAccuracyCard pieceData={detailedAnalytics.piece_accuracy_detailed} />
-              )}
-              
-              {detailedAnalytics.tag_transitions && (
-                <TagTransitionsCard tagTransitions={detailedAnalytics.tag_transitions} />
-              )}
-              
-              {detailedAnalytics.time_buckets && Object.keys(detailedAnalytics.time_buckets).length > 0 && (
-                <TimeManagementCard timeBuckets={detailedAnalytics.time_buckets} />
-              )}
-            </>
+          <div className="stat-card">
+            <span className="stat-label">Current Form</span>
+            <span className="stat-value">
+              {typeof snapshot?.momentum?.wins_last_5 === "number" ? `${snapshot.momentum.wins_last_5} wins in last 5` : "---"}
+            </span>
+          </div>
+        </div>
+
+        {Array.isArray(snapshot?.momentum?.results_last_10) && snapshot.momentum.results_last_10.length > 0 && (
+          <div style={{ marginTop: 12, display: "flex", gap: 6, flexWrap: "wrap" }}>
+            {snapshot.momentum.results_last_10.map((r: string, idx: number) => (
+              <span
+                key={idx}
+                style={{
+                  padding: "4px 8px",
+                  borderRadius: 999,
+                  fontSize: 12,
+                  background:
+                    r === "win" ? "rgba(16, 185, 129, 0.2)" : r === "loss" ? "rgba(239, 68, 68, 0.2)" : "rgba(148, 163, 184, 0.2)",
+                  color: r === "win" ? "#10b981" : r === "loss" ? "#ef4444" : "#cbd5e1",
+                  border: "1px solid rgba(147, 197, 253, 0.15)",
+                }}
+              >
+                {r === "win" ? "W" : r === "loss" ? "L" : r === "draw" ? "D" : "?"}
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Personal Review Section - Moved to bottom */}
+      <div className="tab-section">
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", marginBottom: 12 }}>
+          <div>
+            <h2 style={{ margin: 0, fontSize: "18px" }}>Personal Review</h2>
+            <div style={{ fontSize: "13px", color: "#cbd5e1", marginTop: 4 }}>
+              Ask for a tailored personal review based on any number of recent games
+            </div>
+          </div>
+          {onOpenPersonalReview && (
+            <button
+              type="button"
+              onClick={onOpenPersonalReview}
+              className="generate-training-btn"
+              style={{ whiteSpace: "nowrap" }}
+            >
+              Personal Review
+            </button>
+          )}
+        </div>
+
+        {snapshotError && (
+          <div className="error-message" style={{ marginTop: 12 }}>
+            <p>Failed to load snapshot: {snapshotError}</p>
+          </div>
+        )}
+
+        {snapshotLoading && !snapshot ? (
+          <div style={{ padding: "20px", textAlign: "center", color: "#93c5fd" }}>
+            Loading snapshot...
+          </div>
         ) : (
-          <div style={{ padding: '20px', textAlign: 'center', color: '#9ca3af' }}>
-            No detailed analytics data available yet. Analyze more games to see detailed metrics.
+          <div className="stats-grid" style={{ marginTop: 12 }}>
+            <div className="stat-card">
+              <span className="stat-label">Games Analyzed</span>
+              <span className="stat-value">{snapshot?.games_analyzed ?? 0}/{snapshot?.window ?? 60}</span>
+            </div>
+            <div className="stat-card">
+              <span className="stat-label">Record</span>
+              <span className="stat-value">
+                {snapshot?.record
+                  ? `${snapshot.record.wins}W – ${snapshot.record.draws}D – ${snapshot.record.losses}L`
+                  : "---"}
+              </span>
+            </div>
           </div>
         )}
       </div>

@@ -16,12 +16,13 @@ export type LoadedGamePayload = {
 interface LoadGamePanelProps {
   onLoad: (payload: LoadedGamePayload) => void;
   onClose: () => void;
+  initialTab?: 'pgn' | 'fen' | 'link' | 'lookup' | 'photo';
 }
 
 type LookupGame = LookupGameSummary;
 
-export default function LoadGamePanel({ onLoad, onClose }: LoadGamePanelProps) {
-  const [activeTab, setActiveTab] = useState<'pgn' | 'fen' | 'link' | 'lookup' | 'photo'>('pgn');
+export default function LoadGamePanel({ onLoad, onClose, initialTab = 'pgn' }: LoadGamePanelProps) {
+  const [activeTab, setActiveTab] = useState<'pgn' | 'fen' | 'link' | 'lookup' | 'photo'>(initialTab);
   const [pgnInput, setPgnInput] = useState('');
   const [fenInput, setFenInput] = useState('');
   const [linkInput, setLinkInput] = useState('');

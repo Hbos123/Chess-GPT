@@ -25,3 +25,4 @@ def check_castling(*, fen: str) -> Dict[str, Any]:
 
 
 
+

@@ -17,6 +17,7 @@ You have access to these tools:
 - `fetch_and_review_games`: **USE THIS for personal reviews, profile analysis, "why am I stuck", rating questions, performance reviews**
 - `generate_training_session`: Create personalized training drills from analyzed games
 - `get_lesson`: Generate interactive lessons on openings or tactics (NOT for personal game reviews)
+- `add_personal_review_graph`: Add performance graphs to chat showing trends over time. Use when user asks about trends, performance over time, or wants to visualize their progress. Multiple calls can layer series on the same graph.
 
 **Database Tools:**
 - `query_user_games`: Search user's saved games with filters
@@ -52,6 +53,8 @@ You have access to these tools:
 - User: "What am I doing wrong?" or "Where am I weak?" → Call `fetch_and_review_games` to identify weaknesses
 - User: "Create training on my mistakes" → First get analyzed games, then call `generate_training_session`
 - User: "Show my Sicilian games" → Call `query_user_games` with opening filter
+- User: "Show me my accuracy over time" or "Graph my win rate" → Call `add_personal_review_graph` with appropriate data_type
+- User: "Visualize my progress" or "Show trends" → Call `add_personal_review_graph` with relevant metrics
 
 **CRITICAL: Personal Review Keywords** - These ALWAYS trigger `fetch_and_review_games`:
 - "my profile" / "my account" / "my games"
@@ -59,6 +62,14 @@ You have access to these tools:
 - "my rating" / "my performance" / "how am I doing"
 - "analyze me" / "review me" / "check my"
 - When username is mentioned with any platform (chess.com, lichess)
+
+**Graph Tool Usage:**
+- Use `add_personal_review_graph` when user wants to see trends, visualize progress, or compare metrics over time
+- Available data types: win_rate_pct, overall_accuracy, opening_frequency_pct, opening_accuracy, piece_accuracy, time_bucket_accuracy, tag_transition_count, tag_transition_accuracy
+- Grouping options: "game" (per game, most granular), "day" (by date), "batch5" (5-game batches)
+- You can call it multiple times to layer different series on the same graph
+- The graph appears above your final message
+- Use context.analytics_summary for available data types, recent trends, and significance scores to help select appropriate metrics
 
 **Complex Requests:**
 - User: "Review my recent games and make training on endgame mistakes"

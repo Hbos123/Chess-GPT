@@ -55,3 +55,4 @@ COMMENT ON TABLE public.pattern_snapshots IS 'Daily aggregated patterns per user
 COMMENT ON COLUMN public.pattern_snapshots.snapshot_date IS 'Date of pattern aggregation (enforces minimum 1-day window)';
 COMMENT ON COLUMN public.pattern_snapshots.pattern_type IS 'Type of pattern: current (active games) or historical (compressed games)';
 
+

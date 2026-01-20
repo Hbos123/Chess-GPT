@@ -53,6 +53,7 @@ export default function PhasePerformanceCard({ phaseAnalytics }: PhasePerformanc
       title="Phase Performance"
       significanceScore={overallSignificance}
       trendData={trendData}
+      hideControls={true}
     >
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px' }}>
         {phases.map((phase) => {

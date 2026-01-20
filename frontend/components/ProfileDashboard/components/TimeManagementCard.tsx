@@ -36,7 +36,7 @@ export default function TimeManagementCard({ timeBuckets }: TimeManagementCardPr
 
   if (buckets.length === 0) {
     return (
-      <ExpandableAnalyticsCard title="Time Management Performance">
+      <ExpandableAnalyticsCard title="Time Management Performance" hideControls={true}>
         <p style={{ color: '#cbd5e1', fontSize: '14px' }}>No time management data available yet.</p>
       </ExpandableAnalyticsCard>
     );
@@ -81,6 +81,7 @@ export default function TimeManagementCard({ timeBuckets }: TimeManagementCardPr
       title="Time Management Performance"
       significanceScore={overallSignificance}
       trendData={trendData}
+      hideControls={true}
     >
       
       {/* Best/Worst Highlights */}

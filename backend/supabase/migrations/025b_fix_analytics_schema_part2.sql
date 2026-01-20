@@ -245,3 +245,4 @@ COMMENT ON FUNCTION public.get_lifetime_stats_v4 IS 'V4: Works with existing gam
 COMMENT ON FUNCTION public.get_advanced_patterns_v4 IS 'V4: Works with existing games table schema, no moves_raw dependency';
 COMMENT ON FUNCTION public.get_strength_profile_v4 IS 'V4: Works with existing games table schema using game_review JSONB (optimized)';
 
+

@@ -157,3 +157,4 @@ Supabase uses different hostnames for different services:
 
 Network/DNS issues can affect one but not the other. The pooler often works when direct connection doesn't.
 
+

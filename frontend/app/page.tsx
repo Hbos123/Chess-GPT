@@ -59,7 +59,6 @@ import "../styles/chatUI.css";
 import "./styles.css";
 
 const INITIAL_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
-const BACKEND_BASE = getBackendBase();
 const MAX_BOARD_TABS = 5;
 const LESSON_ARROW_COLORS = {
   main: "rgba(34, 139, 34, 0.7)", // Dark semi-transparent green
@@ -69,12 +68,36 @@ const LESSON_ARROW_COLORS = {
 
 function HomeInner() {
   const searchParams = useSearchParams();
-  const isMobileMode = searchParams.get('mobile') === 'true';
-  
+  const mobileParam = searchParams.get("mobile");
+  const [autoMobileMode, setAutoMobileMode] = useState(false);
+
+  useEffect(() => {
+    // If URL explicitly forces mobile mode, don't auto-detect.
+    if (mobileParam === "true" || mobileParam === "false") return;
+    if (typeof window === "undefined") return;
+
+    const mq = window.matchMedia("(max-width: 768px)");
+    const update = () => setAutoMobileMode(mq.matches);
+
+    update();
+
+    // Safari < 14 fallback
+    if (typeof mq.addEventListener === "function") {
+      mq.addEventListener("change", update);
+      return () => mq.removeEventListener("change", update);
+    }
+
+    mq.addListener(update);
+    return () => mq.removeListener(update);
+  }, [mobileParam]);
+
+  const isMobileMode =
+    mobileParam === "true" ? true : mobileParam === "false" ? false : autoMobileMode;
+
   return <Home isMobileMode={isMobileMode} />;
 }
 
-function Home({ isMobileMode = false }: { isMobileMode?: boolean }) {
+function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
   // Rotating placeholder text for hero composer
   const { text: rotatingPlaceholder, isVisible: placeholderVisible } = useRotatingPlaceholder();
   
@@ -157,21 +180,30 @@ function Home({ isMobileMode = false }: { isMobileMode?: boolean }) {
 
   // Stable per-tab session id for backend-side LLM prefix caching.
   // Use sessionStorage (tab-scoped) to avoid collisions across tabs.
-  const [sessionId] = useState<string>(() => {
+  // Use useEffect to avoid hydration mismatch - only generate on client
+  const [sessionId, setSessionId] = useState<string>("");
+  
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    
     try {
       const key = "chessgpt_session_id";
-      const existing = typeof window !== "undefined" ? window.sessionStorage.getItem(key) : null;
-      if (existing) return existing;
+      const existing = window.sessionStorage.getItem(key);
+      if (existing) {
+        setSessionId(existing);
+        return;
+      }
       const id =
         typeof crypto !== "undefined" && "randomUUID" in crypto
           ? crypto.randomUUID()
           : `sess_${Date.now()}_${Math.random().toString(16).slice(2)}`;
-      if (typeof window !== "undefined") window.sessionStorage.setItem(key, id);
-      return id;
+      window.sessionStorage.setItem(key, id);
+      setSessionId(id);
     } catch {
-      return `sess_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+      const id = `sess_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+      setSessionId(id);
     }
-  });
+  }, []);
   
   // Lesson system state
   const [showLessonBuilder, setShowLessonBuilder] = useState(false);
@@ -1319,7 +1351,7 @@ function Home({ isMobileMode = false }: { isMobileMode?: boolean }) {
   // ==========================================
 
   // NEW: ChatGPT-style UI state
-  const [isFirstMessage, setIsFirstMessage] = useState(true);
+  const [isFirstMessage, setIsFirstMessage] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [showLoadGame, setShowLoadGame] = useState(false);
   const [boardDockOpen, setBoardDockOpen] = useState(false);
@@ -1328,6 +1360,8 @@ function Home({ isMobileMode = false }: { isMobileMode?: boolean }) {
   const [isLegacyReviewing, setIsLegacyReviewing] = useState(false);
   const [showAuthModal, setShowAuthModal] = useState(false);
   const pendingOpeningLessonQueryRef = useRef<string | undefined>(undefined);
+  const [pendingImage, setPendingImage] = useState<{ data: string; filename: string; mimeType: string } | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleShowBoardFromMessage = useCallback((payload?: {
     finalPgn?: string;
@@ -1443,7 +1477,7 @@ function Home({ isMobileMode = false }: { isMobileMode?: boolean }) {
     try {
       // Query the current position for candidate moves
       const response = await fetch(
-        `${BACKEND_BASE}/analyze_position?fen=${encodeURIComponent(fenToUse)}&lines=4&depth=16`
+        `${getBackendBase()}/analyze_position?fen=${encodeURIComponent(fenToUse)}&lines=4&depth=16`
       );
       if (!response.ok) {
         console.warn("[OPENING] Failed to query position for arrows");
@@ -1554,7 +1588,7 @@ function Home({ isMobileMode = false }: { isMobileMode?: boolean }) {
         setWaitingForEngine(true);
 
         const engineResponse = await fetch(
-          `${BACKEND_BASE}/analyze_position?fen=${encodeURIComponent(positionAfterPlayer)}&lines=4&depth=16`
+          `${getBackendBase()}/analyze_position?fen=${encodeURIComponent(positionAfterPlayer)}&lines=4&depth=16`
         );
         if (!engineResponse.ok) {
           console.error("[OPENING] analyze_position failed:", engineResponse.status);
@@ -1577,7 +1611,7 @@ function Home({ isMobileMode = false }: { isMobileMode?: boolean }) {
             const firstMoveSan = candidates[0]?.move || candidates[0]?.san;
             if (firstMoveSan) {
               const firstMoveResponse = await fetch(
-                `${BACKEND_BASE}/check_opening_move?fen=${encodeURIComponent(positionAfterPlayer)}&move_san=${firstMoveSan}&lesson_id=${lessonId}`,
+                `${getBackendBase()}/check_opening_move?fen=${encodeURIComponent(positionAfterPlayer)}&move_san=${firstMoveSan}&lesson_id=${lessonId}`,
                 { method: "POST" }
               );
               if (firstMoveResponse.ok) {
@@ -1673,7 +1707,7 @@ function Home({ isMobileMode = false }: { isMobileMode?: boolean }) {
         try {
           // Analyze the position after AI's move to get player's options
           const playerOptionsResponse = await fetch(
-            `${BACKEND_BASE}/analyze_position?fen=${encodeURIComponent(positionAfterAI)}&lines=4&depth=16`
+            `${getBackendBase()}/analyze_position?fen=${encodeURIComponent(positionAfterAI)}&lines=4&depth=16`
           );
           if (playerOptionsResponse.ok) {
             const playerOptionsAnalysis = await playerOptionsResponse.json();
@@ -1690,7 +1724,7 @@ function Home({ isMobileMode = false }: { isMobileMode?: boolean }) {
                 if (!moveSan) return null;
                 try {
                   const explorerResponse = await fetch(
-                    `${BACKEND_BASE}/check_opening_move?fen=${encodeURIComponent(positionAfterAI)}&move_san=${moveSan}&lesson_id=${lessonId}`,
+                    `${getBackendBase()}/check_opening_move?fen=${encodeURIComponent(positionAfterAI)}&move_san=${moveSan}&lesson_id=${lessonId}`,
                     { method: "POST" }
                   );
                   if (explorerResponse.ok) {
@@ -1916,28 +1950,31 @@ function Home({ isMobileMode = false }: { isMobileMode?: boolean }) {
   const [currentThreadId, setCurrentThreadId] = useState<string | null>(null);
   type LayoutSizes = { board: number; load: number; chat: number };
   const defaultLayoutSizes: LayoutSizes = { board: 0.275, load: 0.2, chat: 0.525 };
-  const [layoutSizes, setLayoutSizes] = useState<LayoutSizes>(() => {
-    if (typeof window !== "undefined") {
-      try {
-        const stored = window.localStorage.getItem("cg_layout_sizes");
-        if (stored) {
-          const parsed = JSON.parse(stored);
-          if (
-            typeof parsed?.board === "number" &&
-            typeof parsed?.load === "number" &&
-            typeof parsed?.chat === "number"
-          ) {
-            return parsed;
-          }
+  const [layoutSizes, setLayoutSizes] = useState<LayoutSizes>(defaultLayoutSizes);
+  
+  // Load layout sizes from localStorage on client only to avoid hydration mismatch
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const stored = window.localStorage.getItem("cg_layout_sizes");
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (
+          typeof parsed?.board === "number" &&
+          typeof parsed?.load === "number" &&
+          typeof parsed?.chat === "number"
+        ) {
+          setLayoutSizes(parsed);
         }
-      } catch (err) {
-        console.warn("Failed to load layout sizes:", err);
       }
+    } catch (err) {
+      console.warn("Failed to load layout sizes:", err);
     }
-    return defaultLayoutSizes;
-  });
+  }, []);
   type DragType = "board-load" | "load-chat" | "board-chat";
-  const [dragState, setDragState] = useState<null | { type: DragType; startX: number; sizes: LayoutSizes }>(null);
+  const [dragState, setDragState] = useState<
+    null | { type: DragType; axis: "x" | "y"; start: number; sizes: LayoutSizes }
+  >(null);
   const layoutRef = useRef<HTMLDivElement | null>(null);
   const { user, loading: authLoading, signOut } = useAuth();
   const authUserEmail = user?.email ?? null;
@@ -2156,10 +2193,18 @@ function Home({ isMobileMode = false }: { isMobileMode?: boolean }) {
   useEffect(() => {
     if (!dragState) return;
     const MIN = { board: 0.18, load: 0.12, chat: 0.22 };
-    const handleMove = (event: MouseEvent) => {
+    const handleMove = (event: PointerEvent | MouseEvent) => {
       if (!layoutRef.current) return;
-      const containerWidth = layoutRef.current.clientWidth || window.innerWidth || 1;
-      const deltaRatio = (event.clientX - dragState.startX) / containerWidth;
+      const axis = dragState.axis;
+      const containerSize =
+        axis === "y"
+          ? (layoutRef.current.clientHeight || window.innerHeight || 1)
+          : (layoutRef.current.clientWidth || window.innerWidth || 1);
+      const currentCoord =
+        axis === "y"
+          ? ("clientY" in event ? event.clientY : 0)
+          : ("clientX" in event ? event.clientX : 0);
+      const deltaRatio = (currentCoord - dragState.start) / containerSize;
       const { board: startBoard, load: startLoad, chat: startChat } = dragState.sizes;
       if (dragState.type === "board-load") {
         const groupTotal = startBoard + startLoad;
@@ -2197,11 +2242,13 @@ function Home({ isMobileMode = false }: { isMobileMode?: boolean }) {
       }
     };
     const handleUp = () => setDragState(null);
-    window.addEventListener("mousemove", handleMove);
-    window.addEventListener("mouseup", handleUp);
+    window.addEventListener("pointermove", handleMove as any);
+    window.addEventListener("pointerup", handleUp);
+    window.addEventListener("pointercancel", handleUp);
     return () => {
-      window.removeEventListener("mousemove", handleMove);
-      window.removeEventListener("mouseup", handleUp);
+      window.removeEventListener("pointermove", handleMove as any);
+      window.removeEventListener("pointerup", handleUp);
+      window.removeEventListener("pointercancel", handleUp);
     };
   }, [dragState]);
 
@@ -2212,10 +2259,23 @@ function Home({ isMobileMode = false }: { isMobileMode?: boolean }) {
   const boardChatTotal = layoutSizes.board + layoutSizes.chat || 1;
   const boardFraction = boardDockOpen ? (layoutSizes.board / boardChatTotal) : 0;
   const chatFraction = boardDockOpen ? (layoutSizes.chat / boardChatTotal) : 1;
-  const beginDrag = (type: DragType, event: ReactMouseEvent<HTMLDivElement>) => {
+  const beginDrag = (
+    type: DragType,
+    axis: "x" | "y",
+    event: React.PointerEvent<HTMLDivElement> | ReactMouseEvent<HTMLDivElement>
+  ) => {
     event.preventDefault();
     event.stopPropagation();
-    setDragState({ type, startX: event.clientX, sizes: layoutSizes });
+    const pointerEvent = event as React.PointerEvent<HTMLDivElement>;
+    try {
+      if (typeof pointerEvent.pointerId === "number") {
+        pointerEvent.currentTarget.setPointerCapture(pointerEvent.pointerId);
+      }
+    } catch {
+      // ignore (some browsers / elements may not support)
+    }
+    const start = axis === "y" ? (event as any).clientY : (event as any).clientX;
+    setDragState({ type, axis, start, sizes: layoutSizes });
   };
   const layoutStyle: CSSProperties | undefined = boardDockOpen
     ? ({
@@ -2225,10 +2285,16 @@ function Home({ isMobileMode = false }: { isMobileMode?: boolean }) {
       } as CSSProperties)
     : undefined;
   const boardColumnStyle = boardDockOpen
-    ? { flexBasis: `${(boardFraction * 100).toFixed(2)}%` }
+    ? (isMobileMode
+        ? // Mobile is vertical: treat board/chat split as a row height ratio.
+          ({ flex: `0 0 ${(boardFraction * 100).toFixed(2)}%` } as CSSProperties)
+        : ({ flexBasis: `${(boardFraction * 100).toFixed(2)}%` } as CSSProperties))
     : undefined;
   const chatColumnStyle = boardDockOpen
-    ? { flexBasis: `${(chatFraction * 100).toFixed(2)}%` }
+    ? (isMobileMode
+        ? // Let chat fill the rest on mobile.
+          ({ flex: "1 1 0" } as CSSProperties)
+        : ({ flexBasis: `${(chatFraction * 100).toFixed(2)}%` } as CSSProperties))
     : undefined;
 
   // Helper function to call LLM through backend (avoids CORS)
@@ -2340,7 +2406,7 @@ function Home({ isMobileMode = false }: { isMobileMode?: boolean }) {
       const timeoutId = setTimeout(() => controller.abort(), 90000); // 90 second timeout
       
       const positionResponse = await fetch(
-        `${BACKEND_BASE}/analyze_position?fen=${encodeURIComponent(currentFen)}&depth=18&lines=3`,
+        `${getBackendBase()}/analyze_position?fen=${encodeURIComponent(currentFen)}&depth=18&lines=3`,
         { signal: controller.signal }
       );
       
@@ -2415,7 +2481,7 @@ function Home({ isMobileMode = false }: { isMobileMode?: boolean }) {
 
       const { buildLearningHeaders } = await import("@/lib/learningClient");
       const { headers } = await buildLearningHeaders();
-      await fetch(`${BACKEND_BASE}/board/baseline_intuition_start`, {
+      await fetch(`${getBackendBase()}/board/baseline_intuition_start`, {
         method: "POST",
         headers: { "Content-Type": "application/json", ...headers },
         body: JSON.stringify({ start_fen: targetFen, thread_id: activeTab?.id || sessionId || null })
@@ -2424,7 +2490,7 @@ function Home({ isMobileMode = false }: { isMobileMode?: boolean }) {
       // Non-fatal prefetch; chat will still await baseline server-side if needed.
       console.warn("Baseline intuition prefetch failed:", e);
     }
-  }, [BACKEND_BASE, mode, lessonMode, aiGameActive, activeTab?.id, sessionId]);
+  }, [mode, lessonMode, aiGameActive, activeTab?.id, sessionId]);
 
   // Ensure backend D2/D16 tree exists for this tab in DISCUSS/ANALYZE.
   const ensureBackendTreeForTab = useCallback(async (tabId: string, startFen: string) => {
@@ -2434,7 +2500,7 @@ function Home({ isMobileMode = false }: { isMobileMode?: boolean }) {
       if (backendTreeNodeByTabRef.current[tabId]) return;
 
       const getResp = await fetch(
-        `${BACKEND_BASE}/board/tree/get?thread_id=${encodeURIComponent(tabId)}&include_scan=false`
+        `${getBackendBase()}/board/tree/get?thread_id=${encodeURIComponent(tabId)}&include_scan=false`
       );
       if (getResp.ok) {
         const data = await getResp.json().catch(() => null);
@@ -2446,7 +2512,7 @@ function Home({ isMobileMode = false }: { isMobileMode?: boolean }) {
         }
       }
 
-      await fetch(`${BACKEND_BASE}/board/tree/init`, {
+      await fetch(`${getBackendBase()}/board/tree/init`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ thread_id: tabId, start_fen: startFen }),
@@ -2455,7 +2521,7 @@ function Home({ isMobileMode = false }: { isMobileMode?: boolean }) {
     } catch (e) {
       console.warn("ensureBackendTreeForTab failed:", e);
     }
-  }, [BACKEND_BASE]);
+  }, []);
 
   // Auto-prefetch baseline intuition whenever the board position changes in DISCUSS/ANALYZE.
   useEffect(() => {
@@ -2486,7 +2552,8 @@ function Home({ isMobileMode = false }: { isMobileMode?: boolean }) {
     status_messages?: any[],
     detected_intent?: string | null,
     tools_used?: string[],
-    orchestration?: any
+    orchestration?: any,
+    graphData?: any
   }> {
     try {
       // Prepend strict tool-usage system guidance (do not rely on NL heuristics)
@@ -2689,7 +2756,7 @@ function Home({ isMobileMode = false }: { isMobileMode?: boolean }) {
       }
       console.log('='.repeat(80) + '\n');
       
-      const response = await fetch(`${BACKEND_BASE}/llm_chat`, {
+      const response = await fetch(`${getBackendBase()}/llm_chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
@@ -2720,6 +2787,7 @@ function Home({ isMobileMode = false }: { isMobileMode?: boolean }) {
       if (data.tool_calls && data.tool_calls.length > 0) {
         console.log(`🔧 Tools called (${data.iterations} iterations):`, data.tool_calls.map((tc: any) => tc.tool).join(', '));
         const miniBoards: any[] = [];
+        const graphDataCollection: any[] = []; // Collect graph data from multiple tool calls
         
         // First pass: Check if review_full_game or fetch_and_review_games was called
         hasGameReview = data.tool_calls.some((tc: any) => tc.tool === 'review_full_game');
@@ -2748,6 +2816,31 @@ function Home({ isMobileMode = false }: { isMobileMode?: boolean }) {
             console.log('   ⏭️  Skipping analyze position flow - game review takes precedence');
           }
 
+          // Handle add_personal_review_graph tool calls
+          if (tc.tool === 'add_personal_review_graph' && tc.result) {
+            const graphResult = tc.result;
+            // Check if result has error
+            if (graphResult.error) {
+              console.warn(`[Graph Tool] Error: ${graphResult.error}`);
+            } else if (graphResult.graph_id && graphResult.series) {
+              // Merge series if same graph_id, otherwise create new graph
+              const existingGraph = graphDataCollection.find(g => g.graph_id === graphResult.graph_id);
+              if (existingGraph) {
+                // Merge series into existing graph
+                existingGraph.series.push(...graphResult.series);
+              } else {
+                // Add new graph
+                graphDataCollection.push({
+                  graph_id: graphResult.graph_id,
+                  series: graphResult.series,
+                  xLabels: graphResult.xLabels,
+                  grouping: graphResult.grouping,
+                });
+              }
+              console.log(`[Graph Tool] Collected graph data: ${graphResult.series.length} series`);
+            }
+          }
+          
           // Setup-position → emit a mini-board message in chat
           if (tc.tool === 'setup_position' && tc.result) {
             const r = tc.result;
@@ -3115,6 +3208,13 @@ function Home({ isMobileMode = false }: { isMobileMode?: boolean }) {
         orchestration_mode: data.orchestration?.mode
       });
 
+      // Merge graph data if multiple graphs were collected (shouldn't happen, but handle it)
+      const finalGraphData = graphDataCollection.length > 0 
+        ? (graphDataCollection.length === 1 
+          ? graphDataCollection[0] 
+          : graphDataCollection[0]) // Use first graph if multiple (could merge in future)
+        : undefined;
+      
       return {
         content: data.content,
         tool_calls: data.tool_calls || [],
@@ -3125,6 +3225,7 @@ function Home({ isMobileMode = false }: { isMobileMode?: boolean }) {
         detected_intent: data.detected_intent || null,
         tools_used: data.tools_used || [],
         orchestration: data.orchestration || null,
+        graphData: finalGraphData, // Include graph data if any graph tools were called
         raw_data: {
           tool_calls: data.tool_calls,
           iterations: data.iterations,
@@ -3160,7 +3261,8 @@ function Home({ isMobileMode = false }: { isMobileMode?: boolean }) {
     frontend_commands?: any[],
     final_pgn?: any,
     show_board_link?: any,
-    buttons?: any[]
+    buttons?: any[],
+    graphData?: any
   }> {
     return new Promise((resolve, reject) => {
       // Prepend strict tool-usage system guidance
@@ -3231,7 +3333,7 @@ function Home({ isMobileMode = false }: { isMobileMode?: boolean }) {
           return buildLearningHeaders();
         })
         .then(({ interactionId, headers }) => {
-          return fetch(`${BACKEND_BASE}/llm_chat_stream`, {
+          return fetch(`${getBackendBase()}/llm_chat_stream`, {
         method: "POST",
             headers: { "Content-Type": "application/json", ...headers },
         body: requestBody
@@ -3519,6 +3621,33 @@ function Home({ isMobileMode = false }: { isMobileMode?: boolean }) {
                   
                   // Merge chunked data into tool_calls if available
                   let mergedToolCalls = data.tool_calls || [];
+                  const graphDataCollection: any[] = []; // Collect graph data from multiple tool calls
+                  
+                  // Process graph tool calls
+                  if (mergedToolCalls.length > 0) {
+                    mergedToolCalls.forEach((tc: any) => {
+                      if (tc.tool === 'add_personal_review_graph' && tc.result) {
+                        const graphResult = tc.result;
+                        if (graphResult.error) {
+                          console.warn(`[Graph Tool] Error: ${graphResult.error}`);
+                        } else if (graphResult.graph_id && graphResult.series) {
+                          const existingGraph = graphDataCollection.find(g => g.graph_id === graphResult.graph_id);
+                          if (existingGraph) {
+                            existingGraph.series.push(...graphResult.series);
+                          } else {
+                            graphDataCollection.push({
+                              graph_id: graphResult.graph_id,
+                              series: graphResult.series,
+                              xLabels: graphResult.xLabels,
+                              grouping: graphResult.grouping,
+                            });
+                          }
+                          console.log(`[Graph Tool] Collected graph data: ${graphResult.series.length} series`);
+                        }
+                      }
+                    });
+                  }
+                  
                   if (chunkedGameData || chunkedStatsData || chunkedNarrativeData || chunkedWalkthroughData) {
                     console.log("📦 Merging chunked data into result...");
                     // Find the game review tool call and enhance it
@@ -3550,6 +3679,13 @@ function Home({ isMobileMode = false }: { isMobileMode?: boolean }) {
                       return tc;
                     });
                   }
+                  
+                  // Merge graph data if multiple graphs were collected
+                  const finalGraphData = graphDataCollection.length > 0 
+                    ? (graphDataCollection.length === 1 
+                      ? graphDataCollection[0] 
+                      : graphDataCollection[0]) // Use first graph if multiple
+                    : undefined;
                   
                   // Use response field if available, otherwise fallback to content
                   const finalContent = data.response || data.content || "";
@@ -3620,7 +3756,8 @@ function Home({ isMobileMode = false }: { isMobileMode?: boolean }) {
                       baseline_intuition: data.baseline_intuition || data.envelope?.baseline_intuition,
                       final_pgn: data.final_pgn,
                       show_board_link: data.show_board_link,
-                      buttons: data.buttons
+                      buttons: data.buttons,
+                      graphData: finalGraphData
                     });
                     return true;
                   }
@@ -3644,7 +3781,8 @@ function Home({ isMobileMode = false }: { isMobileMode?: boolean }) {
                     baseline_intuition: data.baseline_intuition || data.envelope?.baseline_intuition,
                     final_pgn: data.final_pgn,  // NEW: PGN with all investigated lines
                     show_board_link: data.show_board_link,  // NEW: Link to chess board page
-                    buttons: data.buttons || []  // Include buttons (empty array if not present)
+                    buttons: data.buttons || [],  // Include buttons (empty array if not present)
+                    graphData: finalGraphData  // Include graph data if any graph tools were called
                   });
                   return true; // Signal completion
                 } else if (eventType === "error") {
@@ -4361,15 +4499,116 @@ function Home({ isMobileMode = false }: { isMobileMode?: boolean }) {
     return () => window.removeEventListener('keydown', handleKeyPress);
   }, [moveTree, fen]);
 
-  function addUserMessage(content: string) {
-    // Check for duplicates - don't add if the last message is identical
+  function handleImageSelected(file: File) {
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const result = event.target?.result as string;
+      // Store image as pending - will be attached to next message
+      setPendingImage({
+        data: result,
+        filename: file.name,
+        mimeType: file.type,
+      });
+      // Add image preview to chat immediately with uploading state
+      const imageMessage: ChatMessage = {
+        role: 'user',
+        content: '',
+        image: {
+          data: result,
+          filename: file.name,
+          mimeType: file.type,
+          uploading: true,
+          uploadProgress: 0,
+        },
+        fen,
+        tabId: activeTabId,
+      };
+      setMessages((prev) => [...prev, imageMessage]);
+      // Update tab messages
+      setTabs(prevTabs => prevTabs.map(tab => {
+        if (tab.id === activeTabId) {
+          return { ...tab, messages: [...(tab.messages || []), imageMessage] };
+        }
+        return tab;
+      }));
+      // Simulate upload progress (in real app, this would be actual upload)
+      let progress = 0;
+      const progressInterval = setInterval(() => {
+        progress += 10;
+        if (progress >= 100) {
+          clearInterval(progressInterval);
+          // Mark upload as complete
+          setMessages((prev) => prev.map((msg, idx) => {
+            if (idx === prev.length - 1 && msg.image?.uploading) {
+              return {
+                ...msg,
+                image: {
+                  ...msg.image,
+                  uploading: false,
+                  uploadProgress: 100,
+                },
+              };
+            }
+            return msg;
+          }));
+          // Update tab messages
+          setTabs(prevTabs => prevTabs.map(tab => {
+            if (tab.id === activeTabId) {
+              return {
+                ...tab,
+                messages: (tab.messages || []).map((msg, idx) => {
+                  const tabMessages = tab.messages || [];
+                  if (idx === tabMessages.length - 1 && msg.image?.uploading) {
+                    return {
+                      ...msg,
+                      image: {
+                        ...msg.image,
+                        uploading: false,
+                        uploadProgress: 100,
+                      },
+                    };
+                  }
+                  return msg;
+                }),
+              };
+            }
+            return tab;
+          }));
+        } else {
+          // Update progress
+          setMessages((prev) => prev.map((msg, idx) => {
+            if (idx === prev.length - 1 && msg.image?.uploading) {
+              return {
+                ...msg,
+                image: {
+                  ...msg.image,
+                  uploadProgress: progress,
+                },
+              };
+            }
+            return msg;
+          }));
+        }
+      }, 200);
+    };
+    reader.readAsDataURL(file);
+  }
+
+  function addUserMessage(content: string, image?: { data: string; filename?: string; mimeType?: string; uploading?: boolean; uploadProgress?: number }) {
+    // Check for duplicates - don't add if the last message is identical (unless it has an image)
     setMessages((prev) => {
       const lastMessage = prev[prev.length - 1];
-      if (lastMessage?.role === "user" && lastMessage?.content === content && lastMessage?.tabId === activeTabId) {
+      if (lastMessage?.role === "user" && lastMessage?.content === content && lastMessage?.tabId === activeTabId && !image && !lastMessage.image) {
         console.log('⚠️ Duplicate user message detected, skipping:', content);
         return prev;
       }
-      const newMessage = { role: "user" as const, content, fen, tabId: activeTabId };
+      const newMessage: ChatMessage = { 
+        role: "user" as const, 
+        content, 
+        fen, 
+        tabId: activeTabId,
+        ...(image && { image }),
+      };
       return [...prev, newMessage];
     });
     
@@ -4378,24 +4617,30 @@ function Home({ isMobileMode = false }: { isMobileMode?: boolean }) {
       if (tab.id === activeTabId) {
         const tabMessages = tab.messages || [];
         const lastTabMessage = tabMessages[tabMessages.length - 1];
-        // Skip if duplicate
-        if (lastTabMessage?.role === "user" && lastTabMessage?.content === content) {
+        // Skip if duplicate (unless it has an image)
+        if (lastTabMessage?.role === "user" && lastTabMessage?.content === content && !image && !lastTabMessage.image) {
           return tab;
         }
-        const newMessage = { role: "user" as const, content, fen, tabId: activeTabId };
+        const newMessage: ChatMessage = { 
+          role: "user" as const, 
+          content, 
+          fen, 
+          tabId: activeTabId,
+          ...(image && { image }),
+        };
         return { ...tab, messages: [...tabMessages, newMessage] };
       }
       return tab;
     }));
   }
 
-  function addAssistantMessage(content: string, meta?: any) {
+  function addAssistantMessage(content: string, meta?: any, graphData?: any) {
     // Strip all emoji from content (monochrome UI requirement)
     const filteredContent = stripEmojis(content);
     // Check if we have buttons - if so, allow empty content
     const hasButtons = Array.isArray(meta?.buttons) && meta.buttons.length > 0;
-    // Don't add empty messages unless we have buttons
-    if ((!filteredContent || !filteredContent.trim()) && !hasButtons) return;
+    // Don't add empty messages unless we have buttons or graphData
+    if ((!filteredContent || !filteredContent.trim()) && !hasButtons && !graphData) return;
     
     // Ensure meta always includes cached analysis for raw data button
     const enrichedMeta = {
@@ -4418,8 +4663,15 @@ function Home({ isMobileMode = false }: { isMobileMode?: boolean }) {
       }));
     }
     
-    // Include tabId for context scoping
-    const assistantMessage = { role: "assistant" as const, content: filteredContent, meta: enrichedMeta, fen, tabId: activeTabId };
+    // Include tabId for context scoping, and graphData if provided
+    const assistantMessage = { 
+      role: "assistant" as const, 
+      content: filteredContent, 
+      meta: enrichedMeta, 
+      fen, 
+      tabId: activeTabId,
+      ...(graphData && { graphData })
+    };
     setMessages((prev) => {
       const newMessages = [...prev, assistantMessage];
       // Add button messages after the assistant message
@@ -5763,7 +6015,7 @@ If they ask about the game, refer to this data.
           if (reviewResult.narrative) {
             addAssistantMessage(reviewResult.narrative, {
               gameReviewTable: tableData
-            });
+            }, result.graphData);
           }
           
           setTimeout(() => {
@@ -5787,15 +6039,15 @@ If they ask about the game, refer to this data.
         } else {
           // No walkthrough data, but still show narrative if available
           if (reviewResult.narrative) {
-            addAssistantMessage(reviewResult.narrative);
+            addAssistantMessage(reviewResult.narrative, undefined, result.graphData);
           }
         }
 
         // Always show the backend's LLM message if present (even if tab/walkthrough fails or is skipped).
         if (typeof result.content === "string" && result.content.trim()) {
-          addAssistantMessage(result.content);
+          addAssistantMessage(result.content, undefined, result.graphData);
         } else if (!reviewResult.narrative) {
-          addAssistantMessage("I fetched your game review data, but couldn’t render the walkthrough. You can ask about specific moves or moments and I’ll answer from the review.");
+          addAssistantMessage("I fetched your game review data, but couldn't render the walkthrough. You can ask about specific moves or moments and I'll answer from the review.", undefined, result.graphData);
         }
         
         removeLoadingMessage(loaderId);
@@ -5864,7 +6116,7 @@ If they ask about the game, refer to this data.
         narrativeDecision: result.narrative_decision
       };
       
-      addAssistantMessage(reply, meta);
+      addAssistantMessage(reply, meta, result.graphData);
     } catch (err: any) {
       addSystemMessage(`Error: ${err.message}`);
     } finally {
@@ -6212,7 +6464,7 @@ Examples:
           const tabId = activeTab?.id || activeTabId || sessionId;
           await ensureBackendTreeForTab(tabId, fenBeforeMove);
           const parentNodeId = backendTreeNodeByTabRef.current[tabId] || "root";
-          const resp = await fetch(`${BACKEND_BASE}/board/tree/add_move`, {
+          const resp = await fetch(`${getBackendBase()}/board/tree/add_move`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -6504,7 +6756,7 @@ Examples:
     
     try {
       const response = await fetch(
-        `${BACKEND_BASE}/analyze_move?fen=${encodeURIComponent(fenBeforeLastMove)}&move_san=${encodeURIComponent(lastMoveSan)}&depth=18`,
+        `${getBackendBase()}/analyze_move?fen=${encodeURIComponent(fenBeforeLastMove)}&move_san=${encodeURIComponent(lastMoveSan)}&depth=18`,
         {method: "POST"}
       );
       
@@ -7228,7 +7480,7 @@ Answer style:
     
     try {
       // First check status
-      const statusRes = await fetch(`${BACKEND_BASE}/engine_pool/status`);
+      const statusRes = await fetch(`${getBackendBase()}/engine_pool/status`);
       const status = await statusRes.json();
       console.log('Engine pool status:', status);
       
@@ -7241,7 +7493,7 @@ Answer style:
       
       // Run full test
       addSystemMessage('Running test game review (20 moves)...');
-      const testRes = await fetch(`${BACKEND_BASE}/engine_pool/test`, { method: 'POST' });
+      const testRes = await fetch(`${getBackendBase()}/engine_pool/test`, { method: 'POST' });
       const testResult = await testRes.json();
       console.log('Engine pool test result:', testResult);
       
@@ -7537,7 +7789,7 @@ Instructions: Respond naturally and conversationally. Use themes to justify any 
         const fenBefore = mainLine.length > 1 ? mainLine[mainLine.length - 2].fen : "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
         
         // Call analyze_move endpoint
-        const response = await fetch(`${BACKEND_BASE}/analyze_move?fen=${encodeURIComponent(fenBefore)}&move_san=${encodeURIComponent(moveToAnalyze)}&depth=18`, {
+        const response = await fetch(`${getBackendBase()}/analyze_move?fen=${encodeURIComponent(fenBefore)}&move_san=${encodeURIComponent(moveToAnalyze)}&depth=18`, {
           method: 'POST'
         });
         
@@ -7611,7 +7863,7 @@ ${formatAnalysisCard(analysis.bestMoveReport.analysisAfter)}
         addSystemMessage(statusMsg);
         
         // Call analyze_move endpoint with current position
-        const response = await fetch(`${BACKEND_BASE}/analyze_move?fen=${encodeURIComponent(fenToAnalyze)}&move_san=${encodeURIComponent(moveToAnalyze)}&depth=18`, {
+        const response = await fetch(`${getBackendBase()}/analyze_move?fen=${encodeURIComponent(fenToAnalyze)}&move_san=${encodeURIComponent(moveToAnalyze)}&depth=18`, {
           method: 'POST'
         });
         
@@ -7719,7 +7971,7 @@ ${formatAnalysisCard(analysis.bestMoveReport.analysisAfter)}
     
     try {
       const response = await fetch(
-        `${BACKEND_BASE}/analyze_position?fen=${encodeURIComponent(fenToAnalyze)}&lines=4&depth=18&light_mode=false`,
+        `${getBackendBase()}/analyze_position?fen=${encodeURIComponent(fenToAnalyze)}&lines=4&depth=18&light_mode=false`,
         { method: 'GET' }
       );
       
@@ -7769,7 +8021,7 @@ ${formatAnalysisCard(analysis.bestMoveReport.analysisAfter)}
       const structuredPrompt = "Analyze this position with full technical details.";
       
       // Use callLLM with force_structured context flag
-      const result = await fetch(`${BACKEND_BASE}/llm_chat`, {
+      const result = await fetch(`${getBackendBase()}/llm_chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -8022,7 +8274,7 @@ ${formatAnalysisCard(analysis.bestMoveReport.analysisAfter)}
       try {
         const tabId = activeTab?.id || activeTabId || sessionId;
         await ensureBackendTreeForTab(tabId, fen);
-        const resp = await fetch(`${BACKEND_BASE}/board/tree/search`, {
+        const resp = await fetch(`${getBackendBase()}/board/tree/search`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ thread_id: tabId, query, limit: 25 }),
@@ -8065,7 +8317,55 @@ ${formatAnalysisCard(analysis.bestMoveReport.analysisAfter)}
       }
     }
 
-    addUserMessage(message);
+    // Check if there's a pending image to attach
+    if (pendingImage) {
+      // Update the existing image message to include the text content
+      setMessages((prev) => prev.map((msg, idx) => {
+        if (idx === prev.length - 1 && msg.image && msg.content === '') {
+          return {
+            ...msg,
+            content: message,
+            image: {
+              ...msg.image,
+              uploading: false,
+              uploadProgress: 100,
+            },
+          };
+        }
+        return msg;
+      }));
+      
+      // Also update tab messages
+      setTabs(prevTabs => prevTabs.map(tab => {
+        if (tab.id === activeTabId) {
+          return {
+            ...tab,
+            messages: (tab.messages || []).map((msg, idx) => {
+              const tabMessages = tab.messages || [];
+              if (idx === tabMessages.length - 1 && msg.image && msg.content === '') {
+                return {
+                  ...msg,
+                  content: message,
+                  image: {
+                    ...msg.image,
+                    uploading: false,
+                    uploadProgress: 100,
+                  },
+                };
+              }
+              return msg;
+            }),
+          };
+        }
+        return tab;
+      }));
+      
+      setPendingImage(null); // Clear pending image after attaching
+      // Don't add a new message, just update the existing one
+      // The message was already added when image was selected
+    } else {
+      addUserMessage(message);
+    }
 
     let lower = message.toLowerCase().trim();
     
@@ -9946,7 +10246,7 @@ Be conversational and educational. Avoid restating move lists; focus on ideas.`;
   async function analyzeCurrentPosition() {
     // Analyze the current position
     try {
-      const response = await fetch(`${BACKEND_BASE}/analyze_position?fen=${encodeURIComponent(fen)}&lines=3&depth=12`);
+      const response = await fetch(`${getBackendBase()}/analyze_position?fen=${encodeURIComponent(fen)}&lines=3&depth=12`);
       
       if (!response.ok) {
         throw new Error(`Backend returned ${response.status}`);
@@ -10167,7 +10467,7 @@ ${keyPoints.slice(0, 15).map((kp: any) => {
       // Call analyze_move API to get analysis data
       try {
         const response = await fetch(
-          `${BACKEND_BASE}/analyze_move?fen=${encodeURIComponent(retryMoveData.fenBefore)}&move_san=${encodeURIComponent(moveSan)}&depth=18`,
+          `${getBackendBase()}/analyze_move?fen=${encodeURIComponent(retryMoveData.fenBefore)}&move_san=${encodeURIComponent(moveSan)}&depth=18`,
           { method: 'POST' }
         );
         
@@ -10624,7 +10924,7 @@ ${keyPoints.slice(0, 15).map((kp: any) => {
     }, 1000);
 
     try {
-      const response = await fetch(`${BACKEND_BASE}/review_game?pgn_string=${encodeURIComponent(cleanPgn)}&side_focus=${reviewSideFocus}&include_timestamps=true`, {
+      const response = await fetch(`${getBackendBase()}/review_game?pgn_string=${encodeURIComponent(cleanPgn)}&side_focus=${reviewSideFocus}&include_timestamps=true`, {
         method: 'POST'
       });
       
@@ -11073,7 +11373,7 @@ Be conversational and natural. Don't use bullet points. Don't ask questions at t
     
     try {
       // Generate lesson plan
-      const response = await fetch(`${BACKEND_BASE}/generate_lesson`, {
+      const response = await fetch(`${getBackendBase()}/generate_lesson`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ description, target_level: level, count: 5 })
@@ -11095,7 +11395,7 @@ Be conversational and natural. Don't use bullet points. Don't ask questions at t
         
         for (const topicCode of section.topics) {
           try {
-            const posResponse = await fetch(`${BACKEND_BASE}/generate_positions?topic_code=${topicCode}&count=${positionsPerTopic}`, {
+            const posResponse = await fetch(`${getBackendBase()}/generate_positions?topic_code=${topicCode}&count=${positionsPerTopic}`, {
               method: "POST"
             });
             
@@ -11147,7 +11447,7 @@ Be conversational and natural. Don't use bullet points. Don't ask questions at t
     addSystemMessage(`Building opening lesson for "${openingQuery}"...`);
     
     try {
-      const response = await fetch(`${BACKEND_BASE}/generate_opening_lesson`, {
+      const response = await fetch(`${getBackendBase()}/generate_opening_lesson`, {
         method: "POST",
         headers: {"Content-Type": "application/json"},
         body: JSON.stringify({query: openingQuery})
@@ -11253,7 +11553,7 @@ Be conversational and natural. Don't use bullet points. Don't ask questions at t
       const lessonId = currentLesson.plan.lesson_id;
       
       const response = await fetch(
-        `${BACKEND_BASE}/check_opening_move?fen=${encodeURIComponent(currentFen)}&move_san=${moveSan}&lesson_id=${lessonId}`,
+        `${getBackendBase()}/check_opening_move?fen=${encodeURIComponent(currentFen)}&move_san=${moveSan}&lesson_id=${lessonId}`,
         { method: "POST" }
       );
       if (response.status === 404) {
@@ -11670,7 +11970,7 @@ Give very brief, encouraging feedback (1-2 sentences) about why this move is goo
           attemptNumber,
           wasCorrect: false,
         });
-        const response = await fetch(`${BACKEND_BASE}/check_lesson_move?fen=${encodeURIComponent(currentFen)}&move_san=${encodeURIComponent(moveSan)}`, {
+        const response = await fetch(`${getBackendBase()}/check_lesson_move?fen=${encodeURIComponent(currentFen)}&move_san=${encodeURIComponent(moveSan)}`, {
           method: "POST"
         });
         
@@ -11689,7 +11989,7 @@ Give very brief, encouraging feedback (1-2 sentences) about why this move is goo
         // Run full analyze_move on the deviation
         addSystemMessage("Analyzing your move...");
         const analyzeMoveResponse = await fetch(
-          `${BACKEND_BASE}/analyze_move?fen=${encodeURIComponent(currentFen)}&move_san=${encodeURIComponent(moveSan)}&depth=18`,
+          `${getBackendBase()}/analyze_move?fen=${encodeURIComponent(currentFen)}&move_san=${encodeURIComponent(moveSan)}&depth=18`,
           { method: "POST" }
         );
         
@@ -11836,7 +12136,7 @@ Provide 2-3 sentences of natural language commentary explaining why this deviati
             
             if (isOpponentTurn) {
               // Get engine's best response using Stockfish
-              const engineResponse = await fetch(`${BACKEND_BASE}/analyze_position?fen=${encodeURIComponent(currentPosition)}&lines=1&depth=16`);
+              const engineResponse = await fetch(`${getBackendBase()}/analyze_position?fen=${encodeURIComponent(currentPosition)}&lines=1&depth=16`);
               
               if (engineResponse.ok) {
                 const analysis = await engineResponse.json();
@@ -12313,7 +12613,7 @@ Provide 2-3 sentences of natural language commentary explaining why this deviati
   const boardHighlights = lessonMode ? [] : annotations.highlights;
 
   return (
-    <div data-theme={theme}>
+    <div data-theme={theme} className="app-shell">
       <TopBar
         onToggleHistory={() => setShowHistory(!showHistory)}
         onSignIn={handleSignInClick}
@@ -12422,10 +12722,19 @@ Provide 2-3 sentences of natural language commentary explaining why this deviati
                   onAddComment={handleAddComment}
                 />
               </div>
-              <div
-                className="column-resizer"
-                onMouseDown={(e) => beginDrag("board-chat", e)}
-              />
+              {isMobileMode ? (
+                <div
+                  className="row-resizer"
+                  onPointerDown={(e) => beginDrag("board-chat", "y", e)}
+                  onMouseDown={(e) => beginDrag("board-chat", "y", e)}
+                />
+              ) : (
+                <div
+                  className="column-resizer"
+                  onPointerDown={(e) => beginDrag("board-chat", "x", e)}
+                  onMouseDown={(e) => beginDrag("board-chat", "x", e)}
+                />
+              )}
               <div className="layout-column chat-column" style={chatColumnStyle}>
               {activeTab?.tabType === 'training' && activeTab?.trainingSession ? (
                 <TrainingSession
@@ -12654,6 +12963,31 @@ Provide 2-3 sentences of natural language commentary explaining why this deviati
                 <h3>Manual Request</h3>
                 <p>Select a request to run without the LLM.</p>
                 <div className="request-options-buttons">
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/*"
+                    style={{ display: 'none' }}
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) {
+                        handleImageSelected(file);
+                        setShowRequestOptions(false);
+                      }
+                      // Reset input
+                      if (fileInputRef.current) {
+                        fileInputRef.current.value = '';
+                      }
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      fileInputRef.current?.click();
+                    }}
+                  >
+                    Add Photo
+                  </button>
                   <button
                     type="button"
                     onClick={handleLegacyGameReview}
@@ -12721,6 +13055,7 @@ Provide 2-3 sentences of natural language commentary explaining why this deviati
                   <button 
                     type="button"
                     onClick={() => setShowRequestOptions(false)}
+                    className="cancel-button"
                   >
                     Cancel
                   </button>

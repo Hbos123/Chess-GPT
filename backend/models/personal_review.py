@@ -168,3 +168,4 @@ class ProgressUpdate(BaseModel):
     message: str
     percentage: float = Field(default=0.0, ge=0.0, le=100.0)
 
+

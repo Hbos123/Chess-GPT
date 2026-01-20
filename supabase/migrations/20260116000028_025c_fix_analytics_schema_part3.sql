@@ -67,4 +67,3 @@ $$;
 -- Comments
 COMMENT ON FUNCTION public.get_advanced_patterns_v3 IS 'V3: Fixed to use game_review JSONB instead of positions.accuracy_pct';
 COMMENT ON FUNCTION public.get_strength_profile_v3 IS 'V3: Fixed to use game_review JSONB instead of positions.accuracy_pct (optimized)';
-

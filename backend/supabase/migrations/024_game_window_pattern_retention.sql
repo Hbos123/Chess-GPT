@@ -26,3 +26,4 @@ WHERE analyzed_at IS NOT NULL AND compressed_at IS NULL;
 COMMENT ON COLUMN public.games.pattern_summary IS 'Compressed pattern data preserved when game is semi-forgotten. Contains tags, frequencies, phase accuracies, and metadata.';
 COMMENT ON COLUMN public.games.compressed_at IS 'Timestamp when game was compressed (full details removed, pattern data preserved).';
 
+

@@ -125,6 +125,21 @@ class SupabaseClient:
             if result.data and len(result.data) > 0:
                 game_id = result.data[0].get("id")
                 print(f"   ✅ Game saved with ID: {game_id}, analyzed_at: {insert_data.get('analyzed_at', 'not set')}")
+                
+                # Pre-compute and save graph data point (non-blocking, non-fatal)
+                try:
+                    from profile_analytics.graph_data import build_graph_game_point
+                    # Build graph point from the game_data we just saved
+                    graph_point = build_graph_game_point(
+                        {**game_data, "id": game_id}, 
+                        index=0  # Index will be recalculated when fetching
+                    )
+                    # Save to game_graph_data table
+                    self._save_game_graph_data(user_id, game_id, graph_point)
+                except Exception as e:
+                    print(f"   ⚠️ Failed to save graph data for game {game_id}: {e}")
+                    # Non-fatal - game is still saved
+                
                 return game_id
             
             return None
@@ -210,6 +225,43 @@ class SupabaseClient:
         
         except Exception as e:
             return self._handle_supabase_error(e, "fetching games metadata", [])
+
+    def get_recent_games_for_overview_snapshot(self, user_id: str, limit: int = 60) -> List[Dict]:
+        """
+        Fetch a small set of fields needed for the Overview snapshot.
+        Includes PGN clocks + user_color for true time-style classification.
+        """
+        try:
+            select_fields = (
+                "id,game_date,created_at,updated_at,"
+                "pgn,user_color,user_rating,result,opening_name,accuracy_overall,time_control"
+            )
+            query = self.client.table("games")\
+                .select(select_fields)\
+                .eq("user_id", user_id)\
+                .is_("archived_at", "null")\
+                .or_("review_type.eq.full,review_type.is.null")
+
+            # Filter out compressed games unless explicitly requested (best-effort)
+            try:
+                query = query.is_("compressed_at", "null")
+                result = query.order("updated_at", desc=True).limit(int(limit)).execute()
+            except Exception as e:
+                if self._is_missing_column_error(e, "compressed_at"):
+                    result = self.client.table("games")\
+                        .select(select_fields)\
+                        .eq("user_id", user_id)\
+                        .is_("archived_at", "null")\
+                        .or_("review_type.eq.full,review_type.is.null")\
+                        .order("updated_at", desc=True)\
+                        .limit(int(limit))\
+                        .execute()
+                else:
+                    raise
+
+            return result.data if result.data else []
+        except Exception as e:
+            return self._handle_supabase_error(e, "fetching overview snapshot games", [])
     
     def get_active_reviewed_games(self, user_id: str, limit: int = 30, include_full_review: bool = False, include_compressed: bool = False) -> List[Dict]:
         """Get active (non-archived) full-review games
@@ -762,6 +814,15 @@ class SupabaseClient:
                 if game_id not in position_data["source_game_ids"]:
                     position_data["source_game_ids"].append(game_id)
                 
+                # Ensure array fields default to empty lists if not provided
+                array_fields = ["tags_start", "tags_after_played", "tags_after_best", 
+                               "tags_gained", "tags_lost", "tags"]
+                for field in array_fields:
+                    if field not in position_data:
+                        position_data[field] = []
+                    elif position_data[field] is None:
+                        position_data[field] = []
+                
                 # Try to find existing position
                 existing = self.client.table("positions")\
                     .select("id, source_game_ids")\
@@ -803,9 +864,26 @@ class SupabaseClient:
         phases: Optional[List[str]] = None,
         themes: Optional[List[str]] = None,
         mover_name: Optional[str] = None,
-        limit: int = 10
+        tags_gained_filter: Optional[str] = None,
+        tags_lost_filter: Optional[str] = None,
+        tags_missed_filter: Optional[str] = None,
+        min_cp_loss: Optional[float] = None,
+        prioritize_fresh: bool = False,
+        limit: int = 10,
+        phase_filter: Optional[str] = None,
+        opening_name_filter: Optional[str] = None,
+        piece_type_filter: Optional[str] = None,
+        time_bucket_filter: Optional[str] = None
     ) -> List[Dict]:
-        """Search user's saved positions with filters"""
+        """
+        Search user's saved positions with filters.
+        
+        Args:
+            tags_gained_filter: Tag name that was gained after played move
+            tags_lost_filter: Tag name that was lost after played move
+            tags_missed_filter: Tag name that exists in best_move but not in played move
+            min_cp_loss: Minimum centipawn loss to filter by
+        """
         try:
             query = self.client.table("positions").select("*").eq("user_id", user_id)
             
@@ -828,14 +906,152 @@ class SupabaseClient:
                 
             if mover_name:
                 query = query.eq("mover_name", mover_name)
-                
-            result = query.order("created_at", desc=True).limit(limit).execute()
             
-            return result.data if result.data else []
+            # Tag transition filters using array contains
+            if tags_gained_filter:
+                # Check if tag_name is in tags_gained array
+                query = query.contains("tags_gained", [tags_gained_filter])
+            
+            if tags_lost_filter:
+                # Check if tag_name is in tags_lost array
+                query = query.contains("tags_lost", [tags_lost_filter])
+            
+            if tags_missed_filter:
+                # Check if tag_name is in tags_after_best but not in tags_after_played
+                # This requires a more complex query - we'll filter in Python after fetching
+                # For now, we'll use contains on tags_after_best and filter client-side
+                query = query.contains("tags_after_best", [tags_missed_filter])
+            
+            if min_cp_loss is not None:
+                query = query.gte("cp_loss", min_cp_loss)
+            
+            # Order by freshness if requested (unseen/oldest first), otherwise by CP loss
+            if prioritize_fresh:
+                # Fetch more positions to sort properly (Supabase doesn't support NULLS FIRST)
+                result = query.order("cp_loss", desc=True).limit(limit * 3).execute()
+                positions_raw = result.data if result.data else []
+                # Sort in Python to handle NULLS FIRST properly
+                positions_raw.sort(key=lambda p: (
+                    p.get("last_used_in_drill") is not None,  # False (None) comes first
+                    p.get("last_used_in_drill") or datetime.min.replace(tzinfo=None),  # Then by date (oldest first)
+                    -p.get("cp_loss", 0)  # Then by CP loss descending
+                ))
+                positions = positions_raw[:limit]
+            else:
+                result = query.order("cp_loss", desc=True).limit(limit).execute()
+                positions = result.data if result.data else []
+            
+            # Post-process for tags_missed_filter (check that tag is NOT in tags_after_played)
+            if tags_missed_filter and positions:
+                filtered_positions = []
+                for pos in positions:
+                    tags_after_played = pos.get("tags_after_played", [])
+                    if tags_missed_filter not in tags_after_played:
+                        filtered_positions.append(pos)
+                positions = filtered_positions
+            
+            return positions
             
         except Exception as e:
             print(f"Error searching positions: {e}")
             return []
+    
+    def count_user_positions(
+        self,
+        user_id: str,
+        tags_gained_filter: Optional[str] = None,
+        tags_lost_filter: Optional[str] = None,
+        tags_missed_filter: Optional[str] = None,
+        min_cp_loss: Optional[float] = None,
+        error_categories: Optional[List[str]] = None,
+        phase_filter: Optional[str] = None,
+        opening_name_filter: Optional[str] = None,
+        piece_type_filter: Optional[str] = None,
+        time_bucket_filter: Optional[str] = None
+    ) -> Dict[str, int]:
+        """Count total available positions matching filters."""
+        try:
+            query = self.client.table("positions").select("id", count="exact").eq("user_id", user_id)
+            
+            if error_categories:
+                query = query.in_("error_category", error_categories)
+            
+            if tags_gained_filter:
+                query = query.contains("tags_gained", [tags_gained_filter])
+            
+            if tags_lost_filter:
+                query = query.contains("tags_lost", [tags_lost_filter])
+            
+            if tags_missed_filter:
+                query = query.contains("tags_after_best", [tags_missed_filter])
+            
+            if min_cp_loss is not None:
+                query = query.gte("cp_loss", min_cp_loss)
+            
+            # Phase filter (single value)
+            if phase_filter:
+                query = query.eq("phase", phase_filter)
+            
+            # Opening name filter (case-insensitive)
+            if opening_name_filter:
+                query = query.ilike("opening_name", f"%{opening_name_filter}%")
+            
+            # Piece type filter (filter by piece_blundered)
+            if piece_type_filter:
+                query = query.eq("piece_blundered", piece_type_filter)
+            
+            # Time bucket filter
+            if time_bucket_filter:
+                TIME_BUCKET_RANGES = {
+                    "<5s": (0, 5),
+                    "5-15s": (5, 15),
+                    "15-30s": (15, 30),
+                    "30s-1min": (30, 60),
+                    "1min-2min30": (60, 150),
+                    "2min30-5min": (150, 300),
+                    "5min+": (300, float('inf'))
+                }
+                if time_bucket_filter in TIME_BUCKET_RANGES:
+                    min_time, max_time = TIME_BUCKET_RANGES[time_bucket_filter]
+                    query = query.gte("time_spent_s", min_time)
+                    if max_time != float('inf'):
+                        query = query.lt("time_spent_s", max_time)
+            
+            result = query.execute()
+            count = result.count if hasattr(result, 'count') else len(result.data) if result.data else 0
+            
+            # For tags_missed_filter, we need to filter out positions where tag is in tags_after_played
+            if tags_missed_filter and result.data:
+                filtered_count = sum(1 for pos in result.data 
+                                   if tags_missed_filter not in (pos.get("tags_after_played") or []))
+                count = filtered_count
+            
+            return {"count": count}
+        except Exception as e:
+            print(f"Error counting positions: {e}")
+            return {"count": 0}
+    
+    def mark_positions_used(self, position_ids: List[str]) -> bool:
+        """Mark positions as used by updating last_used_in_drill timestamp."""
+        if not position_ids:
+            return True
+        try:
+            from datetime import datetime
+            now = datetime.utcnow().isoformat() + "Z"
+            
+            # Update in batches to avoid query size limits
+            batch_size = 100
+            for i in range(0, len(position_ids), batch_size):
+                batch = position_ids[i:i + batch_size]
+                self.client.table("positions")\
+                    .update({"last_used_in_drill": now})\
+                    .in_("id", batch)\
+                    .execute()
+            
+            return True
+        except Exception as e:
+            print(f"Error marking positions as used: {e}")
+            return False
 
     # ============================================================================
     # COLLECTIONS
@@ -1547,6 +1763,83 @@ class SupabaseClient:
         
         except Exception as e:
             return self._handle_supabase_error(e, "saving computed habits", False)
+
+    def _save_game_graph_data(self, user_id: str, game_id: str, graph_point: Dict) -> bool:
+        """Save pre-computed graph data point for a game."""
+        try:
+            from json import dumps
+            # Convert game_date string to date if needed
+            game_date = graph_point.get("game_date")
+            if isinstance(game_date, str) and "T" in game_date:
+                game_date = game_date.split("T")[0]
+            
+            self.client.table("game_graph_data").upsert({
+                "user_id": user_id,
+                "game_id": game_id,
+                "game_date": game_date,
+                "result": graph_point.get("result"),
+                "opening_name": graph_point.get("opening_name"),
+                "opening_eco": graph_point.get("opening_eco"),
+                "time_control": graph_point.get("time_control"),
+                "overall_accuracy": graph_point.get("overall_accuracy"),
+                "piece_accuracy": graph_point.get("piece_accuracy") or {},
+                "time_bucket_accuracy": graph_point.get("time_bucket_accuracy") or {},
+                "tag_transitions": graph_point.get("tag_transitions") or {"gained": {}, "lost": {}},
+            }, on_conflict="user_id,game_id").execute()
+            
+            print(f"   ✅ [GRAPH_DATA] Saved pre-computed graph data for game {game_id}")
+            return True
+        except Exception as e:
+            # Check if table doesn't exist yet (migration not run)
+            error_str = str(e).lower()
+            if "does not exist" in error_str or "relation" in error_str:
+                print(f"   ⚠️ [GRAPH_DATA] Table game_graph_data not found (migration may not be run yet): {e}")
+            else:
+                print(f"   ⚠️ [GRAPH_DATA] Error saving graph data for game {game_id}: {e}")
+            return False
+
+    def _save_detailed_analytics_cache(self, user_id: str, analytics_data: Dict, games_count: int) -> bool:
+        """Save pre-computed detailed analytics cache for a user."""
+        import time
+        max_retries = 3
+        retry_delay = 2
+        
+        for attempt in range(max_retries):
+            try:
+                from datetime import datetime
+                self.client.table("detailed_analytics_cache").upsert({
+                    "user_id": user_id,
+                    "analytics_data": analytics_data,
+                    "games_count": games_count,
+                    "computed_at": datetime.utcnow().isoformat() + "Z",
+                }, on_conflict="user_id").execute()
+                
+                print(f"   ✅ [DETAILED_ANALYTICS_CACHE] Saved pre-computed detailed analytics for user {user_id} ({games_count} games)")
+                return True
+            except Exception as e:
+                error_str = str(e).lower()
+                
+                # Check if table doesn't exist yet (migration not run)
+                if "does not exist" in error_str or "relation" in error_str or "pgrst205" in error_str:
+                    print(f"   ⚠️ [DETAILED_ANALYTICS_CACHE] Table detailed_analytics_cache not found (migration may not be run yet): {e}")
+                    return False
+                
+                # Retry on SSL/network errors
+                if "ssl" in error_str or "eof" in error_str or "connection" in error_str or "timeout" in error_str:
+                    if attempt < max_retries - 1:
+                        print(f"   ⚠️ [DETAILED_ANALYTICS_CACHE] Network error (attempt {attempt + 1}/{max_retries}), retrying in {retry_delay}s...")
+                        time.sleep(retry_delay)
+                        retry_delay *= 2  # Exponential backoff
+                        continue
+                    else:
+                        print(f"   ❌ [DETAILED_ANALYTICS_CACHE] Failed after {max_retries} attempts: {e}")
+                        return False
+                
+                # Other errors - don't retry
+                print(f"   ⚠️ [DETAILED_ANALYTICS_CACHE] Error saving detailed analytics cache for user {user_id}: {e}")
+                return False
+        
+        return False
 
     # ============================================================================
     # INTERNAL HELPERS

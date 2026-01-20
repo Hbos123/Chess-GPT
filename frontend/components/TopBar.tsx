@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 
 interface TopBarProps {
   onToggleHistory: () => void;
+  onOpenAnalytics?: () => void;
   onSignIn?: () => void;
   onSignOut?: () => Promise<void> | void;
   onSwitchAccount?: () => Promise<void> | void;
@@ -12,6 +13,7 @@ interface TopBarProps {
 
 export default function TopBar({
   onToggleHistory,
+  onOpenAnalytics,
   onSignIn,
   onSignOut,
   onSwitchAccount,
@@ -45,17 +47,29 @@ export default function TopBar({
 
   return (
     <div className="top-bar">
-      <button 
-        className="history-toggle"
-        onClick={onToggleHistory}
-        aria-label="Toggle chat history"
-      >
-        <svg width="60" height="60" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round">
-          <line x1="3" y1="6" x2="21" y2="6"/>
-          <line x1="3" y1="12" x2="21" y2="12"/>
-          <line x1="3" y1="18" x2="21" y2="18"/>
-        </svg>
-      </button>
+      <div className="top-bar-left">
+        <button 
+          className="history-toggle"
+          onClick={onToggleHistory}
+          aria-label="Toggle chat history"
+        >
+          <svg width="60" height="60" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round">
+            <line x1="3" y1="6" x2="21" y2="6"/>
+            <line x1="3" y1="12" x2="21" y2="12"/>
+            <line x1="3" y1="18" x2="21" y2="18"/>
+          </svg>
+        </button>
+        {onOpenAnalytics && (
+          <button
+            type="button"
+            className="topbar-shortcut"
+            onClick={onOpenAnalytics}
+            aria-label="Open analytics overview"
+          >
+            Analytics
+          </button>
+        )}
+      </div>
 
       <div className="wordmark">Chesster AI</div>
 

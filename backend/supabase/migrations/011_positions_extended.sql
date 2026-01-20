@@ -69,3 +69,4 @@ COMMENT ON COLUMN public.positions.error_side IS 'Whether the player or opponent
 
 
 
+

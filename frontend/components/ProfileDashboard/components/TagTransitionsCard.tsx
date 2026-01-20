@@ -93,6 +93,13 @@ export default function TagTransitionsCard({ tagTransitions }: TagTransitionsCar
     ? allSignificanceScores.reduce((a, b) => a + b, 0) / allSignificanceScores.length
     : undefined;
   
+  const formatTagName = (tag: string) => {
+    return tag
+      .replace(/^tag\./, '')
+      .replace(/\./g, ' ')
+      .replace(/\b\w/g, l => l.toUpperCase());
+  };
+  
   // Build trend data from day intervals
   const buildTrendData = () => {
     const allDates = new Set<string>();
@@ -130,16 +137,9 @@ export default function TagTransitionsCard({ tagTransitions }: TagTransitionsCar
   
   const trendData = buildTrendData();
 
-  const formatTagName = (tag: string) => {
-    return tag
-      .replace(/^tag\./, '')
-      .replace(/\./g, ' ')
-      .replace(/\b\w/g, l => l.toUpperCase());
-  };
-
   if (highestGained.length === 0 && highestLost.length === 0) {
     return (
-      <ExpandableAnalyticsCard title="Tag Transitions">
+      <ExpandableAnalyticsCard title="Tag Transitions" hideControls={true}>
         <p style={{ color: '#cbd5e1', fontSize: '14px' }}>No tag transition data available yet.</p>
       </ExpandableAnalyticsCard>
     );
@@ -150,13 +150,16 @@ export default function TagTransitionsCard({ tagTransitions }: TagTransitionsCar
       title="Tag Transitions"
       significanceScore={overallSignificance}
       trendData={trendData}
+      hideControls={true}
     >
       
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
-        {/* Gained Tags */}
-        <div>
-          <h4 style={{ margin: '0 0 12px 0', fontSize: '14px', fontWeight: 600, color: '#10b981' }}>
-            Tags Gained - Highest Accuracy
+      <div style={{ display: 'grid', gridTemplateRows: '1fr 1fr', gap: '20px' }}>
+        {/* Row 1: Tags Gained - Highest and Lowest */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
+          {/* Tags Gained - Highest Accuracy */}
+          <div>
+            <h4 style={{ margin: '0 0 12px 0', fontSize: '14px', fontWeight: 600, color: '#10b981' }}>
+              Tags Gained - Highest Accuracy
           </h4>
           {highestGained.length > 0 ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '20px' }}>
@@ -229,27 +232,31 @@ export default function TagTransitionsCard({ tagTransitions }: TagTransitionsCar
             <p style={{ color: '#9ca3af', fontSize: '12px' }}>No data</p>
           )}
           
-          <h4 style={{ margin: '20px 0 12px 0', fontSize: '14px', fontWeight: 600, color: '#fbbf24' }}>
-            Tags Gained - Lowest Accuracy
-          </h4>
-          {lowestGained.length > 0 ? (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              {lowestGained.map(({ tag, ...data }) => {
-                const errorRate = data.count > 0 
-                  ? ((data.blunders + data.mistakes + data.inaccuracies) / data.count * 100)
-                  : 0;
-                
-                return (
-                  <div key={tag} style={{
-                    padding: '12px',
-                    background: 'rgba(251, 191, 36, 0.1)',
-                    borderRadius: '6px',
-                    border: '1px solid rgba(251, 191, 36, 0.2)'
-                  }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-                      <div style={{ fontSize: '13px', fontWeight: 600, color: '#fbbf24' }}>
-                        {formatTagName(tag)}
-                      </div>
+          </div>
+          
+          {/* Tags Gained - Lowest Accuracy */}
+          <div>
+            <h4 style={{ margin: '0 0 12px 0', fontSize: '14px', fontWeight: 600, color: '#10b981' }}>
+              Tags Gained - Lowest Accuracy
+            </h4>
+            {lowestGained.length > 0 ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                {lowestGained.map(({ tag, ...data }) => {
+                  const errorRate = data.count > 0 
+                    ? ((data.blunders + data.mistakes + data.inaccuracies) / data.count * 100)
+                    : 0;
+                  
+                  return (
+                    <div key={tag} style={{
+                      padding: '12px',
+                      background: 'rgba(16, 185, 129, 0.1)',
+                      borderRadius: '6px',
+                      border: '1px solid rgba(16, 185, 129, 0.3)'
+                    }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                        <div style={{ fontSize: '13px', fontWeight: 600, color: '#6ee7b7' }}>
+                          {formatTagName(tag)}
+                        </div>
                       {data.significance_score !== undefined && (
                         <div style={{
                           padding: '2px 6px',
@@ -298,16 +305,19 @@ export default function TagTransitionsCard({ tagTransitions }: TagTransitionsCar
                   </div>
                 );
               })}
-            </div>
-          ) : (
-            <p style={{ color: '#9ca3af', fontSize: '12px' }}>No data</p>
-          )}
+              </div>
+            ) : (
+              <p style={{ color: '#9ca3af', fontSize: '12px' }}>No data</p>
+            )}
+          </div>
         </div>
 
-        {/* Lost Tags */}
-        <div>
-          <h4 style={{ margin: '0 0 12px 0', fontSize: '14px', fontWeight: 600, color: '#ef4444' }}>
-            Tags Lost - Highest Accuracy
+        {/* Row 2: Tags Lost - Highest and Lowest */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
+          {/* Tags Lost - Highest Accuracy */}
+          <div>
+            <h4 style={{ margin: '0 0 12px 0', fontSize: '14px', fontWeight: 600, color: '#ef4444' }}>
+              Tags Lost - Highest Accuracy
           </h4>
           {highestLost.length > 0 ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '20px' }}>
@@ -379,28 +389,31 @@ export default function TagTransitionsCard({ tagTransitions }: TagTransitionsCar
           ) : (
             <p style={{ color: '#9ca3af', fontSize: '12px' }}>No data</p>
           )}
+          </div>
           
-          <h4 style={{ margin: '20px 0 12px 0', fontSize: '14px', fontWeight: 600, color: '#fbbf24' }}>
-            Tags Lost - Lowest Accuracy
-          </h4>
-          {lowestLost.length > 0 ? (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              {lowestLost.map(({ tag, ...data }) => {
-                const errorRate = data.count > 0 
-                  ? ((data.blunders + data.mistakes + data.inaccuracies) / data.count * 100)
-                  : 0;
-                
-                return (
-                  <div key={tag} style={{
-                    padding: '12px',
-                    background: 'rgba(251, 191, 36, 0.1)',
-                    borderRadius: '6px',
-                    border: '1px solid rgba(251, 191, 36, 0.2)'
-                  }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-                      <div style={{ fontSize: '13px', fontWeight: 600, color: '#fca5a5' }}>
-                        {formatTagName(tag)}
-                      </div>
+          {/* Tags Lost - Lowest Accuracy */}
+          <div>
+            <h4 style={{ margin: '0 0 12px 0', fontSize: '14px', fontWeight: 600, color: '#ef4444' }}>
+              Tags Lost - Lowest Accuracy
+            </h4>
+            {lowestLost.length > 0 ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                {lowestLost.map(({ tag, ...data }) => {
+                  const errorRate = data.count > 0 
+                    ? ((data.blunders + data.mistakes + data.inaccuracies) / data.count * 100)
+                    : 0;
+                  
+                  return (
+                    <div key={tag} style={{
+                      padding: '12px',
+                      background: 'rgba(239, 68, 68, 0.1)',
+                      borderRadius: '6px',
+                      border: '1px solid rgba(239, 68, 68, 0.3)'
+                    }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                        <div style={{ fontSize: '13px', fontWeight: 600, color: '#fca5a5' }}>
+                          {formatTagName(tag)}
+                        </div>
                       {data.significance_score !== undefined && (
                         <div style={{
                           padding: '2px 6px',
@@ -445,14 +458,15 @@ export default function TagTransitionsCard({ tagTransitions }: TagTransitionsCar
                           {data.trend_value > 0 ? '+' : ''}{data.trend_value}% over last 10 games
                         </span>
                       </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          ) : (
-            <p style={{ color: '#9ca3af', fontSize: '12px' }}>No data</p>
-          )}
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <p style={{ color: '#9ca3af', fontSize: '12px' }}>No data</p>
+            )}
+          </div>
         </div>
       </div>
     </ExpandableAnalyticsCard>

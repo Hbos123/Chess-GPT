@@ -17,6 +17,7 @@ interface ExpandableAnalyticsCardProps {
     baseline?: number;
   };
   expandedContent?: React.ReactNode;
+  hideControls?: boolean;
 }
 
 export default function ExpandableAnalyticsCard({ 
@@ -24,7 +25,8 @@ export default function ExpandableAnalyticsCard({
   children, 
   significanceScore,
   trendData,
-  expandedContent 
+  expandedContent,
+  hideControls = false
 }: ExpandableAnalyticsCardProps) {
   const [isExpanded, setIsExpanded] = useState(false);
   
@@ -72,42 +74,44 @@ export default function ExpandableAnalyticsCard({
         }}>
           {title}
         </h3>
-        <div style={{ 
-          display: 'flex', 
-          gap: '12px', 
-          alignItems: 'center' 
-        }}>
-          {significanceScore !== undefined && (
-            <div style={{
-              padding: '4px 8px',
-              borderRadius: '4px',
-              fontSize: '12px',
-              fontWeight: 600,
-              border: '1px solid',
-              ...getSignificanceBadgeStyle(significanceScore)
-            }}>
-              Significance: {significanceScore.toFixed(0)}
-            </div>
-          )}
-          {(trendData || expandedContent) && (
-            <button
-              onClick={() => setIsExpanded(!isExpanded)}
-              style={{
-                padding: '6px 12px',
-                background: isExpanded ? '#3b82f6' : 'rgba(59, 130, 246, 0.2)',
-                color: '#e0e7ff',
-                border: '1px solid rgba(147, 197, 253, 0.3)',
-                borderRadius: '6px',
-                cursor: 'pointer',
-                fontSize: '13px',
+        {!hideControls && (
+          <div style={{ 
+            display: 'flex', 
+            gap: '12px', 
+            alignItems: 'center' 
+          }}>
+            {significanceScore !== undefined && (
+              <div style={{
+                padding: '4px 8px',
+                borderRadius: '4px',
+                fontSize: '12px',
                 fontWeight: 600,
-                transition: 'all 0.2s'
-              }}
-            >
-              {isExpanded ? '▼ Collapse' : '▶ Expand'}
-            </button>
-          )}
-        </div>
+                border: '1px solid',
+                ...getSignificanceBadgeStyle(significanceScore)
+              }}>
+                Significance: {significanceScore.toFixed(0)}
+              </div>
+            )}
+            {(trendData || expandedContent) && (
+              <button
+                onClick={() => setIsExpanded(!isExpanded)}
+                style={{
+                  padding: '6px 12px',
+                  background: isExpanded ? '#3b82f6' : 'rgba(59, 130, 246, 0.2)',
+                  color: '#e0e7ff',
+                  border: '1px solid rgba(147, 197, 253, 0.3)',
+                  borderRadius: '6px',
+                  cursor: 'pointer',
+                  fontSize: '13px',
+                  fontWeight: 600,
+                  transition: 'all 0.2s'
+                }}
+              >
+                {isExpanded ? '▼ Collapse' : '▶ Expand'}
+              </button>
+            )}
+          </div>
+        )}
       </div>
       
       {children}

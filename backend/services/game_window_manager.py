@@ -26,15 +26,6 @@ class GameWindowManager:
     def count_active_games(self, user_id: str) -> int:
         """Count active (non-compressed) analyzed games for a user"""
         try:
-            # Check if it's LocalPostgresClient
-            if hasattr(self.supabase, '_execute_query'):
-                result = self.supabase._execute_query(
-                    "SELECT COUNT(*) as count FROM public.games WHERE user_id = %s AND analyzed_at IS NOT NULL AND compressed_at IS NULL",
-                    (user_id,)
-                )
-                return result[0]['count'] if result else 0
-            
-            # Otherwise use Supabase client
             result = self.supabase.client.table("games")\
                 .select("id", count="exact")\
                 .eq("user_id", user_id)\
@@ -50,15 +41,6 @@ class GameWindowManager:
     def get_oldest_active_game(self, user_id: str) -> Optional[Dict]:
         """Get the oldest active (non-compressed) analyzed game"""
         try:
-            # Check if it's LocalPostgresClient
-            if hasattr(self.supabase, '_execute_query'):
-                result = self.supabase._execute_query(
-                    "SELECT * FROM public.games WHERE user_id = %s AND analyzed_at IS NOT NULL AND compressed_at IS NULL ORDER BY analyzed_at ASC LIMIT 1",
-                    (user_id,)
-                )
-                return result[0] if result else None
-            
-            # Otherwise use Supabase client
             result = self.supabase.client.table("games")\
                 .select("*")\
                 .eq("user_id", user_id)\
@@ -156,19 +138,11 @@ class GameWindowManager:
             # Delete linked positions before compression
             # (CASCADE delete will handle this, but explicit for clarity and logging)
             try:
-                # Check if it's LocalPostgresClient
-                if hasattr(self.supabase, '_execute_delete'):
-                    deleted_count = self.supabase._execute_delete(
-                        "public.positions",
-                        "from_game_id = %s",
-                        (game_id,)
-                    )
-                else:
-                    delete_result = self.supabase.client.table("positions")\
-                        .delete()\
-                        .eq("from_game_id", game_id)\
-                        .execute()
-                    deleted_count = len(delete_result.data) if delete_result.data else 0
+                delete_result = self.supabase.client.table("positions")\
+                    .delete()\
+                    .eq("from_game_id", game_id)\
+                    .execute()
+                deleted_count = len(delete_result.data) if delete_result.data else 0
                 
                 if deleted_count > 0:
                     print(f"   🗑️  Deleted {deleted_count} position(s) linked to game {game_id}")
@@ -179,7 +153,6 @@ class GameWindowManager:
             pattern_summary = self.extract_pattern_summary(oldest)
             
             # Update game: remove full details, keep pattern_summary
-            from psycopg2.extras import Json
             from datetime import datetime as dt
             updates = {
                 "game_review": None,  # Remove full review
@@ -187,39 +160,21 @@ class GameWindowManager:
                 "eval_trace": None,  # Remove eval trace
                 "time_trace": None,  # Remove time trace
                 "key_points": None,  # Remove key points
-                "pattern_summary": Json(pattern_summary) if pattern_summary else None,  # Keep pattern data
+                "pattern_summary": pattern_summary if pattern_summary else None,  # Keep pattern data
                 "compressed_at": dt.utcnow().isoformat() + "Z"
             }
             
-            # Check if it's LocalPostgresClient
-            if hasattr(self.supabase, '_execute_update'):
-                rowcount = self.supabase._execute_update(
-                    "public.games",
-                    updates,
-                    "id = %s",
-                    (game_id,)
-                )
-                if rowcount > 0:
-                    print(f"   ✅ Compressed game {game_id}")
-                    return game_id
-                else:
-                    print(f"   ⚠️  Failed to compress game {game_id} (no rows updated)")
-                    return None
-            else:
-                result = self.supabase.client.table("games")\
-                    .update(updates)\
-                    .eq("id", game_id)\
-                    .execute()
-                
-                if result.data:
-                    print(f"   ✅ Compressed game {game_id}")
-                    return game_id
-                else:
-                    print(f"   ⚠️  Failed to compress game {game_id}")
-                    return None
+            result = self.supabase.client.table("games")\
+                .update(updates)\
+                .eq("id", game_id)\
+                .execute()
             
-            # This should never be reached, but just in case
-            return None
+            if result.data:
+                print(f"   ✅ Compressed game {game_id}")
+                return game_id
+            else:
+                print(f"   ⚠️  Failed to compress game {game_id}")
+                return None
         except Exception as e:
             print(f"   ❌ Error compressing game: {e}")
             import traceback
@@ -251,34 +206,6 @@ class GameWindowManager:
     def get_compressed_games(self, user_id: str, limit: Optional[int] = None) -> List[Dict]:
         """Get compressed games (pattern_summary only) for pattern analysis"""
         try:
-            # Check if it's LocalPostgresClient (has get_compressed_games method)
-            if hasattr(self.supabase, 'get_compressed_games'):
-                return self.supabase.get_compressed_games(user_id, limit)
-            
-            # Otherwise use Supabase client
-            query = self.supabase.client.table("games")\
-                .select("id,pattern_summary,game_date,result,user_rating,opponent_rating,opening_eco,opening_name,time_control,time_category,user_color,platform,external_id")\
-                .eq("user_id", user_id)\
-                .not_.is_("pattern_summary", "null")\
-                .order("game_date", desc=False)
-            
-            if limit:
-                query = query.limit(limit)
-            
-            result = query.execute()
-            return result.data if result.data else []
-        except Exception as e:
-            print(f"⚠️ Error getting compressed games: {e}")
-            return []
-    
-    def get_compressed_games(self, user_id: str, limit: Optional[int] = None) -> List[Dict]:
-        """Get compressed games (pattern_summary only) for pattern analysis"""
-        try:
-            # Check if it's LocalPostgresClient (has get_compressed_games method)
-            if hasattr(self.supabase, 'get_compressed_games'):
-                return self.supabase.get_compressed_games(user_id, limit)
-            
-            # Otherwise use Supabase client
             query = self.supabase.client.table("games")\
                 .select("id,pattern_summary,game_date,result,user_rating,opponent_rating,opening_eco,opening_name,time_control,time_category,user_color,platform,external_id")\
                 .eq("user_id", user_id)\

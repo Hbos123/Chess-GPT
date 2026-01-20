@@ -365,3 +365,4 @@ class InvestigationReducer:
         
         return "\n".join(parts)
 
+

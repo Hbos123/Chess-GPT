@@ -6,7 +6,7 @@ import { fetchProfileOverview, fetchProfileStats } from "@/lib/api";
 import { getBackendBase } from "@/lib/backendBase";
 import OverviewTab from "./tabs/OverviewTab";
 import RecentGamesTab from "./tabs/RecentGamesTab";
-import LifetimeStatsTab from "./tabs/LifetimeStatsTab";
+import GraphsTab from "./tabs/GraphsTab";
 import HabitsPatternsTab from "./tabs/HabitsPatternsTab";
 import TrainingTab from "./tabs/TrainingTab";
 import PersonalReview from "@/components/PersonalReview";
@@ -18,19 +18,115 @@ interface ProfileDashboardProps {
   onCreateNewTab?: (params: any) => void;
 }
 
-export type TabType = 'overview' | 'recent' | 'lifetime' | 'habits' | 'training';
+export type TabType = 'overview' | 'recent' | 'graphs' | 'habits' | 'training';
 
 export default function ProfileDashboard({ onClose, initialTab = 'overview', onCreateNewTab }: ProfileDashboardProps) {
   const { user } = useAuth();
-  const [activeTab, setActiveTab] = useState<TabType>(initialTab as TabType);
-  const [loading, setLoading] = useState(true);
+  const normalizedInitialTab = (initialTab === "lifetime" ? "graphs" : initialTab) as TabType;
+  const [activeTab, setActiveTab] = useState<TabType>(normalizedInitialTab);
+  
+  // TEMPORARY: Dummy data for formatting work - REMOVE AFTER FORMATTING IS DONE
+  const DUMMY_ANALYTICS_DATA = {
+    lifetime_stats: {
+      total_games: 247,
+      wins: 142,
+      losses: 78,
+      draws: 27,
+      win_rate: 57.5,
+      average_accuracy: 78.3,
+      blunder_rate: 4.2,
+      mistake_rate: 8.7,
+      inaccuracy_rate: 12.1
+    },
+    patterns: {
+      top_openings: [
+        { name: "Sicilian Defense", games: 45, win_rate: 62.2, accuracy: 79.1 },
+        { name: "Queen's Gambit", games: 38, win_rate: 55.3, accuracy: 76.8 },
+        { name: "King's Indian Defense", games: 32, win_rate: 50.0, accuracy: 75.2 }
+      ],
+      phase_performance: {
+        opening: 82.1,
+        middlegame: 76.5,
+        endgame: 81.3
+      },
+      piece_accuracy: {
+        Pawn: { accuracy: 79.2, count: 1245 },
+        Knight: { accuracy: 75.8, count: 456 },
+        Bishop: { accuracy: 77.3, count: 432 },
+        Rook: { accuracy: 78.9, count: 678 },
+        Queen: { accuracy: 76.1, count: 234 },
+        King: { accuracy: 81.5, count: 189 }
+      }
+    },
+    strength_profile: {
+      overall_rating_estimate: 1650,
+      diagnostic_insights: [
+        "Strong endgame technique with 81.3% accuracy",
+        "Tendency to blunder in time pressure situations",
+        "Excellent pawn structure understanding"
+      ],
+      tendencies: [
+        { title: "Positional Player", detail: "Prefers strategic play over tactical complications", confidence: "High" },
+        { title: "Time Management", detail: "Struggles in blitz time controls", confidence: "Medium" }
+      ]
+    },
+    rolling_window: {
+      last_30_games: {
+        win_rate: 60.0,
+        average_accuracy: 79.5,
+        trend: "improving"
+      }
+    },
+    deltas: {
+      accuracy_change: 2.3,
+      win_rate_change: 5.2
+    },
+    tag_transitions: {
+      gained: {
+        "Positional Advantage": { accuracy: 82.1, count: 45, blunders: 2, mistakes: 5, inaccuracies: 8, significance_score: 0.85 },
+        "Endgame Technique": { accuracy: 84.3, count: 38, blunders: 1, mistakes: 3, inaccuracies: 6, significance_score: 0.78 }
+      },
+      lost: {
+        "Time Pressure": { accuracy: 68.2, count: 32, blunders: 8, mistakes: 12, inaccuracies: 15, significance_score: 0.72 },
+        "Tactical Awareness": { accuracy: 71.5, count: 28, blunders: 6, mistakes: 10, inaccuracies: 13, significance_score: 0.65 }
+      }
+    }
+  };
+
+  const DUMMY_PROFILE_STATUS = {
+    state: "completed",
+    message: "Profile analysis complete",
+    total_accounts: 2,
+    completed_accounts: 2,
+    total_games_estimate: 247,
+    games_indexed: 247,
+    progress_percent: 100,
+    started_at: "2026-01-15T10:00:00Z",
+    finished_at: "2026-01-15T10:45:00Z",
+    last_updated: "2026-01-19T19:00:00Z"
+  };
+
+  const DUMMY_PATTERN_HISTORY = {
+    current: [
+      { pattern_name: "Positional Advantage", pattern_type: "current", accuracy: 82.1, count: 45, trend: "improving" },
+      { pattern_name: "Endgame Technique", pattern_type: "current", accuracy: 84.3, count: 38, trend: "stable" }
+    ],
+    historical: [
+      { pattern_name: "Time Pressure", pattern_type: "historical", accuracy: 68.2, count: 32, trend: "declining" },
+      { pattern_name: "Tactical Awareness", pattern_type: "historical", accuracy: 71.5, count: 28, trend: "declining" }
+    ]
+  };
+
+  const [loading, setLoading] = useState(false); // Set to false immediately for dummy data
   const [error, setError] = useState<string | null>(null);
-  const [analyticsData, setAnalyticsData] = useState<any>(null);
-  const [profileStatus, setProfileStatus] = useState<any>(null);
+  const [analyticsData, setAnalyticsData] = useState<any>(DUMMY_ANALYTICS_DATA);
+  const [profileStatus, setProfileStatus] = useState<any>(DUMMY_PROFILE_STATUS);
   const [showPersonalReview, setShowPersonalReview] = useState(false);
-  const [patternHistory, setPatternHistory] = useState<{current: any[], historical: any[]}>({current: [], historical: []});
+  const [patternHistory, setPatternHistory] = useState<{current: any[], historical: any[]}>(DUMMY_PATTERN_HISTORY);
   const backendBase = getBackendBase();
 
+  // TEMPORARY: Comment out all fetch logic - UNCOMMENT AFTER FORMATTING IS DONE
+  /*
   // Load profile status to get analyzed games count - poll more frequently when analyzing
   useEffect(() => {
     if (!user?.id) return;
@@ -83,7 +179,10 @@ export default function ProfileDashboard({ onClose, initialTab = 'overview', onC
       clearInterval(statusCheckInterval);
     };
   }, [user?.id, backendBase, profileStatus?.state]);
+  */ // END TEMPORARY COMMENT
 
+  // TEMPORARY: Comment out pattern history fetch - UNCOMMENT AFTER FORMATTING IS DONE
+  /*
   // Fetch pattern history for graphing
   useEffect(() => {
     if (!user?.id) return;
@@ -379,19 +478,21 @@ export default function ProfileDashboard({ onClose, initialTab = 'overview', onC
       clearInterval(statusCheckInterval);
     };
   }, [user?.id, backendBase, profileStatus?.state]);
+  */ // END TEMPORARY COMMENT - UNCOMMENT ABOVE AFTER FORMATTING IS DONE
 
-  const tabs: { id: TabType; label: string; icon: string }[] = [
-    { id: 'overview', label: 'Overview', icon: '📊' },
-    { id: 'recent', label: 'Recent Games', icon: '🕒' },
-    { id: 'lifetime', label: 'Lifetime Stats', icon: '🏆' },
-    { id: 'habits', label: 'Habits & Patterns', icon: '🧠' },
-    { id: 'training', label: 'Training', icon: '🎯' },
+  const tabs: { id: TabType; label: string }[] = [
+    { id: 'overview', label: 'Overview' },
+    { id: 'recent', label: 'Recent Games' },
+    { id: 'graphs', label: 'Graphs' },
+    { id: 'habits', label: 'Habits & Patterns' },
+    { id: 'training', label: 'Training' },
   ];
 
   return (
     <div className="profile-dashboard-overlay" onClick={onClose}>
       <div className="profile-dashboard-container" onClick={(e) => e.stopPropagation()}>
-        <div className="profile-dashboard-sidebar">
+        {/* Desktop Sidebar - hidden on mobile */}
+        <div className="profile-dashboard-sidebar desktop-only">
           <div className="sidebar-header">
             <div className="user-avatar-large">
               {user?.email?.[0].toUpperCase() || 'P'}
@@ -405,7 +506,6 @@ export default function ProfileDashboard({ onClose, initialTab = 'overview', onC
                 className={`nav-item ${activeTab === tab.id ? 'active' : ''}`}
                 onClick={() => setActiveTab(tab.id)}
               >
-                <span className="nav-icon">{tab.icon}</span>
                 <span className="nav-label">{tab.label}</span>
               </button>
             ))}
@@ -417,7 +517,22 @@ export default function ProfileDashboard({ onClose, initialTab = 'overview', onC
           </div>
         </div>
 
+        {/* Main Content Area */}
         <div className="profile-dashboard-main">
+          {/* Mobile Header - shown only on mobile */}
+          <div className="mobile-header mobile-only">
+            <div className="mobile-header-content">
+              <div className="user-avatar-small">
+                {user?.email?.[0].toUpperCase() || 'P'}
+              </div>
+              <h3>Your Profile</h3>
+              <button className="close-dashboard-btn-mobile" onClick={onClose}>
+                ×
+              </button>
+            </div>
+          </div>
+
+          {/* Content */}
           {loading ? (
             <div className="dashboard-loading">
               <div className="spinner"></div>
@@ -435,12 +550,31 @@ export default function ProfileDashboard({ onClose, initialTab = 'overview', onC
                 />
               )}
               {activeTab === 'recent' && <RecentGamesTab userId={user?.id || ''} onCreateNewTab={onCreateNewTab} />}
-              {activeTab === 'lifetime' && <LifetimeStatsTab data={analyticsData?.lifetime_stats} />}
-              {activeTab === 'habits' && <HabitsPatternsTab userId={user?.id || ''} data={analyticsData?.patterns} />}
-              {activeTab === 'training' && <TrainingTab userId={user?.id || ''} />}
+              {activeTab === 'graphs' && <GraphsTab userId={user?.id || ''} backendBase={backendBase} />}
+              {activeTab === 'habits' && <HabitsPatternsTab userId={user?.id || ''} backendBase={backendBase} />}
+              {activeTab === 'training' && <TrainingTab userId={user?.id || ''} backendBase={backendBase} />}
             </div>
           )}
           {error && <div className="dashboard-error-banner">{error}</div>}
+        </div>
+
+        {/* Mobile bottom nav (PWA-friendly, safe-area aware) */}
+        <div
+          className="profile-dashboard-mobile-nav mobile-only"
+          onClick={(e) => e.stopPropagation()}
+        >
+          {tabs.map((tab) => (
+            <button
+              key={tab.id}
+              className={`profile-dashboard-mobile-nav-item ${
+                activeTab === tab.id ? "active" : ""
+              }`}
+              onClick={() => setActiveTab(tab.id)}
+              type="button"
+            >
+              {tab.label}
+            </button>
+          ))}
         </div>
       </div>
 
