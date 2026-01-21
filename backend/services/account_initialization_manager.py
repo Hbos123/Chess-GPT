@@ -168,7 +168,9 @@ class AccountInitializationManager:
         
         print(f"📋 [TRIGGER_ANALYSIS] Preferences loaded: {len(accounts)} accounts, {len(time_controls)} time controls")
         if accounts:
-            print(f"📋 [TRIGGER_ANALYSIS] Account details: {[f\"{a.get('platform')}/{a.get('username')}\" for a in accounts]}")
+            # NOTE: Avoid backslashes inside f-string expressions (Python syntax error).
+            account_details = [f"{a.get('platform')}/{a.get('username')}" for a in accounts]
+            print(f"📋 [TRIGGER_ANALYSIS] Account details: {account_details}")
         
         # If no preferences, check Supabase profile for linked accounts
         if not accounts and self.supabase:

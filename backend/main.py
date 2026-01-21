@@ -7,6 +7,11 @@ from contextlib import asynccontextmanager
 from io import StringIO
 import urllib.parse
 import urllib.request
+import platform
+import shutil
+import stat
+import tempfile
+import zipfile
 from datetime import datetime
 
 from fastapi import FastAPI, HTTPException, Query, UploadFile, File, Form
@@ -137,6 +142,65 @@ PRE_GENERATED_POSITIONS: Dict[str, List[Dict]] = {}
 
 STOCKFISH_PATH = os.getenv("STOCKFISH_PATH", "./stockfish")
 
+
+def _ensure_stockfish_present() -> bool:
+    """
+    Best-effort: ensure a Stockfish binary exists at STOCKFISH_PATH.
+
+    This repo often relies on a build-time download step (Render blueprint). If the build
+    command is overridden, this runtime fallback keeps engine-backed features working.
+    """
+    try:
+        if os.path.exists(STOCKFISH_PATH):
+            return True
+
+        # Only auto-fetch for the default path; don't surprise users with downloads when
+        # they configured a custom STOCKFISH_PATH.
+        if os.getenv("STOCKFISH_PATH") and os.getenv("STOCKFISH_PATH") != "./stockfish":
+            return False
+
+        if platform.system().lower() != "linux":
+            return False
+
+        url = "https://github.com/official-stockfish/Stockfish/releases/download/sf_16/stockfish_16_linux_x64_avx2.zip"
+        print(f"⬇️  Stockfish missing; downloading from {url}")
+
+        target_path = os.path.abspath(STOCKFISH_PATH)
+        os.makedirs(os.path.dirname(target_path), exist_ok=True)
+
+        with tempfile.TemporaryDirectory() as td:
+            zip_path = os.path.join(td, "stockfish.zip")
+            urllib.request.urlretrieve(url, zip_path)  # nosec - static URL
+
+            extracted_path = os.path.join(td, "stockfish_extracted")
+            with zipfile.ZipFile(zip_path, "r") as zf:
+                # Preferred layout: stockfish_16_linux_x64_avx2/stockfish
+                candidate = None
+                for name in zf.namelist():
+                    if name.endswith("/stockfish") and ("linux" in name) and ("avx2" in name):
+                        candidate = name
+                        break
+                if not candidate:
+                    for name in zf.namelist():
+                        if name.endswith("/stockfish"):
+                            candidate = name
+                            break
+                if not candidate:
+                    print("⚠️  Stockfish archive did not contain a stockfish binary")
+                    return False
+
+                with zf.open(candidate) as src, open(extracted_path, "wb") as dst:
+                    shutil.copyfileobj(src, dst)
+
+            shutil.move(extracted_path, target_path)
+            os.chmod(target_path, os.stat(target_path).st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+
+        print(f"✅ Stockfish downloaded to {target_path}")
+        return True
+    except Exception as e:
+        print(f"⚠️  Failed to download Stockfish automatically: {e}")
+        return False
+
 # System prompt for the LLM
 SYSTEM_PROMPT = """You are Chess GPT. You must not invent concrete evaluations, tablebase facts, or long variations. For any concrete claims (evals, PVs, winning lines, best moves), you rely on tool outputs the client provides from backend endpoints:
 
@@ -208,6 +272,7 @@ async def lifespan(app: FastAPI):
     """Initialize and cleanup the Stockfish engine and explorer client."""
     global engine, engine_queue, PRE_GENERATED_POSITIONS, explorer_client, game_fetcher, review_aggregator, stats_manager, archive_manager, llm_planner, llm_reporter, position_miner, drill_generator, training_planner, srs_scheduler, card_databases, tool_executor, profile_indexer, profile_analytics_engine, supabase_client, engine_pool_instance
     
+    _ensure_stockfish_present()
     await initialize_engine()
     
     # Initialize engine pool for parallel analysis (4 instances)
