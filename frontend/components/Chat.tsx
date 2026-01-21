@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect } from "react";
 import type { ChatMessage, Mode, Annotation } from "@/types";
 import OpenAI from "openai";
-import EvalGraph from "./EvalGraph";
+import ChatGraph from "./ChatGraph";
 import MarkdownTable from "./MarkdownTable";
 import ExpandableTable from "./ExpandableTable";
 
@@ -350,7 +350,7 @@ export default function Chat({
           <div key={idx}>
             {msg.role === 'graph' ? (
               <div className="message message-graph">
-                <EvalGraph moves={msg.graphData || []} />
+                {msg.graphData ? <ChatGraph graphData={msg.graphData} /> : null}
               </div>
             ) : msg.role === 'button' ? (
               <div className="message message-button">

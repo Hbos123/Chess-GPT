@@ -30,6 +30,7 @@ import { stripEmojis } from "@/utils/emojiFilter";
 import type {
   Mode,
   ChatMessage,
+  ChatGraphData,
   Annotation,
   TacticsPuzzle,
   AnnotationArrow,
@@ -2783,11 +2784,12 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
       let hasGameReview = false;
       let hasPersonalReview = false;
       let shouldTriggerWalkthrough = false;
+      const graphDataCollection: any[] = []; // Collect graph data from multiple tool calls
       
       if (data.tool_calls && data.tool_calls.length > 0) {
         console.log(`🔧 Tools called (${data.iterations} iterations):`, data.tool_calls.map((tc: any) => tc.tool).join(', '));
         const miniBoards: any[] = [];
-        const graphDataCollection: any[] = []; // Collect graph data from multiple tool calls
+        // graphDataCollection is declared above so it can be referenced after this block
         
         // First pass: Check if review_full_game or fetch_and_review_games was called
         hasGameReview = data.tool_calls.some((tc: any) => tc.tool === 'review_full_game');
@@ -10286,10 +10288,43 @@ Be conversational and educational. Avoid restating move lists; focus on ideas.`;
     const plyRecords = reviewData.ply_records || [];
     
     // 1. Show eval graph
+    const evalRawValues: Array<number | null> = moves.map((m: any) => {
+      const v = m?.evalAfter;
+      return typeof v === "number" && Number.isFinite(v) ? v / 100 : null; // pawns
+    });
+    const evalNums = evalRawValues.filter((v): v is number => typeof v === "number" && Number.isFinite(v));
+    const evalMin = evalNums.length ? Math.min(...evalNums) : 0;
+    const evalMax = evalNums.length ? Math.max(...evalNums) : 0;
+    const evalRange = evalMax - evalMin;
+    const evalNormalizedValues: Array<number | null> = evalRawValues.map((v) => {
+      if (v == null || !Number.isFinite(v)) return null;
+      if (evalRange <= 1e-9) return 50;
+      return ((v - evalMin) / evalRange) * 100;
+    });
+
+    const evalGraphData: ChatGraphData = {
+      graph_id: "eval_graph",
+      series: [
+        {
+          id: "eval_pawns",
+          name: "Eval (pawns)",
+          color: "#60a5fa",
+          rawValues: evalRawValues,
+          normalizedValues: evalNormalizedValues,
+        },
+      ],
+      xLabels: moves.map((m: any, idx: number) => {
+        const mn = m?.moveNumber;
+        const mv = m?.move;
+        return `${typeof mn === "number" ? mn : idx + 1}${m?.color === "b" ? "..." : "."} ${mv ?? ""}`.trim();
+      }),
+      grouping: "game",
+    };
+
     setMessages(prev => [...prev, {
       role: 'graph',
       content: '',
-      graphData: moves
+      graphData: evalGraphData
     }]);
     
     // 2. Calculate top themes per phase and overall

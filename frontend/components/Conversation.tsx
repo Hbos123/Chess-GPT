@@ -9,7 +9,7 @@ import Board from './Board';
 import PGNViewer from './PGNViewer';
 import StockfishAnalysis from './StockfishAnalysis';
 import EvaluationBar from './EvaluationBar';
-import type { AnnotationArrow, AnnotationHighlight } from '@/types';
+import type { AnnotationArrow, AnnotationHighlight, ChatGraphData } from '@/types';
 import type { MoveNode } from '@/lib/moveTree';
 
 interface Message {
@@ -22,6 +22,14 @@ interface Message {
   buttonLabel?: string;
   tableTitle?: string;
   tableContent?: string;
+  graphData?: ChatGraphData;
+  image?: {
+    data: string;
+    filename?: string;
+    mimeType?: string;
+    uploading?: boolean;
+    uploadProgress?: number;
+  };
 }
 
 interface LoadingIndicator {

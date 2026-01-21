@@ -1,4 +1,15 @@
-import type { CapacitorConfig } from "@capacitor/cli";
+// Avoid depending on @capacitor/cli at build time on Vercel.
+// This file is only relevant for Capacitor builds; for web deploys we just need TS to type-check.
+type CapacitorConfig = {
+  appId: string;
+  appName: string;
+  webDir: string;
+  bundledWebRuntime?: boolean;
+  server?: {
+    url?: string;
+    cleartext?: boolean;
+  };
+};
 
 /**
  * Capacitor config for the Next.js frontend.

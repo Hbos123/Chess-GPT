@@ -84,6 +84,26 @@ export default function GraphsTab({ userId, backendBase }: GraphsTabProps) {
     const ecos = ["B20", "D06", "E90", "C00", "B12", "C50", "C65"];
     const openingIdx = i % openings.length;
     
+    const gained: Record<string, { count: number; avg_accuracy: number | null }> =
+      i % 6 === 0
+        ? {
+            "Positional Advantage": {
+              count: 2 + Math.floor(Math.random() * 3),
+              avg_accuracy: Math.round((accuracy + 5) * 10) / 10,
+            },
+          }
+        : {};
+
+    const lost: Record<string, { count: number; avg_accuracy: number | null }> =
+      i % 8 === 0
+        ? {
+            "Time Pressure": {
+              count: 1 + Math.floor(Math.random() * 2),
+              avg_accuracy: Math.round((accuracy - 8) * 10) / 10,
+            },
+          }
+        : {};
+
     return {
       index: i,
       game_id: `game-${1000 + i}`,
@@ -107,8 +127,8 @@ export default function GraphsTab({ userId, backendBase }: GraphsTabProps) {
         "endgame": { accuracy: Math.round((accuracy + 4 + Math.random() * 3) * 10) / 10, count: 8 + Math.floor(Math.random() * 5) }
       },
       tag_transitions: {
-        gained: i % 6 === 0 ? { "Positional Advantage": { count: 2 + Math.floor(Math.random() * 3), avg_accuracy: Math.round((accuracy + 5) * 10) / 10 } } : {},
-        lost: i % 8 === 0 ? { "Time Pressure": { count: 1 + Math.floor(Math.random() * 2), avg_accuracy: Math.round((accuracy - 8) * 10) / 10 } } : {}
+        gained,
+        lost,
       }
     };
   });
