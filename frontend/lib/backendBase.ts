@@ -23,58 +23,61 @@ function isNgrokDomain(hostname: string): boolean {
 }
 
 export function getBackendBase(): string {
-  const envUrl = process.env.NEXT_PUBLIC_BACKEND_URL;
-  if (envUrl && String(envUrl).trim()) {
-    const raw = String(envUrl).trim();
-    // If an explicit env URL points at localhost but the user is visiting the site via LAN
-    // (e.g. iPhone hitting http://192.168.x.x:3000), "localhost" will resolve to the phone.
-    // In that case, rewrite the host to the current page hostname but keep protocol/port.
-    if (typeof window !== "undefined") {
-      try {
-        const parsed = new URL(raw);
-        const isLocalhost =
-          parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1";
-        const pageHost = window.location.hostname;
-        const pageIsLocalhost =
-          pageHost === "localhost" || pageHost === "127.0.0.1";
-        const pageIsNgrok = isNgrokDomain(pageHost);
-        
-        // If env URL is localhost but we're on ngrok, use Next.js API proxy
-        if (isLocalhost && pageIsNgrok) {
-          const proto = window.location.protocol || "https:";
-          return `${proto}//${pageHost}/api/backend`;
-        }
-        
-        if (isLocalhost && !pageIsLocalhost && !pageIsNgrok) {
-          parsed.hostname = pageHost;
-          // Keep port from envUrl; if missing, default.
-          if (!parsed.port) parsed.port = DEFAULT_BACKEND_PORT;
-          return parsed.toString().replace(/\/$/, "");
-        }
-      } catch {
-        // If URL parsing fails, fall back to raw.
-      }
-    }
-    return raw;
-  }
-
   if (typeof window !== "undefined") {
     const proto = window.location.protocol || "http:";
     const host = window.location.hostname || "localhost";
     const isNgrok = isNgrokDomain(host);
+    const isLocalhost = host === "localhost" || host === "127.0.0.1";
     
-    // If on ngrok domain, use Next.js API proxy route
-    // This proxies requests to localhost backend through Next.js
+    // For production domains (vercel.app, custom domains, etc.), always use API proxy
+    // This avoids CORS issues and keeps requests server-side
+    if (!isLocalhost && !isNgrok) {
+      return `${proto}//${host}/api/backend`;
+    }
+    
+    const envUrl = process.env.NEXT_PUBLIC_BACKEND_URL;
+    
+    // If env URL is set and we're on localhost/ngrok, handle special cases
+    if (envUrl && String(envUrl).trim()) {
+      const raw = String(envUrl).trim();
+      try {
+        const parsed = new URL(raw);
+        const isLocalhostUrl = parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1";
+        
+        // If env URL is localhost but we're on ngrok, use API proxy
+        if (isLocalhostUrl && isNgrok) {
+          return `https://${host}/api/backend`;
+        }
+        
+        // If env URL is localhost but we're on LAN, rewrite hostname
+        if (isLocalhostUrl && !isLocalhost && !isNgrok) {
+          parsed.hostname = host;
+          if (!parsed.port) parsed.port = DEFAULT_BACKEND_PORT;
+          return parsed.toString().replace(/\/$/, "");
+        }
+        
+        // For localhost with localhost URL, use direct connection
+        if (isLocalhost && isLocalhostUrl) {
+          return raw;
+        }
+      } catch {
+        // If URL parsing fails, fall back to API proxy for production
+        if (!isLocalhost && !isNgrok) {
+          return `${proto}//${host}/api/backend`;
+        }
+      }
+    }
+    
+    // For ngrok, use API proxy
     if (isNgrok) {
-      // Force HTTPS for ngrok to avoid mixed content issues
       return `https://${host}/api/backend`;
     }
     
-    // For localhost or LAN access, use the protocol and add port
-    return `${proto}//${host}:${DEFAULT_BACKEND_PORT}`;
+    // For localhost without env URL, use direct connection with port
+    if (isLocalhost) {
+      return `${proto}//${host}:${DEFAULT_BACKEND_PORT}`;
+    }
   }
 
   return `http://localhost:${DEFAULT_BACKEND_PORT}`;
 }
-
-
