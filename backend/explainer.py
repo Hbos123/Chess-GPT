@@ -31,7 +31,7 @@ class Explainer:
         """
         self.client = openai_client
         self.llm_router = llm_router
-        self.model = os.getenv("EXPLAINER_MODEL", "gpt-4o-mini")
+        self.model = os.getenv("EXPLAINER_MODEL", "gpt-5-mini")
         self._last_prompt_audit: Optional[Dict[str, Any]] = None
 
     async def explain(

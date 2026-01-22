@@ -114,8 +114,8 @@ class Planner:
         self.engine_queue = engine_queue
         self.llm_router = llm_router
         # Default to a cheaper/faster model; can be overridden via PLANNER_MODEL.
-        # "gpt-4 mini" in OpenAI model naming is typically "gpt-4o-mini".
-        self.model = os.getenv("PLANNER_MODEL", "gpt-4o-mini")
+        # "gpt-4 mini" in OpenAI model naming is typically "gpt-5-mini".
+        self.model = os.getenv("PLANNER_MODEL", "gpt-5-mini")
         self.engine_move_drop_threshold_cp = 120  # cp gap allowed between best and alternative candidates
         # Speed: depth used only for *candidate selection* (not the main investigations).
         # Keep this lower to reduce latency without impacting final quality (the Investigator does deeper work).

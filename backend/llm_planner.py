@@ -22,7 +22,7 @@ class LLMPlanner:
         self.llm_router = llm_router
         # This is the "planner" for personal review queries (not the 4-layer executor Planner).
         # Default to a cheaper model; can be overridden via PERSONAL_REVIEW_PLANNER_MODEL.
-        self.model = os.getenv("PERSONAL_REVIEW_PLANNER_MODEL", "gpt-4o-mini")
+        self.model = os.getenv("PERSONAL_REVIEW_PLANNER_MODEL", "gpt-5-mini")
     
     def plan_analysis(self, query: str, games: List[Dict]) -> Dict[str, Any]:
         """

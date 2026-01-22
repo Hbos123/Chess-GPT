@@ -64,6 +64,7 @@ from engine_queue import StockfishQueue
 from board_vision import analyze_board_image, BoardVisionError
 from concurrent.futures import ProcessPoolExecutor
 from parallel_analyzer import compute_themes_and_tags, compute_theme_scores
+from llm_router import LLMRouter, LLMRouterConfig
 
 load_dotenv()
 
@@ -597,14 +598,41 @@ async def lifespan(app: FastAPI):
             game_window_manager = None
             account_init_manager = None
     
-    llm_planner = LLMPlanner(openai_client)
-    llm_reporter = LLMReporter(openai_client)
+    # Initialize LLMRouter with OpenAI provider (GPT-5-mini) - "openai-vllm route"
+    # This provides session management, prefix caching, and identical structure to vLLM calls
+    llm_router = None
+    if openai_client:
+        try:
+            # Configure router to use OpenAI provider with GPT-5-mini
+            # Set LLM_PROVIDER=openai and VLLM_ONLY=false to enable OpenAI provider
+            router_config = LLMRouterConfig(
+                openai_api_key=openai_api_key,
+                vllm_only=False,  # Allow OpenAI provider
+            )
+            # Set environment variables to force OpenAI provider for all stages
+            # These are kept set for the duration of the application
+            # Components will use OpenAI provider via _stage_provider() function
+            os.environ["LLM_PROVIDER"] = "openai"
+            os.environ["VLLM_ONLY"] = "false"
+            
+            llm_router = LLMRouter(config=router_config)
+            
+            print("✅ LLMRouter initialized (openai-vllm route) with GPT-5-mini")
+            print("   📍 All LLM calls will use OpenAI provider via router")
+        except Exception as e:
+            print(f"⚠️  Failed to initialize LLMRouter: {e}")
+            import traceback
+            traceback.print_exc()
+            llm_router = None
+    
+    llm_planner = LLMPlanner(openai_client, llm_router=llm_router)
+    llm_reporter = LLMReporter(openai_client, llm_router=llm_router)
     print("✅ Personal Review system initialized")
     
     # Initialize Training & Drill components
-    position_miner = PositionMiner(openai_client)
+    position_miner = PositionMiner(openai_client, llm_router=llm_router)
     drill_generator = DrillGenerator()
-    training_planner = TrainingPlanner(openai_client)
+    training_planner = TrainingPlanner(openai_client, llm_router=llm_router)
     srs_scheduler = SRSScheduler()
     print("✅ Training & Drill system initialized")
     
@@ -618,7 +646,8 @@ async def lifespan(app: FastAPI):
         srs_scheduler=srs_scheduler,
         supabase_client=supabase_client,
         openai_client=openai_client
-    )
+    ),
+        llm_router=llm_router
     print("✅ Tool executor initialized for chat")
     
     # Initialize Request Interpreter for chat preprocessing
@@ -3278,7 +3307,7 @@ def check_lichess_masters(fen: str) -> dict:
 
 class LLMRequest(BaseModel):
     messages: List[Dict[str, str]]
-    model: str = "gpt-4o-mini"
+    model: str = "gpt-5-mini"
     temperature: float = 0.7
     use_tools: bool = True  # Enable function calling
     context: Optional[Dict[str, Any]] = None  # Board state, PGN, mode, etc.
@@ -5127,7 +5156,7 @@ Return JSON:
 
         # Call LLM
         response = openai_client.chat.completions.create(
-            model="gpt-4o-mini",
+            model="gpt-5-mini",
             messages=[
                 {"role": "system", "content": "You are a chess lesson planner. Return valid JSON only."},
                 {"role": "user", "content": prompt}
