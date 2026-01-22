@@ -2559,18 +2559,9 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
     graphData?: any
   }> {
     try {
-      // Prepend strict tool-usage system guidance (do not rely on NL heuristics)
-      const toolInstr = {
-        role: 'system',
-        content: [
-          'TOOL POLICY:',
-          '- Always use setup_position to display or update a board when the user references an opening, mentions a position, provides FEN/PGN, or asks to set something up.',
-          '- Always use review_full_game when user asks to "review the game", "analyze my game", or "check this game", passing the PGN from context.pgn if available.',
-          '- Do NOT describe the setup verbally if a board change is needed—call setup_position with pgn and/or fen (include orientation when implied).',
-          '- After tool calls, provide a concise follow-up answer. If no board change is needed, explain briefly and suggest a setup_position call if appropriate.'
-        ].join('\n')
-      } as any;
-      const finalMessages = [toolInstr, ...messages];
+      // Note: backend replaces the first system message with its interpreter-driven prompt,
+      // so adding extra system-level tool policy here is redundant and wastes tokens.
+      const finalMessages = messages;
       // Build context for tools - include cached analysis if available
       // In DISCUSS/ANALYZE, raw cached analysis is redundant with baseline intuition.
       // Keep cached_analysis only for PLAY/lesson loops where move-quality depends on it.
@@ -3273,19 +3264,9 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
       const streamRunId = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
       // Local capture of what the UI actually received during this run.
       const streamedStatusHistory: any[] = [];
-
-      // Prepend strict tool-usage system guidance
-      const toolInstr = {
-        role: 'system',
-        content: [
-          'TOOL POLICY:',
-          '- Always use setup_position to display or update a board when the user references an opening, mentions a position, provides FEN/PGN, or asks to set something up.',
-          '- Always use review_full_game when user asks to "review the game", "analyze my game", or "check this game", passing the PGN from context.pgn if available.',
-          '- Do NOT describe the setup verbally if a board change is needed—call setup_position with pgn and/or fen (include orientation when implied).',
-          '- After tool calls, provide a concise follow-up answer. If no board change is needed, explain briefly and suggest a setup_position call if appropriate.'
-        ].join('\n')
-      } as any;
-      const finalMessages = [toolInstr, ...messages];
+      // Note: backend replaces the first system message with its interpreter-driven prompt,
+      // so adding extra system-level tool policy here is redundant and wastes tokens.
+      const finalMessages = messages;
       
       // Build context
       const cachedAnalysis = analysisCache[fen];

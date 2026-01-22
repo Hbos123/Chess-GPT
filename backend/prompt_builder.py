@@ -124,7 +124,7 @@ def format_analyses_for_prompt(analyses: Dict[str, Any]) -> str:
             }
             # Remove None values
             summary = {k: v for k, v in summary.items() if v is not None}
-            parts.append(f"### {tool_name} Results\n{json.dumps(summary, indent=2)}")
+            parts.append(f"### {tool_name} Results\n{json.dumps(summary, separators=(',', ':'), ensure_ascii=False)}")
         elif isinstance(result, dict):
             # For other large dicts, summarize key fields
             summary_fields = ["success", "narrative", "summary", "stats", "games_analyzed"]
@@ -138,10 +138,10 @@ def format_analyses_for_prompt(analyses: Dict[str, Any]) -> str:
                     summary[field] = val
             
             if summary:
-                parts.append(f"### {tool_name} Results\n{json.dumps(summary, indent=2)}")
+                parts.append(f"### {tool_name} Results\n{json.dumps(summary, separators=(',', ':'), ensure_ascii=False)}")
             else:
                 # Fallback: just show keys and truncate
-                result_str = json.dumps(result, indent=2)
+                result_str = json.dumps(result, separators=(",", ":"), ensure_ascii=False)
                 if len(result_str) > MAX_RESULT_SIZE:
                     result_str = result_str[:MAX_RESULT_SIZE] + "..."
                 parts.append(f"### {tool_name} Results\n{result_str}")
@@ -173,7 +173,7 @@ def build_interpreter_driven_prompt(
         Complete system prompt string
     """
     # Format selected data with size limits
-    context_str = json.dumps(filtered_context, indent=2) if filtered_context else "No context selected."
+    context_str = json.dumps(filtered_context, separators=(",", ":"), ensure_ascii=False) if filtered_context else "No context selected."
     # Truncate context if too large (max 5000 chars)
     MAX_CONTEXT_SIZE = 5000
     if len(context_str) > MAX_CONTEXT_SIZE:
