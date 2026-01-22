@@ -409,8 +409,13 @@ class LLMRouter:
         if temperature is not None and "gpt-5" not in chosen_model.lower():
             kwargs["temperature"] = temperature
         if max_tokens is not None:
-            # vLLM usually supports max_tokens; keep this as a compatibility knob.
-            kwargs["max_tokens"] = int(max_tokens)
+            # GPT-5 models require max_completion_tokens instead of max_tokens
+            model_lower = chosen_model.lower() if chosen_model else ""
+            if "gpt-5" in model_lower:
+                kwargs["max_completion_tokens"] = int(max_tokens)
+            else:
+                # vLLM and other models support max_tokens
+                kwargs["max_tokens"] = int(max_tokens)
 
         # vLLM-only by default. Any fallback must be explicitly disabled by config.
         # (Your deployment choice: fail fast, no silent provider switching.)
