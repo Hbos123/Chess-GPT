@@ -1795,9 +1795,12 @@ Output ONLY valid JSON:"""
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt}
                 ],
-                "max_tokens": 1500   # Allow more detailed plans with expanded context
             }
-            if not self.model.startswith("gpt-5"):
+            # GPT-5 models require max_completion_tokens instead of max_tokens
+            if self.model.startswith("gpt-5"):
+                llm_kwargs["max_completion_tokens"] = 1500
+            else:
+                llm_kwargs["max_tokens"] = 1500
                 llm_kwargs["temperature"] = 0.3  # Slightly higher for more natural understanding
             
             response = self.client.chat.completions.create(**llm_kwargs)
