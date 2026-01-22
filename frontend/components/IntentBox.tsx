@@ -19,20 +19,30 @@ interface IntentBoxProps {
 export function IntentBox({ intent, toolsUsed, statusHistory, mode }: IntentBoxProps) {
   const [isExpanded, setIsExpanded] = useState(false);
   
+  // Deduplicate history so repeated early-phase messages (e.g. "Understanding your request...")
+  // don't spam the expanded view (this matches StatusIndicator behavior).
+  const uniqueHistory = useMemo(() => {
+    const src = Array.isArray(statusHistory) ? statusHistory : [];
+    return src.reduce((acc: StatusMessage[], msg) => {
+      if (acc.some(m => m.message === msg.message && m.phase === msg.phase)) return acc;
+      return [...acc, msg];
+    }, []);
+  }, [uniqueHistory]);
+
   // Calculate thinking time from status history
   const thinkingTime = useMemo(() => {
-    if (!statusHistory || statusHistory.length < 2) return null;
-    const first = statusHistory[0]?.timestamp || 0;
-    const last = statusHistory[statusHistory.length - 1]?.timestamp || 0;
+    if (!uniqueHistory || uniqueHistory.length < 2) return null;
+    const first = uniqueHistory[0]?.timestamp || 0;
+    const last = uniqueHistory[uniqueHistory.length - 1]?.timestamp || 0;
     const seconds = (last - first);
     return seconds > 1000 ? (seconds / 1000).toFixed(1) : seconds.toFixed(1);
-  }, [statusHistory]);
+  }, [uniqueHistory]);
   
   if (!intent && toolsUsed.length === 0) {
     return null;
   }
   
-  const hasHistory = statusHistory && statusHistory.length > 0;
+  const hasHistory = uniqueHistory && uniqueHistory.length > 0;
   
   return (
     <div className="intent-whisper">
@@ -54,7 +64,7 @@ export function IntentBox({ intent, toolsUsed, statusHistory, mode }: IntentBoxP
       {/* Expanded chain of thought */}
       {isExpanded && hasHistory && (
         <div className="chain-expanded">
-          {statusHistory.map((status, idx) => (
+          {uniqueHistory.map((status, idx) => (
             <div key={idx} className="chain-line">
               <span className="chain-message">{status.message}</span>
               {status.tool && <span className="tool-name">({status.tool})</span>}

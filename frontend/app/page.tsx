@@ -137,6 +137,8 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
   const [liveStatusMessages, setLiveStatusMessages] = useState<any[]>([]); // Live status during LLM call
   const [factsByTask, setFactsByTask] = useState<Record<string, any>>({});
   const lastStatusUpdateRef = useRef<number>(0); // Throttle status updates to prevent flashing
+  // Prevent cross-run mixing (e.g. if a previous SSE stream finishes late).
+  const activeStatusRunIdRef = useRef<string | null>(null);
   const [isLLMProcessing, setIsLLMProcessing] = useState(false);
   // Treat a running SSE analysis as "in progress" so we can pause noisy background polling.
   const [analysisInProgress, setAnalysisInProgress] = useState(false);
@@ -3267,6 +3269,11 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
     graphData?: any
   }> {
     return new Promise((resolve, reject) => {
+      // Per-request run id to avoid cross-run status mixing in the UI.
+      const streamRunId = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+      // Local capture of what the UI actually received during this run.
+      const streamedStatusHistory: any[] = [];
+
       // Prepend strict tool-usage system guidance
       const toolInstr = {
         role: 'system',
@@ -3398,7 +3405,9 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
                 const eventType = currentEventType;
                 
                 if (eventType === "status") {
-                  onStatus(data);
+                  const enriched = { ...data, _runId: streamRunId };
+                  streamedStatusHistory.push(enriched);
+                  onStatus(enriched);
                 } else if (eventType === "milestone") {
                   const name = String(data?.name || "");
                   const kind = String(data?.kind || "");
@@ -3750,7 +3759,8 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
                       content: finalContent,
                       tool_calls: mergedToolCalls,
                       annotations: data.annotations,
-                      status_messages: data.status_messages,
+                      // Prefer the exact stream history we received client-side; fall back to backend summary.
+                      status_messages: (streamedStatusHistory.length > 0 ? streamedStatusHistory : (data.status_messages || [])),
                       detected_intent: data.detected_intent,
                       tools_used: data.tools_used,
                       orchestration: data.orchestration,
@@ -3775,7 +3785,7 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
                     content: finalContent,
                     tool_calls: mergedToolCalls,
                     annotations: data.annotations,
-                    status_messages: data.status_messages,
+                    status_messages: (streamedStatusHistory.length > 0 ? streamedStatusHistory : (data.status_messages || [])),
                     detected_intent: data.detected_intent,
                     tools_used: data.tools_used,
                     orchestration: data.orchestration,
@@ -5872,6 +5882,7 @@ If they ask about the game, refer to this data.
     const loaderId = addLoadingMessage('llm', 'Understanding request...');
     setIsLLMProcessing(true);
     setLiveStatusMessages([]);  // Clear previous status
+    activeStatusRunIdRef.current = null;
     
     try {
       // Build recent chat history for context (last 5 messages, keep errors)
@@ -5910,6 +5921,12 @@ If they ask about the game, refer to this data.
           const shouldAnimate = timeSinceLastUpdate > 1000;
           
           setLiveStatusMessages(prev => {
+            // Ignore late events from previous runs; lock to first seen run id.
+            const runId = (status as any)?._runId as (string | undefined);
+            if (runId) {
+              if (!activeStatusRunIdRef.current) activeStatusRunIdRef.current = runId;
+              if (activeStatusRunIdRef.current && runId !== activeStatusRunIdRef.current) return prev;
+            }
             lastStatusUpdateRef.current = now;
             const enrichedStatus = { ...status, instant: !shouldAnimate };
             
@@ -7605,6 +7622,7 @@ Answer style:
     const loaderId = addLoadingMessage('llm', 'Generating response...');
     setIsLLMProcessing(true);
     setLiveStatusMessages([]);  // Clear previous status
+    activeStatusRunIdRef.current = null;
 
     try {
       // Determine the mode from user message if needed
@@ -7695,6 +7713,12 @@ Instructions: Respond naturally and conversationally. Use themes to justify any 
           const shouldAnimate = timeSinceLastUpdate > 1000;
           
           setLiveStatusMessages(prev => {
+            // Ignore late events from previous runs; lock to first seen run id.
+            const runId = (status as any)?._runId as (string | undefined);
+            if (runId) {
+              if (!activeStatusRunIdRef.current) activeStatusRunIdRef.current = runId;
+              if (activeStatusRunIdRef.current && runId !== activeStatusRunIdRef.current) return prev;
+            }
             lastStatusUpdateRef.current = now;
             const enrichedStatus = { ...status, instant: !shouldAnimate };
             
