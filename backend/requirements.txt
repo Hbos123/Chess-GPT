@@ -1,0 +1,11 @@
+fastapi==0.115.*
+uvicorn==0.30.*
+python-chess==1.999
+pydantic==2.*
+python-dotenv==1.*
+openai==1.*
+aiohttp==3.9.*
+requests==2.*
+supabase==2.*
+python-multipart==0.0.9
+

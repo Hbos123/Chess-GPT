@@ -1,0 +1,910 @@
+{
+  "lesson_id": "ce5b5348834f",
+  "query": "London System",
+  "title": "Queen's Pawn Game: London System - Opening Lesson",
+  "description": "Learn the Queen's Pawn Game: London System with main line and popular alternatives",
+  "meta": {
+    "db": "lichess",
+    "rating_range": [
+      1600,
+      2000
+    ],
+    "speeds": [
+      "rapid",
+      "classical"
+    ],
+    "orientation": "white",
+    "eco": "D02"
+  },
+  "sections": [
+    {
+      "type": "overview",
+      "main_branch_id": "main",
+      "key_ideas": [
+        "Main line involves: d4, d5, Nf3, Nf6, Bf4, e6",
+        "Teaching from white's perspective",
+        "Based on lichess database, ratings 1600-2000"
+      ],
+      "structure": "Queen's Pawn Game: London System"
+    },
+    {
+      "type": "walkthrough",
+      "branch_id": "main",
+      "checkpoints": [
+        {
+          "fen": "rnbqkb1r/ppp1pppp/5n2/3p4/3P1B2/5N2/PPP1PPPP/RN1QKB1R b KQkq - 3 3",
+          "moves_san": [
+            "d4",
+            "d5",
+            "Nf3",
+            "Nf6",
+            "Bf4"
+          ],
+          "objective": "Find the best continuation (e6 is most popular)",
+          "popular_replies": [
+            {
+              "san": "e6",
+              "pop": 0.27721209591946105,
+              "score": 0.5276999446233225
+            },
+            {
+              "san": "Bf5",
+              "pop": 0.2017031431116373,
+              "score": 0.5160896334544063
+            },
+            {
+              "san": "Nc6",
+              "pop": 0.16745367787173296,
+              "score": 0.5635539721575689
+            },
+            {
+              "san": "c5",
+              "pop": 0.1328162989913326,
+              "score": 0.46618380892398625
+            }
+          ]
+        },
+        {
+          "fen": "rnbqkb1r/ppp2ppp/4pn2/3p4/3P1B2/4PN2/PPP2PPP/RN1QKB1R b KQkq - 0 4",
+          "moves_san": [
+            "d4",
+            "d5",
+            "Nf3",
+            "Nf6",
+            "Bf4",
+            "e6",
+            "e3"
+          ],
+          "objective": "Find the best continuation (Bd6 is most popular)",
+          "popular_replies": [
+            {
+              "san": "Bd6",
+              "pop": 0.3149894716111355,
+              "score": 0.5263652457133302
+            },
+            {
+              "san": "c5",
+              "pop": 0.3026141777723326,
+              "score": 0.5188297659002077
+            },
+            {
+              "san": "Be7",
+              "pop": 0.11546304873287204,
+              "score": 0.5492661642205474
+            }
+          ]
+        },
+        {
+          "fen": "rnbqk2r/ppp2ppp/3bpn2/3p4/3P1B2/4PN2/PPP2PPP/RN1QKB1R w KQkq - 1 5",
+          "moves_san": [
+            "d4",
+            "d5",
+            "Nf3",
+            "Nf6",
+            "Bf4",
+            "e6",
+            "e3",
+            "Bd6"
+          ],
+          "objective": "Find the best continuation (Bg3 is most popular)",
+          "popular_replies": [
+            {
+              "san": "Bg3",
+              "pop": 0.47646099270572145,
+              "score": 0.5250196225004672
+            },
+            {
+              "san": "Ne5",
+              "pop": 0.22975908935491224,
+              "score": 0.5511789052690322
+            },
+            {
+              "san": "Bxd6",
+              "pop": 0.0983374173695008,
+              "score": 0.49065555957986234
+            }
+          ]
+        },
+        {
+          "fen": "rnbqk2r/ppp2ppp/3bpn2/3p4/3P4/4PNB1/PPP2PPP/RN1QKB1R b KQkq - 2 5",
+          "moves_san": [
+            "d4",
+            "d5",
+            "Nf3",
+            "Nf6",
+            "Bf4",
+            "e6",
+            "e3",
+            "Bd6",
+            "Bg3"
+          ],
+          "objective": "Find the best continuation (O-O is most popular)",
+          "popular_replies": [
+            {
+              "san": "O-O",
+              "pop": 0.36323613858227527,
+              "score": 0.5175727501610164
+            },
+            {
+              "san": "Bxg3",
+              "pop": 0.1760671218018248,
+              "score": 0.5447997825693061
+            },
+            {
+              "san": "Ne4",
+              "pop": 0.1156925923562815,
+              "score": 0.5148903901833723
+            },
+            {
+              "san": "c5",
+              "pop": 0.09568472319700547,
+              "score": 0.5068348521893754
+            }
+          ]
+        },
+        {
+          "fen": "rnbq1rk1/ppp2ppp/3bpn2/3p4/3P4/4PNB1/PPP2PPP/RN1QKB1R w KQ - 3 6",
+          "moves_san": [
+            "d4",
+            "d5",
+            "Nf3",
+            "Nf6",
+            "Bf4",
+            "e6",
+            "e3",
+            "Bd6",
+            "Bg3",
+            "O-O"
+          ],
+          "objective": "Find the best continuation (Bd3 is most popular)",
+          "popular_replies": [
+            {
+              "san": "Bd3",
+              "pop": 0.4823648262836562,
+              "score": 0.5180902082195107
+            },
+            {
+              "san": "Nbd2",
+              "pop": 0.21264695978096954,
+              "score": 0.5350454420269898
+            },
+            {
+              "san": "c3",
+              "pop": 0.14215018813780178,
+              "score": 0.5001029972190751
+            }
+          ]
+        },
+        {
+          "fen": "rnbq1rk1/ppp2ppp/3bpn2/3p4/3P4/3BPNB1/PPP2PPP/RN1QK2R b KQ - 4 6",
+          "moves_san": [
+            "d4",
+            "d5",
+            "Nf3",
+            "Nf6",
+            "Bf4",
+            "e6",
+            "e3",
+            "Bd6",
+            "Bg3",
+            "O-O",
+            "Bd3"
+          ],
+          "objective": "Find the best continuation (c5 is most popular)",
+          "popular_replies": [
+            {
+              "san": "c5",
+              "pop": 0.3449197860962567,
+              "score": 0.48508117595436595
+            },
+            {
+              "san": "Nc6",
+              "pop": 0.11979114115629098,
+              "score": 0.5404295641187619
+            },
+            {
+              "san": "b6",
+              "pop": 0.1376753102613258,
+              "score": 0.4958776108464639
+            },
+            {
+              "san": "Ne4",
+              "pop": 0.08134900615477753,
+              "score": 0.521860465116279
+            }
+          ]
+        },
+        {
+          "fen": "rnbq1rk1/pp3ppp/3bpn2/2pp4/3P4/2PBPNB1/PP3PPP/RN1QK2R b KQ - 0 7",
+          "moves_san": [
+            "d4",
+            "d5",
+            "Nf3",
+            "Nf6",
+            "Bf4",
+            "e6",
+            "e3",
+            "Bd6",
+            "Bg3",
+            "O-O",
+            "Bd3",
+            "c5",
+            "c3"
+          ],
+          "objective": "Find the best continuation (Nc6 is most popular)",
+          "popular_replies": [
+            {
+              "san": "Nc6",
+              "pop": 0.33677474861536805,
+              "score": 0.4815583586140827
+            },
+            {
+              "san": "c4",
+              "pop": 0.20336613432274023,
+              "score": 0.5594923320994183
+            },
+            {
+              "san": "Qc7",
+              "pop": 0.19944077001666935,
+              "score": 0.4242383391749798
+            },
+            {
+              "san": "cxd4",
+              "pop": 0.11007151691132978,
+              "score": 0.5407914020517831
+            }
+          ]
+        },
+        {
+          "fen": "r1bq1rk1/pp3ppp/2nbpn2/2pp4/3P4/2PBPNB1/PP3PPP/RN1QK2R w KQ - 1 8",
+          "moves_san": [
+            "d4",
+            "d5",
+            "Nf3",
+            "Nf6",
+            "Bf4",
+            "e6",
+            "e3",
+            "Bd6",
+            "Bg3",
+            "O-O",
+            "Bd3",
+            "c5",
+            "c3",
+            "Nc6"
+          ],
+          "objective": "Find the best continuation (Nbd2 is most popular)",
+          "popular_replies": [
+            {
+              "san": "Nbd2",
+              "pop": 0.7265334252239835,
+              "score": 0.49933598937583
+            },
+            {
+              "san": "Ne5",
+              "pop": 0.11399035148173674,
+              "score": 0.48941958887545345
+            }
+          ]
+        },
+        {
+          "fen": "r1bq1rk1/pp3ppp/2nbpn2/2pp4/3P4/2PBPNB1/PP1N1PPP/R2QK2R b KQ - 2 8",
+          "moves_san": [
+            "d4",
+            "d5",
+            "Nf3",
+            "Nf6",
+            "Bf4",
+            "e6",
+            "e3",
+            "Bd6",
+            "Bg3",
+            "O-O",
+            "Bd3",
+            "c5",
+            "c3",
+            "Nc6",
+            "Nbd2"
+          ],
+          "objective": "Find the best continuation (b6 is most popular)",
+          "popular_replies": [
+            {
+              "san": "b6",
+              "pop": 0.2848441306928219,
+              "score": 0.47313301897137844
+            },
+            {
+              "san": "Re8",
+              "pop": 0.2087836571499969,
+              "score": 0.5375523638539796
+            },
+            {
+              "san": "c4",
+              "pop": 0.11707378022115325,
+              "score": 0.5776414087513341
+            },
+            {
+              "san": "cxd4",
+              "pop": 0.10511026425938652,
+              "score": 0.54888558692422
+            }
+          ]
+        },
+        {
+          "fen": "r1bq1rk1/p4ppp/1pnbpn2/2pp4/3P4/2PBPNB1/PP1N1PPP/R2QK2R w KQ - 0 9",
+          "moves_san": [
+            "d4",
+            "d5",
+            "Nf3",
+            "Nf6",
+            "Bf4",
+            "e6",
+            "e3",
+            "Bd6",
+            "Bg3",
+            "O-O",
+            "Bd3",
+            "c5",
+            "c3",
+            "Nc6",
+            "Nbd2",
+            "b6"
+          ],
+          "objective": "Find the best continuation (Ne5 is most popular)",
+          "popular_replies": [
+            {
+              "san": "Ne5",
+              "pop": 0.45082288401253917,
+              "score": 0.47674923946110387
+            },
+            {
+              "san": "Qe2",
+              "pop": 0.1336206896551724,
+              "score": 0.5135630498533724
+            },
+            {
+              "san": "e4",
+              "pop": 0.09296630094043887,
+              "score": 0.5763962065331928
+            },
+            {
+              "san": "O-O",
+              "pop": 0.13254310344827586,
+              "score": 0.48152254249815224
+            }
+          ]
+        },
+        {
+          "fen": "r1bq1rk1/p4ppp/1pnbpn2/2ppN3/3P4/2PBP1B1/PP1N1PPP/R2QK2R b KQ - 1 9",
+          "moves_san": [
+            "d4",
+            "d5",
+            "Nf3",
+            "Nf6",
+            "Bf4",
+            "e6",
+            "e3",
+            "Bd6",
+            "Bg3",
+            "O-O",
+            "Bd3",
+            "c5",
+            "c3",
+            "Nc6",
+            "Nbd2",
+            "b6",
+            "Ne5"
+          ],
+          "objective": "Find the best continuation (Bb7 is most popular)",
+          "popular_replies": [
+            {
+              "san": "Bb7",
+              "pop": 0.6811876896402254,
+              "score": 0.46500159083678017
+            },
+            {
+              "san": "Qc7",
+              "pop": 0.18855656697009102,
+              "score": 0.4867816091954023
+            }
+          ]
+        },
+        {
+          "fen": "r2q1rk1/pb3ppp/1pnbpn2/2ppN3/3P4/2PBP1B1/PP1N1PPP/R2QK2R w KQ - 2 10",
+          "moves_san": [
+            "d4",
+            "d5",
+            "Nf3",
+            "Nf6",
+            "Bf4",
+            "e6",
+            "e3",
+            "Bd6",
+            "Bg3",
+            "O-O",
+            "Bd3",
+            "c5",
+            "c3",
+            "Nc6",
+            "Nbd2",
+            "b6",
+            "Ne5",
+            "Bb7"
+          ],
+          "objective": "Find the best continuation (f4 is most popular)",
+          "popular_replies": [
+            {
+              "san": "f4",
+              "pop": 0.4665117261778999,
+              "score": 0.4916213768115942
+            },
+            {
+              "san": "Ndf3",
+              "pop": 0.18994295372913586,
+              "score": 0.41490545050055616
+            },
+            {
+              "san": "O-O",
+              "pop": 0.14219311219099937,
+              "score": 0.48959881129271915
+            }
+          ]
+        },
+        {
+          "fen": "r2q1rk1/pb3ppp/1pnbpn2/2ppN3/3P1P2/2PBP1B1/PP1N2PP/R2QK2R b KQ - 0 10",
+          "moves_san": [
+            "d4",
+            "d5",
+            "Nf3",
+            "Nf6",
+            "Bf4",
+            "e6",
+            "e3",
+            "Bd6",
+            "Bg3",
+            "O-O",
+            "Bd3",
+            "c5",
+            "c3",
+            "Nc6",
+            "Nbd2",
+            "b6",
+            "Ne5",
+            "Bb7",
+            "f4"
+          ],
+          "objective": "Find the best continuation (Ne7 is most popular)",
+          "popular_replies": [
+            {
+              "san": "Ne7",
+              "pop": 0.485531914893617,
+              "score": 0.406660823838738
+            },
+            {
+              "san": "cxd4",
+              "pop": 0.10638297872340426,
+              "score": 0.556
+            },
+            {
+              "san": "Nd7",
+              "pop": 0.08468085106382979,
+              "score": 0.5452261306532663
+            },
+            {
+              "san": "Rc8",
+              "pop": 0.0851063829787234,
+              "score": 0.52
+            }
+          ]
+        },
+        {
+          "fen": "r2q1rk1/pb2nppp/1p1bpn2/2ppN3/3P1P2/2PBP1B1/PP1N2PP/R2QK2R w KQ - 1 11",
+          "moves_san": [
+            "d4",
+            "d5",
+            "Nf3",
+            "Nf6",
+            "Bf4",
+            "e6",
+            "e3",
+            "Bd6",
+            "Bg3",
+            "O-O",
+            "Bd3",
+            "c5",
+            "c3",
+            "Nc6",
+            "Nbd2",
+            "b6",
+            "Ne5",
+            "Bb7",
+            "f4",
+            "Ne7"
+          ],
+          "objective": "Find the best continuation (O-O is most popular)",
+          "popular_replies": [
+            {
+              "san": "O-O",
+              "pop": 0.2890127388535032,
+              "score": 0.42699724517906334
+            },
+            {
+              "san": "Qf3",
+              "pop": 0.2300955414012739,
+              "score": 0.4515570934256055
+            },
+            {
+              "san": "Bh4",
+              "pop": 0.24522292993630573,
+              "score": 0.39935064935064934
+            }
+          ]
+        },
+        {
+          "fen": "r2q1rk1/pb2nppp/1p1bpn2/2ppN3/3P1P2/2PBP1B1/PP1N2PP/R2Q1RK1 b - - 2 11",
+          "moves_san": [
+            "d4",
+            "d5",
+            "Nf3",
+            "Nf6",
+            "Bf4",
+            "e6",
+            "e3",
+            "Bd6",
+            "Bg3",
+            "O-O",
+            "Bd3",
+            "c5",
+            "c3",
+            "Nc6",
+            "Nbd2",
+            "b6",
+            "Ne5",
+            "Bb7",
+            "f4",
+            "Ne7",
+            "O-O"
+          ],
+          "objective": "Find the best continuation (Nf5 is most popular)",
+          "popular_replies": [
+            {
+              "san": "Nf5",
+              "pop": 0.5548172757475083,
+              "score": 0.4281437125748503
+            },
+            {
+              "san": "Ne4",
+              "pop": 0.36212624584717606,
+              "score": 0.39908256880733944
+            }
+          ]
+        },
+        {
+          "fen": "r2q1rk1/pb3ppp/1p1bpn2/2ppNn2/3P1P2/2PBP1B1/PP1N2PP/R2Q1RK1 w - - 3 12",
+          "moves_san": [
+            "d4",
+            "d5",
+            "Nf3",
+            "Nf6",
+            "Bf4",
+            "e6",
+            "e3",
+            "Bd6",
+            "Bg3",
+            "O-O",
+            "Bd3",
+            "c5",
+            "c3",
+            "Nc6",
+            "Nbd2",
+            "b6",
+            "Ne5",
+            "Bb7",
+            "f4",
+            "Ne7",
+            "O-O",
+            "Nf5"
+          ],
+          "objective": "Find the best continuation (Bf2 is most popular)",
+          "popular_replies": [
+            {
+              "san": "Bf2",
+              "pop": 0.4550898203592814,
+              "score": 0.46710526315789475
+            },
+            {
+              "san": "Bxf5",
+              "pop": 0.32335329341317365,
+              "score": 0.4166666666666667
+            },
+            {
+              "san": "Qf3",
+              "pop": 0.11976047904191617,
+              "score": 0.5
+            }
+          ]
+        },
+        {
+          "fen": "r2q1rk1/pb3ppp/1p1bpn2/2ppNn2/3P1P2/2PBP3/PP1N1BPP/R2Q1RK1 b - - 4 12",
+          "moves_san": [
+            "d4",
+            "d5",
+            "Nf3",
+            "Nf6",
+            "Bf4",
+            "e6",
+            "e3",
+            "Bd6",
+            "Bg3",
+            "O-O",
+            "Bd3",
+            "c5",
+            "c3",
+            "Nc6",
+            "Nbd2",
+            "b6",
+            "Ne5",
+            "Bb7",
+            "f4",
+            "Ne7",
+            "O-O",
+            "Nf5",
+            "Bf2"
+          ],
+          "objective": "Find the best continuation (Be7 is most popular)",
+          "popular_replies": [
+            {
+              "san": "Be7",
+              "pop": 0.673202614379085,
+              "score": 0.49029126213592233
+            },
+            {
+              "san": "Ne4",
+              "pop": 0.24183006535947713,
+              "score": 0.36486486486486486
+            }
+          ]
+        },
+        {
+          "fen": "r2q1rk1/pb2bppp/1p2pn2/2ppNn2/3P1P2/2PBP3/PP1N1BPP/R2Q1RK1 w - - 5 13",
+          "moves_san": [
+            "d4",
+            "d5",
+            "Nf3",
+            "Nf6",
+            "Bf4",
+            "e6",
+            "e3",
+            "Bd6",
+            "Bg3",
+            "O-O",
+            "Bd3",
+            "c5",
+            "c3",
+            "Nc6",
+            "Nbd2",
+            "b6",
+            "Ne5",
+            "Bb7",
+            "f4",
+            "Ne7",
+            "O-O",
+            "Nf5",
+            "Bf2",
+            "Be7"
+          ],
+          "objective": "Find the best continuation (g4 is most popular)",
+          "popular_replies": [
+            {
+              "san": "g4",
+              "pop": 0.638095238095238,
+              "score": 0.4925373134328358
+            },
+            {
+              "san": "Qf3",
+              "pop": 0.1523809523809524,
+              "score": 0.5
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "alternates",
+      "branches": [
+        {
+          "id": "alt_0_e6",
+          "name": null,
+          "checkpoints": [
+            {
+              "fen": "rnbqkb1r/ppp2ppp/4pn2/3p4/3P1B2/4PN2/PPP2PPP/RN1QKB1R b KQkq - 0 4",
+              "moves_san": [
+                "e6",
+                "e3"
+              ],
+              "objective": "Find the best continuation (Bd6 is most popular)",
+              "popular_replies": [
+                {
+                  "san": "Bd6",
+                  "pop": 0.3149894716111355,
+                  "score": 0.5263652457133302
+                },
+                {
+                  "san": "c5",
+                  "pop": 0.3026141777723326,
+                  "score": 0.5188297659002077
+                },
+                {
+                  "san": "Be7",
+                  "pop": 0.11546304873287204,
+                  "score": 0.5492661642205474
+                }
+              ]
+            },
+            {
+              "fen": "rnbqk2r/ppp2ppp/3bpn2/3p4/3P1B2/4PN2/PPP2PPP/RN1QKB1R w KQkq - 1 5",
+              "moves_san": [
+                "e6",
+                "e3",
+                "Bd6"
+              ],
+              "objective": "Find the best continuation (Bg3 is most popular)",
+              "popular_replies": [
+                {
+                  "san": "Bg3",
+                  "pop": 0.47646099270572145,
+                  "score": 0.5250196225004672
+                },
+                {
+                  "san": "Ne5",
+                  "pop": 0.22975908935491224,
+                  "score": 0.5511789052690322
+                },
+                {
+                  "san": "Bxd6",
+                  "pop": 0.0983374173695008,
+                  "score": 0.49065555957986234
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "alt_0_Bf5",
+          "name": null,
+          "checkpoints": [
+            {
+              "fen": "rn1qkb1r/ppp1pppp/5n2/3p1b2/3P1B2/4PN2/PPP2PPP/RN1QKB1R b KQkq - 0 4",
+              "moves_san": [
+                "Bf5",
+                "e3"
+              ],
+              "objective": "Find the best continuation (e6 is most popular)",
+              "popular_replies": [
+                {
+                  "san": "e6",
+                  "pop": 0.6553066057263981,
+                  "score": 0.5114559115873176
+                },
+                {
+                  "san": "Nc6",
+                  "pop": 0.10421669123045248,
+                  "score": 0.5636387711864407
+                }
+              ]
+            },
+            {
+              "fen": "rn1qkb1r/ppp2ppp/4pn2/3p1b2/3P1B2/4PN2/PPP2PPP/RN1QKB1R w KQkq - 0 5",
+              "moves_san": [
+                "Bf5",
+                "e3",
+                "e6"
+              ],
+              "objective": "Find the best continuation (Bd3 is most popular)",
+              "popular_replies": [
+                {
+                  "san": "Bd3",
+                  "pop": 0.2839304816365341,
+                  "score": 0.5204016372473779
+                },
+                {
+                  "san": "c4",
+                  "pop": 0.1626530288823444,
+                  "score": 0.5318583172637775
+                },
+                {
+                  "san": "Nbd2",
+                  "pop": 0.16173848734168858,
+                  "score": 0.5101657548787458
+                },
+                {
+                  "san": "c3",
+                  "pop": 0.16238559976756778,
+                  "score": 0.5078379147690306
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "drill",
+      "fens": [
+        "rnbqkb1r/ppp1pppp/5n2/3p4/3P1B2/5N2/PPP1PPPP/RN1QKB1R b KQkq - 3 3",
+        "rnbqkb1r/ppp2ppp/4pn2/3p4/3P1B2/4PN2/PPP2PPP/RN1QKB1R b KQkq - 0 4",
+        "rnbqk2r/ppp2ppp/3bpn2/3p4/3P1B2/4PN2/PPP2PPP/RN1QKB1R w KQkq - 1 5",
+        "rnbqk2r/ppp2ppp/3bpn2/3p4/3P4/4PNB1/PPP2PPP/RN1QKB1R b KQkq - 2 5",
+        "rnbq1rk1/ppp2ppp/3bpn2/3p4/3P4/4PNB1/PPP2PPP/RN1QKB1R w KQ - 3 6",
+        "rnbq1rk1/ppp2ppp/3bpn2/3p4/3P4/3BPNB1/PPP2PPP/RN1QK2R b KQ - 4 6",
+        "rnbq1rk1/pp3ppp/3bpn2/2pp4/3P4/2PBPNB1/PP3PPP/RN1QK2R b KQ - 0 7",
+        "r1bq1rk1/pp3ppp/2nbpn2/2pp4/3P4/2PBPNB1/PP3PPP/RN1QK2R w KQ - 1 8",
+        "r1bq1rk1/pp3ppp/2nbpn2/2pp4/3P4/2PBPNB1/PP1N1PPP/R2QK2R b KQ - 2 8",
+        "r1bq1rk1/p4ppp/1pnbpn2/2pp4/3P4/2PBPNB1/PP1N1PPP/R2QK2R w KQ - 0 9",
+        "r1bq1rk1/p4ppp/1pnbpn2/2ppN3/3P4/2PBP1B1/PP1N1PPP/R2QK2R b KQ - 1 9",
+        "r2q1rk1/pb3ppp/1pnbpn2/2ppN3/3P4/2PBP1B1/PP1N1PPP/R2QK2R w KQ - 2 10",
+        "r2q1rk1/pb3ppp/1pnbpn2/2ppN3/3P1P2/2PBP1B1/PP1N2PP/R2QK2R b KQ - 0 10",
+        "r2q1rk1/pb2nppp/1p1bpn2/2ppN3/3P1P2/2PBP1B1/PP1N2PP/R2QK2R w KQ - 1 11",
+        "r2q1rk1/pb2nppp/1p1bpn2/2ppN3/3P1P2/2PBP1B1/PP1N2PP/R2Q1RK1 b - - 2 11",
+        "r2q1rk1/pb3ppp/1p1bpn2/2ppNn2/3P1P2/2PBP1B1/PP1N2PP/R2Q1RK1 w - - 3 12",
+        "r2q1rk1/pb3ppp/1p1bpn2/2ppNn2/3P1P2/2PBP3/PP1N1BPP/R2Q1RK1 b - - 4 12",
+        "r2q1rk1/pb2bppp/1p2pn2/2ppNn2/3P1P2/2PBP3/PP1N1BPP/R2Q1RK1 w - - 5 13",
+        "rnbqkb1r/ppp2ppp/4pn2/3p4/3P1B2/4PN2/PPP2PPP/RN1QKB1R b KQkq - 0 4",
+        "rnbqk2r/ppp2ppp/3bpn2/3p4/3P1B2/4PN2/PPP2PPP/RN1QKB1R w KQkq - 1 5",
+        "rn1qkb1r/ppp1pppp/5n2/3p1b2/3P1B2/4PN2/PPP2PPP/RN1QKB1R b KQkq - 0 4",
+        "rn1qkb1r/ppp2ppp/4pn2/3p1b2/3P1B2/4PN2/PPP2PPP/RN1QKB1R w KQkq - 0 5"
+      ]
+    }
+  ],
+  "practice_count": 22,
+  "main_line_moves": [
+    "d4",
+    "d5",
+    "Nf3",
+    "Nf6",
+    "Bf4",
+    "e6",
+    "e3",
+    "Bd6",
+    "Bg3",
+    "O-O",
+    "Bd3",
+    "c5",
+    "c3",
+    "Nc6",
+    "Nbd2",
+    "b6",
+    "Ne5",
+    "Bb7",
+    "f4",
+    "Ne7",
+    "O-O",
+    "Nf5",
+    "Bf2",
+    "Be7",
+    "g4"
+  ],
+  "alternates_count": 6,
+  "personalized_variations": [],
+  "quizzes": []
+}

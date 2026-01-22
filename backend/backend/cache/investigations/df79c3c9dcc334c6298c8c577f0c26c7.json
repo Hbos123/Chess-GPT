@@ -1,0 +1,3046 @@
+{
+  "fen": "rnb1kbnr/ppp1pppp/8/4q3/8/2N5/PPPPBPPP/R1BQK1NR b KQkq - 3 4",
+  "move_san": null,
+  "investigation_type": "position",
+  "result": {
+    "eval_before": 0.97,
+    "eval_after": null,
+    "eval_drop": null,
+    "player_move": null,
+    "best_move": "c8h3",
+    "missed_move": null,
+    "intent_mismatch": null,
+    "game_phase": "opening",
+    "urgency": null,
+    "pgn_branches": {},
+    "tactics_found": [],
+    "threats": [],
+    "material_change": null,
+    "positional_change": null,
+    "theme_changes": {},
+    "candidate_moves": [],
+    "pv_after_move": [
+      "c6",
+      "Nf3",
+      "Qc7",
+      "d4",
+      "Nd7",
+      "O-O",
+      "Ngf6",
+      "Re1",
+      "e6",
+      "Bd3"
+    ],
+    "user_proposed_move": false,
+    "candidate_move": false,
+    "is_awkward_development": false,
+    "light_raw_analysis": {
+      "themes": {
+        "center_space": {
+          "white": {
+            "S_center": 1,
+            "S_tension": 0,
+            "S_space": -6,
+            "total": -5
+          },
+          "black": {
+            "S_center": 5,
+            "S_tension": 0,
+            "S_space": 6,
+            "total": 11
+          }
+        },
+        "pawn_structure": {
+          "white": {
+            "S_passed": 0,
+            "S_candidate": 0,
+            "S_isolated": 0,
+            "S_doubled": 0,
+            "S_backward": 0,
+            "S_chain": 0,
+            "S_chain_base_weak": 0,
+            "S_levers_ready": 0,
+            "S_majority_qside": 1,
+            "S_majority_kside": 0,
+            "S_islands": -2,
+            "total": -1
+          },
+          "black": {
+            "S_passed": 0,
+            "S_candidate": 0,
+            "S_isolated": 0,
+            "S_doubled": 0,
+            "S_backward": 0,
+            "S_chain": 0,
+            "S_chain_base_weak": 0,
+            "S_levers_ready": 0,
+            "S_majority_qside": 0,
+            "S_majority_kside": 1,
+            "S_islands": -2,
+            "total": -1
+          }
+        },
+        "king_safety": {
+          "white": {
+            "S_shield": 0,
+            "S_files_to_king": -0.5,
+            "S_diagonals_to_king": 0,
+            "S_local": 1,
+            "S_center_king": -1,
+            "S_castled": 0,
+            "S_hook": 0,
+            "S_holes": 0,
+            "total": -0.5
+          },
+          "black": {
+            "S_shield": 0,
+            "S_files_to_king": -0.5,
+            "S_diagonals_to_king": 0,
+            "S_local": 0,
+            "S_center_king": -1,
+            "S_castled": 0,
+            "S_hook": 0,
+            "S_holes": 0,
+            "total": -1.5
+          }
+        },
+        "piece_activity": {
+          "white": {
+            "S_mob": 2.763481888481888,
+            "S_outpost": 0,
+            "S_trapped": -2,
+            "S_bad_bishop": -1,
+            "S_bishop_pair": 1,
+            "S_rook_open": 0,
+            "S_rook_connected": 0,
+            "S_rook_7th": 0,
+            "S_coord": 0,
+            "total": 0.7634818884818881
+          },
+          "black": {
+            "S_mob": 2.4288766788766787,
+            "S_outpost": 0,
+            "S_trapped": 0,
+            "S_bad_bishop": -1,
+            "S_bishop_pair": 1,
+            "S_rook_open": 0,
+            "S_rook_connected": 0,
+            "S_rook_7th": 0,
+            "S_coord": 0,
+            "total": 2.4288766788766787
+          }
+        },
+        "color_complex": {
+          "white": {
+            "total": 0
+          },
+          "black": {
+            "total": 0
+          }
+        },
+        "lanes": {
+          "white": {
+            "total": 0
+          },
+          "black": {
+            "total": 0
+          }
+        },
+        "local_imbalances": {
+          "white": {
+            "total": 0
+          },
+          "black": {
+            "total": 0
+          }
+        },
+        "development": {
+          "white": {
+            "total": 2
+          },
+          "black": {
+            "total": 0
+          }
+        },
+        "promotion": {
+          "white": {
+            "total": 0
+          },
+          "black": {
+            "total": 0
+          }
+        },
+        "breaks": {
+          "white": {
+            "total": 0
+          },
+          "black": {
+            "total": 0
+          }
+        },
+        "prophylaxis": {
+          "white": {
+            "total": 0
+          },
+          "black": {
+            "total": 0
+          }
+        }
+      },
+      "tags": [
+        {
+          "tag_name": "tag.king.attackers.count",
+          "side": "white",
+          "squares": [
+            "e1"
+          ],
+          "attackers_count": 0,
+          "attacking_pieces": [],
+          "details": {
+            "count": 0
+          }
+        },
+        {
+          "tag_name": "tag.king.defenders.count",
+          "side": "white",
+          "squares": [
+            "e1"
+          ],
+          "defenders_count": 1,
+          "defending_pieces": [
+            {
+              "square": "d1",
+              "piece": "Q",
+              "piece_name": "Queen"
+            }
+          ],
+          "details": {
+            "count": 1
+          }
+        },
+        {
+          "tag_name": "tag.king.attackers.count",
+          "side": "black",
+          "squares": [
+            "e8"
+          ],
+          "attackers_count": 0,
+          "attacking_pieces": [],
+          "details": {
+            "count": 0
+          }
+        },
+        {
+          "tag_name": "tag.king.defenders.count",
+          "side": "black",
+          "squares": [
+            "e8"
+          ],
+          "defenders_count": 0,
+          "defending_pieces": [],
+          "details": {
+            "count": 0
+          }
+        },
+        {
+          "tag_name": "tag.center.control.near",
+          "side": "black",
+          "squares": [
+            "f4",
+            "c5",
+            "f5"
+          ],
+          "details": {
+            "count": 3
+          }
+        },
+        {
+          "tag_name": "tag.key.d4",
+          "side": "black",
+          "squares": [
+            "d4"
+          ],
+          "controlling_pieces": [
+            {
+              "square": "e5",
+              "piece": "q",
+              "piece_name": "Queen"
+            }
+          ],
+          "details": {}
+        },
+        {
+          "tag_name": "tag.key.e5",
+          "side": "black",
+          "squares": [
+            "e5"
+          ],
+          "controlling_pieces": [
+            {
+              "square": "e5",
+              "piece": "q",
+              "piece_name": "Queen",
+              "occupying": true
+            }
+          ],
+          "details": {}
+        },
+        {
+          "tag_name": "tag.space.advantage",
+          "side": "black",
+          "squares": [],
+          "details": {
+            "differential": 6
+          }
+        },
+        {
+          "tag_name": "tag.file.semi.d",
+          "side": "black",
+          "files": [
+            "d"
+          ],
+          "squares": [],
+          "details": {}
+        },
+        {
+          "tag_name": "tag.file.semi.e",
+          "side": "white",
+          "files": [
+            "e"
+          ],
+          "squares": [],
+          "details": {}
+        },
+        {
+          "tag_name": "tag.diagonal.open.e2-h5",
+          "side": "white",
+          "pieces": [
+            "Be2"
+          ],
+          "squares": [
+            "f3",
+            "g4",
+            "h5"
+          ],
+          "direction": "ne",
+          "details": {
+            "length": 3,
+            "open": true
+          }
+        },
+        {
+          "tag_name": "tag.diagonal.open.e2-a6",
+          "side": "white",
+          "pieces": [
+            "Be2"
+          ],
+          "squares": [
+            "d3",
+            "c4",
+            "b5",
+            "a6"
+          ],
+          "direction": "nw",
+          "details": {
+            "length": 4,
+            "open": true
+          }
+        },
+        {
+          "tag_name": "tag.diagonal.open.c8-h3",
+          "side": "black",
+          "pieces": [
+            "Bc8"
+          ],
+          "squares": [
+            "d7",
+            "e6",
+            "f5",
+            "g4",
+            "h3"
+          ],
+          "direction": "se",
+          "details": {
+            "length": 5,
+            "open": true
+          }
+        },
+        {
+          "tag_name": "tag.diagonal.open.e5-g3",
+          "side": "black",
+          "pieces": [
+            "Qe5"
+          ],
+          "squares": [
+            "f4",
+            "g3"
+          ],
+          "direction": "se",
+          "details": {
+            "length": 2,
+            "open": true
+          }
+        },
+        {
+          "tag_name": "tag.activity.mobility.knight",
+          "side": "white",
+          "squares": [],
+          "details": {
+            "mobility": 11
+          }
+        },
+        {
+          "tag_name": "tag.activity.mobility.bishop",
+          "side": "white",
+          "squares": [],
+          "details": {
+            "mobility": 11
+          }
+        },
+        {
+          "tag_name": "tag.activity.mobility.rook",
+          "side": "white",
+          "squares": [],
+          "details": {
+            "mobility": 5
+          }
+        },
+        {
+          "tag_name": "tag.activity.mobility.queen",
+          "side": "white",
+          "squares": [],
+          "details": {
+            "mobility": 5
+          }
+        },
+        {
+          "tag_name": "tag.undeveloped.knight",
+          "side": "white",
+          "squares": [
+            "g1"
+          ],
+          "pieces": [
+            "Ng1"
+          ],
+          "details": {
+            "count": 1,
+            "count_total": 1
+          }
+        },
+        {
+          "tag_name": "tag.undeveloped.bishop",
+          "side": "white",
+          "squares": [
+            "c1"
+          ],
+          "pieces": [
+            "Bc1"
+          ],
+          "details": {
+            "count": 1,
+            "count_total": 1
+          }
+        },
+        {
+          "tag_name": "tag.undeveloped.rook",
+          "side": "white",
+          "squares": [
+            "a1"
+          ],
+          "pieces": [
+            "Ra1"
+          ],
+          "details": {
+            "count": 1,
+            "count_total": 2
+          }
+        },
+        {
+          "tag_name": "tag.undeveloped.rook",
+          "side": "white",
+          "squares": [
+            "h1"
+          ],
+          "pieces": [
+            "Rh1"
+          ],
+          "details": {
+            "count": 1,
+            "count_total": 2
+          }
+        },
+        {
+          "tag_name": "tag.undeveloped.queen",
+          "side": "white",
+          "squares": [
+            "d1"
+          ],
+          "pieces": [
+            "Qd1"
+          ],
+          "details": {
+            "count": 1,
+            "count_total": 1
+          }
+        },
+        {
+          "tag_name": "tag.piece.trapped",
+          "side": "white",
+          "piece_type": "Knight",
+          "pieces": [
+            "Ng1"
+          ],
+          "squares": [
+            "g1"
+          ],
+          "safe_squares_count": 1,
+          "safe_squares": [
+            "f3"
+          ],
+          "attacked_squares": [
+            "e2",
+            "h3"
+          ],
+          "details": {
+            "safe_squares": 1
+          }
+        },
+        {
+          "tag_name": "tag.piece.trapped",
+          "side": "white",
+          "piece_type": "Rook",
+          "pieces": [
+            "Rh1"
+          ],
+          "squares": [
+            "h1"
+          ],
+          "safe_squares_count": 1,
+          "safe_squares": [
+            "g1"
+          ],
+          "attacked_squares": [
+            "h2"
+          ],
+          "details": {
+            "safe_squares": 1
+          }
+        },
+        {
+          "tag_name": "tag.bishop.pair",
+          "side": "white",
+          "pieces": [
+            "Bc1",
+            "Be2"
+          ],
+          "squares": [],
+          "details": {}
+        },
+        {
+          "tag_name": "tag.activity.mobility.knight",
+          "side": "black",
+          "squares": [],
+          "details": {
+            "mobility": 6
+          }
+        },
+        {
+          "tag_name": "tag.activity.mobility.bishop",
+          "side": "black",
+          "squares": [],
+          "details": {
+            "mobility": 8
+          }
+        },
+        {
+          "tag_name": "tag.activity.mobility.rook",
+          "side": "black",
+          "squares": [],
+          "details": {
+            "mobility": 4
+          }
+        },
+        {
+          "tag_name": "tag.activity.mobility.queen",
+          "side": "black",
+          "squares": [],
+          "details": {
+            "mobility": 21
+          }
+        },
+        {
+          "tag_name": "tag.undeveloped.knight",
+          "side": "black",
+          "squares": [
+            "b8"
+          ],
+          "pieces": [
+            "Nb8"
+          ],
+          "details": {
+            "count": 1,
+            "count_total": 2
+          }
+        },
+        {
+          "tag_name": "tag.undeveloped.knight",
+          "side": "black",
+          "squares": [
+            "g8"
+          ],
+          "pieces": [
+            "Ng8"
+          ],
+          "details": {
+            "count": 1,
+            "count_total": 2
+          }
+        },
+        {
+          "tag_name": "tag.undeveloped.bishop",
+          "side": "black",
+          "squares": [
+            "c8"
+          ],
+          "pieces": [
+            "Bc8"
+          ],
+          "details": {
+            "count": 1,
+            "count_total": 2
+          }
+        },
+        {
+          "tag_name": "tag.undeveloped.bishop",
+          "side": "black",
+          "squares": [
+            "f8"
+          ],
+          "pieces": [
+            "Bf8"
+          ],
+          "details": {
+            "count": 1,
+            "count_total": 2
+          }
+        },
+        {
+          "tag_name": "tag.undeveloped.rook",
+          "side": "black",
+          "squares": [
+            "a8"
+          ],
+          "pieces": [
+            "Ra8"
+          ],
+          "details": {
+            "count": 1,
+            "count_total": 2
+          }
+        },
+        {
+          "tag_name": "tag.undeveloped.rook",
+          "side": "black",
+          "squares": [
+            "h8"
+          ],
+          "pieces": [
+            "Rh8"
+          ],
+          "details": {
+            "count": 1,
+            "count_total": 2
+          }
+        },
+        {
+          "tag_name": "tag.bishop.pair",
+          "side": "black",
+          "pieces": [
+            "Bc8",
+            "Bf8"
+          ],
+          "squares": [],
+          "details": {}
+        },
+        {
+          "tag_name": "tag.castling.rights.kingside",
+          "side": "white",
+          "squares": [],
+          "details": {
+            "rights": true
+          }
+        },
+        {
+          "tag_name": "tag.castling.rights.queenside",
+          "side": "white",
+          "squares": [],
+          "details": {
+            "rights": true
+          }
+        },
+        {
+          "tag_name": "tag.castling.rights.kingside",
+          "side": "black",
+          "squares": [],
+          "details": {
+            "rights": true
+          }
+        },
+        {
+          "tag_name": "tag.castling.rights.queenside",
+          "side": "black",
+          "squares": [],
+          "details": {
+            "rights": true
+          }
+        }
+      ],
+      "roles": {
+        "white_bishop_c1": [
+          "role.activity.low_mobility",
+          "role.defending.king"
+        ],
+        "white_queen_d1": [
+          "role.defending.king"
+        ],
+        "white_king_e1": [
+          "role.defending.king"
+        ],
+        "white_knight_g1": [
+          "role.status.trapped",
+          "role.defending.king"
+        ],
+        "white_rook_h1": [
+          "role.status.trapped",
+          "role.activity.low_mobility"
+        ],
+        "white_pawn_a2": [
+          "role.activity.low_mobility"
+        ],
+        "white_pawn_b2": [
+          "role.activity.low_mobility"
+        ],
+        "white_pawn_c2": [
+          "role.activity.low_mobility"
+        ],
+        "white_pawn_d2": [
+          "role.activity.low_mobility"
+        ],
+        "white_bishop_e2": [
+          "role.activity.high_mobility",
+          "role.defending.king"
+        ],
+        "white_pawn_f2": [
+          "role.activity.low_mobility"
+        ],
+        "white_pawn_g2": [
+          "role.activity.low_mobility"
+        ],
+        "white_pawn_h2": [
+          "role.activity.low_mobility"
+        ],
+        "white_knight_c3": [
+          "role.activity.moderate_mobility",
+          "role.defending.king"
+        ],
+        "black_queen_e5": [
+          "role.activity.high_mobility",
+          "role.defending.king"
+        ],
+        "black_pawn_a7": [
+          "role.activity.low_mobility"
+        ],
+        "black_pawn_b7": [
+          "role.activity.low_mobility"
+        ],
+        "black_pawn_c7": [
+          "role.activity.low_mobility"
+        ],
+        "black_pawn_e7": [
+          "role.activity.low_mobility"
+        ],
+        "black_pawn_f7": [
+          "role.activity.low_mobility"
+        ],
+        "black_pawn_g7": [
+          "role.activity.low_mobility"
+        ],
+        "black_pawn_h7": [
+          "role.activity.low_mobility"
+        ],
+        "black_rook_a8": [
+          "role.activity.low_mobility"
+        ],
+        "black_knight_b8": [
+          "role.defending.king"
+        ],
+        "black_bishop_c8": [
+          "role.activity.moderate_mobility",
+          "role.defending.king"
+        ],
+        "black_king_e8": [
+          "role.defending.king"
+        ],
+        "black_bishop_f8": [
+          "role.activity.low_mobility",
+          "role.defending.king"
+        ],
+        "black_knight_g8": [
+          "role.defending.king"
+        ],
+        "black_rook_h8": [
+          "role.activity.low_mobility"
+        ]
+      },
+      "material_balance_cp": 0,
+      "material_advantage": "equal",
+      "theme_scores": {
+        "white": {
+          "S_CENTER_SPACE": -5.0,
+          "S_PAWN_STRUCTURE": -1.0,
+          "S_KING_SAFETY": -0.6,
+          "S_PIECE_ACTIVITY": 0.7634818884818881,
+          "S_COLOR_COMPLEX": 0.0,
+          "S_LANES": 0.0,
+          "S_LOCAL_IMBALANCES": 0.0,
+          "S_DEVELOPMENT": 2.0,
+          "S_PROMOTION": 0.0,
+          "S_BREAKS": 0.0,
+          "S_PROPHYLAXIS": 0.0,
+          "total": -3.836518111518112
+        },
+        "black": {
+          "S_CENTER_SPACE": 11.0,
+          "S_PAWN_STRUCTURE": -1.0,
+          "S_KING_SAFETY": -1.7999999999999998,
+          "S_PIECE_ACTIVITY": 2.4288766788766787,
+          "S_COLOR_COMPLEX": 0.0,
+          "S_LANES": 0.0,
+          "S_LOCAL_IMBALANCES": 0.0,
+          "S_DEVELOPMENT": 0.0,
+          "S_PROMOTION": 0.0,
+          "S_BREAKS": 0.0,
+          "S_PROPHYLAXIS": 0.0,
+          "total": 10.628876678876678
+        }
+      },
+      "top_themes": [
+        "center_space",
+        "piece_activity",
+        "king_safety",
+        "pawn_structure",
+        "development"
+      ]
+    },
+    "eval_d16": 0.97,
+    "best_move_d16": "Bh3",
+    "best_move_d16_eval_cp": 574,
+    "second_best_move_d16": "Kd8",
+    "second_best_move_d16_eval_cp": 246,
+    "is_critical": true,
+    "is_winning": false,
+    "eval_d2": 0.94,
+    "top_moves_d2": [
+      {
+        "move": "c6",
+        "move_uci": "c7c6",
+        "eval": 1.22,
+        "eval_cp": 122,
+        "rank": 1
+      }
+    ],
+    "overestimated_moves": [
+      "c6"
+    ],
+    "exploration_tree": {
+      "position": "rnb1kbnr/ppp1pppp/8/4q3/8/2N5/PPPPBPPP/R1BQK1NR b KQkq - 3 4",
+      "original_position": "rnb1kbnr/ppp1pppp/8/4q3/8/2N5/PPPPBPPP/R1BQK1NR b KQkq - 3 4",
+      "eval_d16": 1.04,
+      "best_move_d16": "Bh3",
+      "best_move_d16_eval_cp": 574,
+      "pv_full": [
+        "c6",
+        "Nf3",
+        "Qc7",
+        "d4",
+        "Nd7",
+        "O-O",
+        "Ngf6",
+        "Re1",
+        "e6",
+        "Bd3",
+        "b6",
+        "Qe2",
+        "Bb7",
+        "Ne5",
+        "Bd6"
+      ],
+      "second_best_move_d16": "Kd8",
+      "second_best_move_d16_eval_cp": 246,
+      "is_critical": true,
+      "is_winning": false,
+      "threat_tags": [],
+      "light_raw": {
+        "themes": {
+          "center_space": {
+            "white": {
+              "S_center": 1,
+              "S_tension": 0,
+              "S_space": -6,
+              "total": -5
+            },
+            "black": {
+              "S_center": 5,
+              "S_tension": 0,
+              "S_space": 6,
+              "total": 11
+            }
+          },
+          "pawn_structure": {
+            "white": {
+              "S_passed": 0,
+              "S_candidate": 0,
+              "S_isolated": 0,
+              "S_doubled": 0,
+              "S_backward": 0,
+              "S_chain": 0,
+              "S_chain_base_weak": 0,
+              "S_levers_ready": 0,
+              "S_majority_qside": 1,
+              "S_majority_kside": 0,
+              "S_islands": -2,
+              "total": -1
+            },
+            "black": {
+              "S_passed": 0,
+              "S_candidate": 0,
+              "S_isolated": 0,
+              "S_doubled": 0,
+              "S_backward": 0,
+              "S_chain": 0,
+              "S_chain_base_weak": 0,
+              "S_levers_ready": 0,
+              "S_majority_qside": 0,
+              "S_majority_kside": 1,
+              "S_islands": -2,
+              "total": -1
+            }
+          },
+          "king_safety": {
+            "white": {
+              "S_shield": 0,
+              "S_files_to_king": -0.5,
+              "S_diagonals_to_king": 0,
+              "S_local": 1,
+              "S_center_king": -1,
+              "S_castled": 0,
+              "S_hook": 0,
+              "S_holes": 0,
+              "total": -0.5
+            },
+            "black": {
+              "S_shield": 0,
+              "S_files_to_king": -0.5,
+              "S_diagonals_to_king": 0,
+              "S_local": 0,
+              "S_center_king": -1,
+              "S_castled": 0,
+              "S_hook": 0,
+              "S_holes": 0,
+              "total": -1.5
+            }
+          },
+          "piece_activity": {
+            "white": {
+              "S_mob": 2.763481888481888,
+              "S_outpost": 0,
+              "S_trapped": -2,
+              "S_bad_bishop": -1,
+              "S_bishop_pair": 1,
+              "S_rook_open": 0,
+              "S_rook_connected": 0,
+              "S_rook_7th": 0,
+              "S_coord": 0,
+              "total": 0.7634818884818881
+            },
+            "black": {
+              "S_mob": 2.4288766788766787,
+              "S_outpost": 0,
+              "S_trapped": 0,
+              "S_bad_bishop": -1,
+              "S_bishop_pair": 1,
+              "S_rook_open": 0,
+              "S_rook_connected": 0,
+              "S_rook_7th": 0,
+              "S_coord": 0,
+              "total": 2.4288766788766787
+            }
+          },
+          "color_complex": {
+            "white": {
+              "total": 0
+            },
+            "black": {
+              "total": 0
+            }
+          },
+          "lanes": {
+            "white": {
+              "total": 0
+            },
+            "black": {
+              "total": 0
+            }
+          },
+          "local_imbalances": {
+            "white": {
+              "total": 0
+            },
+            "black": {
+              "total": 0
+            }
+          },
+          "development": {
+            "white": {
+              "total": 2
+            },
+            "black": {
+              "total": 0
+            }
+          },
+          "promotion": {
+            "white": {
+              "total": 0
+            },
+            "black": {
+              "total": 0
+            }
+          },
+          "breaks": {
+            "white": {
+              "total": 0
+            },
+            "black": {
+              "total": 0
+            }
+          },
+          "prophylaxis": {
+            "white": {
+              "total": 0
+            },
+            "black": {
+              "total": 0
+            }
+          }
+        },
+        "tags": [
+          {
+            "tag_name": "tag.king.attackers.count",
+            "side": "white",
+            "squares": [
+              "e1"
+            ],
+            "attackers_count": 0,
+            "attacking_pieces": [],
+            "details": {
+              "count": 0
+            }
+          },
+          {
+            "tag_name": "tag.king.defenders.count",
+            "side": "white",
+            "squares": [
+              "e1"
+            ],
+            "defenders_count": 1,
+            "defending_pieces": [
+              {
+                "square": "d1",
+                "piece": "Q",
+                "piece_name": "Queen"
+              }
+            ],
+            "details": {
+              "count": 1
+            }
+          },
+          {
+            "tag_name": "tag.king.attackers.count",
+            "side": "black",
+            "squares": [
+              "e8"
+            ],
+            "attackers_count": 0,
+            "attacking_pieces": [],
+            "details": {
+              "count": 0
+            }
+          },
+          {
+            "tag_name": "tag.king.defenders.count",
+            "side": "black",
+            "squares": [
+              "e8"
+            ],
+            "defenders_count": 0,
+            "defending_pieces": [],
+            "details": {
+              "count": 0
+            }
+          },
+          {
+            "tag_name": "tag.center.control.near",
+            "side": "black",
+            "squares": [
+              "f4",
+              "c5",
+              "f5"
+            ],
+            "details": {
+              "count": 3
+            }
+          },
+          {
+            "tag_name": "tag.key.d4",
+            "side": "black",
+            "squares": [
+              "d4"
+            ],
+            "controlling_pieces": [
+              {
+                "square": "e5",
+                "piece": "q",
+                "piece_name": "Queen"
+              }
+            ],
+            "details": {}
+          },
+          {
+            "tag_name": "tag.key.e5",
+            "side": "black",
+            "squares": [
+              "e5"
+            ],
+            "controlling_pieces": [
+              {
+                "square": "e5",
+                "piece": "q",
+                "piece_name": "Queen",
+                "occupying": true
+              }
+            ],
+            "details": {}
+          },
+          {
+            "tag_name": "tag.space.advantage",
+            "side": "black",
+            "squares": [],
+            "details": {
+              "differential": 6
+            }
+          },
+          {
+            "tag_name": "tag.file.semi.d",
+            "side": "black",
+            "files": [
+              "d"
+            ],
+            "squares": [],
+            "details": {}
+          },
+          {
+            "tag_name": "tag.file.semi.e",
+            "side": "white",
+            "files": [
+              "e"
+            ],
+            "squares": [],
+            "details": {}
+          },
+          {
+            "tag_name": "tag.diagonal.open.e2-h5",
+            "side": "white",
+            "pieces": [
+              "Be2"
+            ],
+            "squares": [
+              "f3",
+              "g4",
+              "h5"
+            ],
+            "direction": "ne",
+            "details": {
+              "length": 3,
+              "open": true
+            }
+          },
+          {
+            "tag_name": "tag.diagonal.open.e2-a6",
+            "side": "white",
+            "pieces": [
+              "Be2"
+            ],
+            "squares": [
+              "d3",
+              "c4",
+              "b5",
+              "a6"
+            ],
+            "direction": "nw",
+            "details": {
+              "length": 4,
+              "open": true
+            }
+          },
+          {
+            "tag_name": "tag.diagonal.open.c8-h3",
+            "side": "black",
+            "pieces": [
+              "Bc8"
+            ],
+            "squares": [
+              "d7",
+              "e6",
+              "f5",
+              "g4",
+              "h3"
+            ],
+            "direction": "se",
+            "details": {
+              "length": 5,
+              "open": true
+            }
+          },
+          {
+            "tag_name": "tag.diagonal.open.e5-g3",
+            "side": "black",
+            "pieces": [
+              "Qe5"
+            ],
+            "squares": [
+              "f4",
+              "g3"
+            ],
+            "direction": "se",
+            "details": {
+              "length": 2,
+              "open": true
+            }
+          },
+          {
+            "tag_name": "tag.activity.mobility.knight",
+            "side": "white",
+            "squares": [],
+            "details": {
+              "mobility": 11
+            }
+          },
+          {
+            "tag_name": "tag.activity.mobility.bishop",
+            "side": "white",
+            "squares": [],
+            "details": {
+              "mobility": 11
+            }
+          },
+          {
+            "tag_name": "tag.activity.mobility.rook",
+            "side": "white",
+            "squares": [],
+            "details": {
+              "mobility": 5
+            }
+          },
+          {
+            "tag_name": "tag.activity.mobility.queen",
+            "side": "white",
+            "squares": [],
+            "details": {
+              "mobility": 5
+            }
+          },
+          {
+            "tag_name": "tag.undeveloped.knight",
+            "side": "white",
+            "squares": [
+              "g1"
+            ],
+            "pieces": [
+              "Ng1"
+            ],
+            "details": {
+              "count": 1,
+              "count_total": 1
+            }
+          },
+          {
+            "tag_name": "tag.undeveloped.bishop",
+            "side": "white",
+            "squares": [
+              "c1"
+            ],
+            "pieces": [
+              "Bc1"
+            ],
+            "details": {
+              "count": 1,
+              "count_total": 1
+            }
+          },
+          {
+            "tag_name": "tag.undeveloped.rook",
+            "side": "white",
+            "squares": [
+              "a1"
+            ],
+            "pieces": [
+              "Ra1"
+            ],
+            "details": {
+              "count": 1,
+              "count_total": 2
+            }
+          },
+          {
+            "tag_name": "tag.undeveloped.rook",
+            "side": "white",
+            "squares": [
+              "h1"
+            ],
+            "pieces": [
+              "Rh1"
+            ],
+            "details": {
+              "count": 1,
+              "count_total": 2
+            }
+          },
+          {
+            "tag_name": "tag.undeveloped.queen",
+            "side": "white",
+            "squares": [
+              "d1"
+            ],
+            "pieces": [
+              "Qd1"
+            ],
+            "details": {
+              "count": 1,
+              "count_total": 1
+            }
+          },
+          {
+            "tag_name": "tag.piece.trapped",
+            "side": "white",
+            "piece_type": "Knight",
+            "pieces": [
+              "Ng1"
+            ],
+            "squares": [
+              "g1"
+            ],
+            "safe_squares_count": 1,
+            "safe_squares": [
+              "f3"
+            ],
+            "attacked_squares": [
+              "e2",
+              "h3"
+            ],
+            "details": {
+              "safe_squares": 1
+            }
+          },
+          {
+            "tag_name": "tag.piece.trapped",
+            "side": "white",
+            "piece_type": "Rook",
+            "pieces": [
+              "Rh1"
+            ],
+            "squares": [
+              "h1"
+            ],
+            "safe_squares_count": 1,
+            "safe_squares": [
+              "g1"
+            ],
+            "attacked_squares": [
+              "h2"
+            ],
+            "details": {
+              "safe_squares": 1
+            }
+          },
+          {
+            "tag_name": "tag.bishop.pair",
+            "side": "white",
+            "pieces": [
+              "Bc1",
+              "Be2"
+            ],
+            "squares": [],
+            "details": {}
+          },
+          {
+            "tag_name": "tag.activity.mobility.knight",
+            "side": "black",
+            "squares": [],
+            "details": {
+              "mobility": 6
+            }
+          },
+          {
+            "tag_name": "tag.activity.mobility.bishop",
+            "side": "black",
+            "squares": [],
+            "details": {
+              "mobility": 8
+            }
+          },
+          {
+            "tag_name": "tag.activity.mobility.rook",
+            "side": "black",
+            "squares": [],
+            "details": {
+              "mobility": 4
+            }
+          },
+          {
+            "tag_name": "tag.activity.mobility.queen",
+            "side": "black",
+            "squares": [],
+            "details": {
+              "mobility": 21
+            }
+          },
+          {
+            "tag_name": "tag.undeveloped.knight",
+            "side": "black",
+            "squares": [
+              "b8"
+            ],
+            "pieces": [
+              "Nb8"
+            ],
+            "details": {
+              "count": 1,
+              "count_total": 2
+            }
+          },
+          {
+            "tag_name": "tag.undeveloped.knight",
+            "side": "black",
+            "squares": [
+              "g8"
+            ],
+            "pieces": [
+              "Ng8"
+            ],
+            "details": {
+              "count": 1,
+              "count_total": 2
+            }
+          },
+          {
+            "tag_name": "tag.undeveloped.bishop",
+            "side": "black",
+            "squares": [
+              "c8"
+            ],
+            "pieces": [
+              "Bc8"
+            ],
+            "details": {
+              "count": 1,
+              "count_total": 2
+            }
+          },
+          {
+            "tag_name": "tag.undeveloped.bishop",
+            "side": "black",
+            "squares": [
+              "f8"
+            ],
+            "pieces": [
+              "Bf8"
+            ],
+            "details": {
+              "count": 1,
+              "count_total": 2
+            }
+          },
+          {
+            "tag_name": "tag.undeveloped.rook",
+            "side": "black",
+            "squares": [
+              "a8"
+            ],
+            "pieces": [
+              "Ra8"
+            ],
+            "details": {
+              "count": 1,
+              "count_total": 2
+            }
+          },
+          {
+            "tag_name": "tag.undeveloped.rook",
+            "side": "black",
+            "squares": [
+              "h8"
+            ],
+            "pieces": [
+              "Rh8"
+            ],
+            "details": {
+              "count": 1,
+              "count_total": 2
+            }
+          },
+          {
+            "tag_name": "tag.bishop.pair",
+            "side": "black",
+            "pieces": [
+              "Bc8",
+              "Bf8"
+            ],
+            "squares": [],
+            "details": {}
+          },
+          {
+            "tag_name": "tag.castling.rights.kingside",
+            "side": "white",
+            "squares": [],
+            "details": {
+              "rights": true
+            }
+          },
+          {
+            "tag_name": "tag.castling.rights.queenside",
+            "side": "white",
+            "squares": [],
+            "details": {
+              "rights": true
+            }
+          },
+          {
+            "tag_name": "tag.castling.rights.kingside",
+            "side": "black",
+            "squares": [],
+            "details": {
+              "rights": true
+            }
+          },
+          {
+            "tag_name": "tag.castling.rights.queenside",
+            "side": "black",
+            "squares": [],
+            "details": {
+              "rights": true
+            }
+          }
+        ],
+        "roles": {
+          "white_bishop_c1": [
+            "role.activity.low_mobility",
+            "role.defending.king"
+          ],
+          "white_queen_d1": [
+            "role.defending.king"
+          ],
+          "white_king_e1": [
+            "role.defending.king"
+          ],
+          "white_knight_g1": [
+            "role.status.trapped",
+            "role.defending.king"
+          ],
+          "white_rook_h1": [
+            "role.status.trapped",
+            "role.activity.low_mobility"
+          ],
+          "white_pawn_a2": [
+            "role.activity.low_mobility"
+          ],
+          "white_pawn_b2": [
+            "role.activity.low_mobility"
+          ],
+          "white_pawn_c2": [
+            "role.activity.low_mobility"
+          ],
+          "white_pawn_d2": [
+            "role.activity.low_mobility"
+          ],
+          "white_bishop_e2": [
+            "role.activity.high_mobility",
+            "role.defending.king"
+          ],
+          "white_pawn_f2": [
+            "role.activity.low_mobility"
+          ],
+          "white_pawn_g2": [
+            "role.activity.low_mobility"
+          ],
+          "white_pawn_h2": [
+            "role.activity.low_mobility"
+          ],
+          "white_knight_c3": [
+            "role.activity.moderate_mobility",
+            "role.defending.king"
+          ],
+          "black_queen_e5": [
+            "role.activity.high_mobility",
+            "role.defending.king"
+          ],
+          "black_pawn_a7": [
+            "role.activity.low_mobility"
+          ],
+          "black_pawn_b7": [
+            "role.activity.low_mobility"
+          ],
+          "black_pawn_c7": [
+            "role.activity.low_mobility"
+          ],
+          "black_pawn_e7": [
+            "role.activity.low_mobility"
+          ],
+          "black_pawn_f7": [
+            "role.activity.low_mobility"
+          ],
+          "black_pawn_g7": [
+            "role.activity.low_mobility"
+          ],
+          "black_pawn_h7": [
+            "role.activity.low_mobility"
+          ],
+          "black_rook_a8": [
+            "role.activity.low_mobility"
+          ],
+          "black_knight_b8": [
+            "role.defending.king"
+          ],
+          "black_bishop_c8": [
+            "role.activity.moderate_mobility",
+            "role.defending.king"
+          ],
+          "black_king_e8": [
+            "role.defending.king"
+          ],
+          "black_bishop_f8": [
+            "role.activity.low_mobility",
+            "role.defending.king"
+          ],
+          "black_knight_g8": [
+            "role.defending.king"
+          ],
+          "black_rook_h8": [
+            "role.activity.low_mobility"
+          ]
+        },
+        "material_balance_cp": 0,
+        "material_advantage": "equal",
+        "theme_scores": {
+          "white": {
+            "S_CENTER_SPACE": -5.0,
+            "S_PAWN_STRUCTURE": -1.0,
+            "S_KING_SAFETY": -0.6,
+            "S_PIECE_ACTIVITY": 0.7634818884818881,
+            "S_COLOR_COMPLEX": 0.0,
+            "S_LANES": 0.0,
+            "S_LOCAL_IMBALANCES": 0.0,
+            "S_DEVELOPMENT": 2.0,
+            "S_PROMOTION": 0.0,
+            "S_BREAKS": 0.0,
+            "S_PROPHYLAXIS": 0.0,
+            "total": -3.836518111518112
+          },
+          "black": {
+            "S_CENTER_SPACE": 11.0,
+            "S_PAWN_STRUCTURE": -1.0,
+            "S_KING_SAFETY": -1.7999999999999998,
+            "S_PIECE_ACTIVITY": 2.4288766788766787,
+            "S_COLOR_COMPLEX": 0.0,
+            "S_LANES": 0.0,
+            "S_LOCAL_IMBALANCES": 0.0,
+            "S_DEVELOPMENT": 0.0,
+            "S_PROMOTION": 0.0,
+            "S_BREAKS": 0.0,
+            "S_PROPHYLAXIS": 0.0,
+            "total": 10.628876678876678
+          }
+        },
+        "top_themes": [
+          "center_space",
+          "piece_activity",
+          "king_safety",
+          "pawn_structure",
+          "development"
+        ]
+      },
+      "branches": [
+        {
+          "position": "rnb1kbnr/pp2pppp/2p5/4q3/8/2N5/PPPPBPPP/R1BQK1NR w KQkq - 0 5",
+          "move_played": "c6",
+          "stopped": true,
+          "reason": "d2_eval_below_original",
+          "eval_d16": 0.97,
+          "eval_d2": 0.97,
+          "original_eval_d16": 1.04,
+          "best_move_d16": "Nf3",
+          "best_move_d2": "d4",
+          "pv_full": [
+            "Nf3",
+            "Qc7",
+            "d4",
+            "Nd7",
+            "O-O",
+            "e6",
+            "Re1",
+            "Ngf6",
+            "Bd3",
+            "Bd6",
+            "Bg5",
+            "O-O",
+            "Ne4",
+            "Nxe4",
+            "Rxe4",
+            "c5",
+            "Rh4",
+            "f5"
+          ],
+          "pv_san": [
+            "Nf3",
+            "Qc7",
+            "d4",
+            "Nd7",
+            "O-O",
+            "e6",
+            "Re1",
+            "Ngf6",
+            "Bd3",
+            "Bd6",
+            "Bg5",
+            "O-O",
+            "Ne4",
+            "Nxe4",
+            "Rxe4",
+            "c5",
+            "Rh4",
+            "f5"
+          ],
+          "role_deltas": [
+            {
+              "move": "c6",
+              "roles_gained": [
+                "black_pawn_c6:role.activity.low_mobility"
+              ],
+              "roles_lost": [
+                "black_pawn_c7:role.activity.low_mobility"
+              ]
+            }
+          ]
+        }
+      ],
+      "role_deltas": [
+        {
+          "move": "c6",
+          "roles_gained": [
+            "black_pawn_c6:role.activity.low_mobility"
+          ],
+          "roles_lost": [
+            "black_pawn_c7:role.activity.low_mobility"
+          ]
+        },
+        {
+          "move": "Nf3",
+          "roles_gained": [
+            "white_bishop_e2:role.activity.moderate_mobility",
+            "black_queen_e5:role.status.hanging",
+            "white_knight_f3:role.activity.moderate_mobility",
+            "white_knight_f3:role.defending.king",
+            "white_rook_h1:role.defending.king"
+          ],
+          "roles_lost": [
+            "white_knight_g1:role.defending.king",
+            "white_bishop_e2:role.activity.high_mobility",
+            "white_knight_g1:role.status.trapped",
+            "white_rook_h1:role.activity.low_mobility",
+            "white_rook_h1:role.status.trapped"
+          ]
+        },
+        {
+          "move": "Qc7",
+          "roles_gained": [
+            "black_queen_c7:role.defending.king",
+            "black_queen_c7:role.activity.high_mobility"
+          ],
+          "roles_lost": [
+            "black_queen_e5:role.defending.king",
+            "black_queen_e5:role.status.hanging",
+            "black_queen_e5:role.activity.high_mobility"
+          ]
+        },
+        {
+          "move": "d4",
+          "roles_gained": [
+            "white_pawn_d4:role.activity.low_mobility",
+            "white_queen_d1:role.activity.moderate_mobility",
+            "white_bishop_c1:role.activity.moderate_mobility"
+          ],
+          "roles_lost": [
+            "white_bishop_c1:role.activity.low_mobility",
+            "white_pawn_d2:role.activity.low_mobility"
+          ]
+        },
+        {
+          "move": "Nd7",
+          "roles_gained": [
+            "black_bishop_c8:role.activity.low_mobility",
+            "black_knight_d7:role.defending.king",
+            "black_knight_d7:role.activity.moderate_mobility"
+          ],
+          "roles_lost": [
+            "black_rook_a8:role.activity.low_mobility",
+            "black_bishop_c8:role.activity.moderate_mobility",
+            "black_knight_b8:role.defending.king"
+          ]
+        },
+        {
+          "move": "O-O",
+          "roles_gained": [
+            "white_rook_f1:role.defending.king",
+            "white_king_g1:role.defending.king"
+          ],
+          "roles_lost": [
+            "white_bishop_c1:role.defending.king",
+            "white_king_e1:role.defending.king",
+            "white_knight_c3:role.defending.king",
+            "white_rook_h1:role.defending.king"
+          ]
+        },
+        {
+          "move": "Ngf6",
+          "roles_gained": [
+            "black_rook_h8:role.defending.king",
+            "black_knight_f6:role.activity.moderate_mobility",
+            "black_knight_f6:role.defending.king"
+          ],
+          "roles_lost": [
+            "black_knight_g8:role.defending.king",
+            "black_rook_h8:role.activity.low_mobility"
+          ]
+        },
+        {
+          "move": "Re1",
+          "roles_gained": [
+            "white_rook_e1:role.defending.king"
+          ],
+          "roles_lost": [
+            "white_rook_f1:role.defending.king",
+            "white_queen_d1:role.defending.king"
+          ]
+        },
+        {
+          "move": "e6",
+          "roles_gained": [
+            "black_bishop_f8:role.activity.moderate_mobility",
+            "black_pawn_e6:role.activity.low_mobility"
+          ],
+          "roles_lost": [
+            "black_pawn_e7:role.activity.low_mobility",
+            "black_bishop_f8:role.activity.low_mobility"
+          ]
+        },
+        {
+          "move": "Bd3",
+          "roles_gained": [
+            "white_bishop_d3:role.defending.king",
+            "white_bishop_d3:role.activity.high_mobility",
+            "white_rook_e1:role.activity.moderate_mobility"
+          ],
+          "roles_lost": [
+            "white_bishop_e2:role.activity.moderate_mobility",
+            "white_bishop_e2:role.defending.king"
+          ]
+        },
+        {
+          "move": "b6",
+          "roles_gained": [
+            "black_pawn_b6:role.activity.low_mobility"
+          ],
+          "roles_lost": [
+            "black_bishop_c8:role.activity.low_mobility",
+            "black_pawn_b7:role.activity.low_mobility"
+          ]
+        },
+        {
+          "move": "Qe2",
+          "roles_gained": [
+            "white_queen_e2:role.defending.king",
+            "white_queen_e2:role.activity.high_mobility"
+          ],
+          "roles_lost": [
+            "white_bishop_d3:role.defending.king",
+            "white_queen_d1:role.activity.moderate_mobility",
+            "white_rook_e1:role.activity.moderate_mobility"
+          ]
+        },
+        {
+          "move": "Bb7",
+          "roles_gained": [
+            "black_rook_a8:role.defending.king"
+          ],
+          "roles_lost": [
+            "black_bishop_c8:role.defending.king"
+          ]
+        },
+        {
+          "move": "Ne5",
+          "roles_gained": [
+            "white_knight_e5:role.activity.moderate_mobility",
+            "white_knight_e5:role.control.outpost"
+          ],
+          "roles_lost": [
+            "white_knight_f3:role.activity.moderate_mobility",
+            "white_knight_f3:role.defending.king"
+          ]
+        },
+        {
+          "move": "Bd6",
+          "roles_gained": [
+            "black_bishop_d6:role.activity.moderate_mobility",
+            "black_queen_c7:role.activity.moderate_mobility",
+            "black_bishop_d6:role.defending.king"
+          ],
+          "roles_lost": [
+            "black_bishop_f8:role.activity.moderate_mobility",
+            "black_queen_c7:role.activity.high_mobility",
+            "black_bishop_f8:role.defending.king"
+          ]
+        }
+      ]
+    },
+    "pgn_exploration": "[Event \"Investigation\"]\n[Site \"?\"]\n[Date \"????.??.??\"]\n[Round \"?\"]\n[White \"?\"]\n[Black \"?\"]\n[Result \"*\"]\n[FEN \"rnb1kbnr/ppp1pppp/8/4q3/8/2N5/PPPPBPPP/R1BQK1NR b KQkq - 3 4\"]\n\n{ [Starting tags: tag.king.attackers.count, tag.king.defenders.count, tag.king.attackers.count, tag.king.defenders.count, tag.center.control.near, tag.key.d4, tag.key.e5, tag.space.advantage, tag.file.semi.d, tag.file.semi.e, tag.diagonal.open.e2-h5, tag.diagonal.open.e2-a6, tag.diagonal.open.c8-h3, tag.diagonal.open.e5-g3, tag.activity.mobility.knight, tag.activity.mobility.bishop, tag.activity.mobility.rook, tag.activity.mobility.queen, tag.undeveloped.knight, tag.undeveloped.bishop][Starting roles: white_bishop_c1:role.activity.low_mobility, white_bishop_c1:role.defending.king, white_queen_d1:role.defending.king, white_king_e1:role.defending.king, white_knight_g1:role.status.trapped, white_knight_g1:role.defending.king, white_rook_h1:role.status.trapped, white_rook_h1:role.activity.low_mobility, white_pawn_a2:role.activity.low_mobility, white_pawn_b2:role.activity.low_mobility, white_pawn_c2:role.activity.low_mobility, white_pawn_d2:role.activity.low_mobility, white_bishop_e2:role.activity.high_mobility, white_bishop_e2:role.defending.king, white_pawn_f2:role.activity.low_mobility, white_pawn_g2:role.activity.low_mobility, white_pawn_h2:role.activity.low_mobility, white_knight_c3:role.activity.moderate_mobility, white_knight_c3:role.defending.king, black_queen_e5:role.activity.high_mobility, black_queen_e5:role.defending.king, black_pawn_a7:role.activity.low_mobility, black_pawn_b7:role.activity.low_mobility, black_pawn_c7:role.activity.low_mobility, black_pawn_e7:role.activity.low_mobility, black_pawn_f7:role.activity.low_mobility, black_pawn_g7:role.activity.low_mobility, black_pawn_h7:role.activity.low_mobility, black_rook_a8:role.activity.low_mobility, black_knight_b8:role.defending.king, black_bishop_c8:role.activity.moderate_mobility, black_bishop_c8:role.defending.king, black_king_e8:role.defending.king, black_bishop_f8:role.activity.low_mobility, black_bishop_f8:role.defending.king, black_knight_g8:role.defending.king, black_rook_h8:role.activity.low_mobility] }\n4... c6\n{ [%eval +1.04] [%theme \"center_space,piece_activity\"] [%tactic \"center control core\"] {[gained: tag.center.control.core, tag.key.d5, tag.diagonal.open.e5-c7], [lost: none], [roles_gained: pawn_c6:role.activity.low_mobility], [roles_lost: pawn_c7:role.activity.low_mobility], [threats: center control core, key d5, diagonal open e5-c7] }\n( 4... c6\n{ [%eval +0.97] [%theme \"stopped_branch\"] [%theme \"d2_worse_than_original\"] Branch stopped: d2_eval_below_original. D2 eval (+0.97) below original (+1.04, diff: -0.07). {[gained: diagonal open e5-c7, key d5, center control core], [lost: none], [roles_gained: pawn_c6:role.activity.low_mobility], [roles_lost: pawn_c7:role.activity.low_mobility], [threats: none] }\n5. Nf3\n{ [%eval +0.97] [%theme \"center_space,piece_activity,king_safety\"] {[gained: castling available kingside], [lost: space advantage, key d4, center control core, piece trapped, diagonal open e2-h5], [roles_gained: bishop_e2:role.activity.moderate_mobility, knight_f3:role.defending.king, queen_e5:role.status.hanging, knight_f3:role.activity.moderate_mobility, rook_h1:role.defending.king], [roles_lost: bishop_e2:role.activity.high_mobility, knight_g1:role.status.trapped, knight_g1:role.defending.king, rook_h1:role.activity.low_mobility, rook_h1:role.status.trapped], [threats: none] }\n5... Qc7\n{ [%theme \"center_space,piece_activity,king_safety\"] {[gained: diagonal open c7-a5, key d4, center control core, key e4, diagonal open c7-g3], [lost: diagonal open e5-g3, diagonal open e5-c7, key d5, key e5], [roles_gained: queen_c7:role.activity.high_mobility, queen_c7:role.defending.king], [roles_lost: queen_e5:role.activity.high_mobility, queen_e5:role.status.hanging, queen_e5:role.defending.king], [threats: none] }\n6. d4\n{ [%theme \"center_space,piece_activity,king_safety\"] {[gained: diagonal open c1-h6, key e5], [lost: none], [roles_gained: pawn_d4:role.activity.low_mobility, bishop_c1:role.activity.moderate_mobility, queen_d1:role.activity.moderate_mobility], [roles_lost: bishop_c1:role.activity.low_mobility, pawn_d2:role.activity.low_mobility], [threats: none] }\n6... Nd7\n{ [%theme \"center_space,piece_activity,development\"] {[gained: none], [lost: center control near, diagonal open c8-h3, key e5], [roles_gained: knight_d7:role.activity.moderate_mobility, knight_d7:role.defending.king, bishop_c8:role.activity.low_mobility], [roles_lost: bishop_c8:role.activity.moderate_mobility, rook_a8:role.activity.low_mobility, knight_b8:role.defending.king], [threats: none] }\n7. O-O\n{ [%theme \"center_space,king_safety,piece_activity\"] {[gained: none], [lost: castling available kingside], [roles_gained: king_g1:role.defending.king, rook_f1:role.defending.king], [roles_lost: bishop_c1:role.defending.king, knight_c3:role.defending.king, rook_h1:role.defending.king, king_e1:role.defending.king], [threats: none] }\n7... e6\n{ [%theme \"center_space,king_safety,piece_activity\"] {[gained: center control near, key d5, diagonal open f8-a3, bishop bad], [lost: none], [roles_gained: bishop_f8:role.activity.moderate_mobility, pawn_e6:role.activity.low_mobility], [roles_lost: bishop_f8:role.activity.low_mobility, pawn_e7:role.activity.low_mobility], [threats: none] }\n8. Re1\n{ [%theme \"center_space,king_safety,piece_activity\"] {[gained: rook semi open], [lost: none], [roles_gained: rook_e1:role.defending.king], [roles_lost: queen_d1:role.defending.king, rook_f1:role.defending.king], [threats: none] }\n8... Ngf6\n{ [%theme \"king_safety,piece_activity,center_space\"] {[gained: none], [lost: undeveloped knight, key e4, center control core], [roles_gained: knight_f6:role.defending.king, knight_f6:role.activity.moderate_mobility, rook_h8:role.defending.king], [roles_lost: knight_g8:role.defending.king, rook_h8:role.activity.low_mobility], [threats: none] }\n9. Bd3\n{ [%theme \"center_space,king_safety,piece_activity\"] {[gained: diagonal open d3-a6, key e4, diagonal open d3-g6, center control core, key e5, diagonal open d3-f1], [lost: center control near, diagonal open e2-a6], [roles_gained: rook_e1:role.activity.moderate_mobility, bishop_d3:role.defending.king, bishop_d3:role.activity.high_mobility], [roles_lost: bishop_e2:role.activity.moderate_mobility, bishop_e2:role.defending.king], [threats: none] }\n9... Bd6\n{ [%theme \"center_space,piece_activity,king_safety\"] {[gained: diagonal open d6-f8, castling available kingside, diagonal open d6-a3, diagonal open d6-g3], [lost: diagonal open f8-a3, diagonal open c7-g3], [roles_gained: bishop_d6:role.defending.king, bishop_d6:role.activity.high_mobility], [roles_lost: bishop_f8:role.defending.king, bishop_f8:role.activity.moderate_mobility], [threats: none] Final eval: +0.97. }\n) 5. Nf3\n{ [%eval +0.94] [%theme \"center_space,piece_activity\"] [%tactic \"castling available kingside\"] {[gained: tag.castling.available.kingside], [lost: tag.center.control.core, tag.key.d4, tag.space.advantage, tag.diagonal.open.e2-h5, tag.piece.trapped, tag.piece.trapped], [roles_gained: bishop_e2:role.activity.moderate_mobility, queen_e5:role.status.hanging, knight_f3:role.activity.moderate_mobility, knight_f3:role.defending.king, rook_h1:role.defending.king], [roles_lost: knight_g1:role.defending.king, bishop_e2:role.activity.high_mobility, knight_g1:role.status.trapped, rook_h1:role.activity.low_mobility, rook_h1:role.status.trapped], [threats: castling available kingside] }\n5... Qc7\n{ [%eval +1.06] [%theme \"center_space,piece_activity\"] [%tactic \"center control core\"] {[gained: tag.center.control.core, tag.key.e4, tag.key.d4, tag.diagonal.open.c7-g3, tag.diagonal.open.c7-a5], [lost: tag.key.e5, tag.key.e5, tag.key.d5, tag.diagonal.open.e5-c7, tag.diagonal.open.e5-g3], [roles_gained: queen_c7:role.defending.king, queen_c7:role.activity.high_mobility], [roles_lost: queen_e5:role.defending.king, queen_e5:role.status.hanging, queen_e5:role.activity.high_mobility], [threats: center control core, key e4, key d4, diagonal open c7-g3, diagonal open c7-a5] }\n6. d4\n{ [%eval +0.95] [%theme \"center_space,piece_activity\"] [%tactic \"key e5\"] {[gained: tag.key.e5, tag.diagonal.open.c1-h6], [lost: none], [roles_gained: pawn_d4:role.activity.low_mobility, queen_d1:role.activity.moderate_mobility, bishop_c1:role.activity.moderate_mobility], [roles_lost: bishop_c1:role.activity.low_mobility, pawn_d2:role.activity.low_mobility], [threats: key e5, diagonal open c1-h6] }\n6... Nd7\n{ [%eval +0.97] [%theme \"center_space,piece_activity\"] [%tactic \"none\"] {[gained: none], [lost: tag.center.control.near, tag.key.e5, tag.diagonal.open.c8-h3], [roles_gained: bishop_c8:role.activity.low_mobility, knight_d7:role.defending.king, knight_d7:role.activity.moderate_mobility], [roles_lost: rook_a8:role.activity.low_mobility, bishop_c8:role.activity.moderate_mobility, knight_b8:role.defending.king], [threats: none] }\n7. O-O\n{ [%eval +1.10] [%theme \"center_space,king_safety\"] [%tactic \"none\"] {[gained: none], [lost: tag.castling.available.kingside], [roles_gained: rook_f1:role.defending.king, king_g1:role.defending.king], [roles_lost: bishop_c1:role.defending.king, king_e1:role.defending.king, knight_c3:role.defending.king, rook_h1:role.defending.king], [threats: none] }\n7... Ngf6\n{ [%eval +1.14] [%theme \"king_safety,piece_activity\"] [%tactic \"key d5\"] {[gained: tag.key.d5], [lost: tag.center.control.core, tag.key.e4, tag.undeveloped.knight], [roles_gained: rook_h8:role.defending.king, knight_f6:role.activity.moderate_mobility, knight_f6:role.defending.king], [roles_lost: knight_g8:role.defending.king, rook_h8:role.activity.low_mobility], [threats: key d5] }\n8. Re1\n{ [%eval +1.16] [%theme \"king_safety,piece_activity\"] [%tactic \"rook semi open\"] {[gained: tag.rook.semi_open], [lost: none], [roles_gained: rook_e1:role.defending.king], [roles_lost: rook_f1:role.defending.king, queen_d1:role.defending.king], [threats: rook semi open] }\n8... e6\n{ [%eval +0.97] [%theme \"king_safety,piece_activity\"] [%tactic \"center control near\"] {[gained: tag.center.control.near, tag.diagonal.open.f8-a3, tag.bishop.bad], [lost: none], [roles_gained: bishop_f8:role.activity.moderate_mobility, pawn_e6:role.activity.low_mobility], [roles_lost: pawn_e7:role.activity.low_mobility, bishop_f8:role.activity.low_mobility], [threats: center control near, diagonal open f8-a3, bishop bad] }\n9. Bd3\n{ [%eval +1.10] [%theme \"center_space,king_safety\"] [%tactic \"center control core\"] {[gained: tag.center.control.core, tag.key.e4, tag.key.e5, tag.diagonal.open.d3-g6, tag.diagonal.open.d3-a6, tag.diagonal.open.d3-f1], [lost: tag.center.control.near, tag.diagonal.open.e2-a6], [roles_gained: bishop_d3:role.defending.king, bishop_d3:role.activity.high_mobility, rook_e1:role.activity.moderate_mobility], [roles_lost: bishop_e2:role.activity.moderate_mobility, bishop_e2:role.defending.king], [threats: center control core, key e4, key e5, diagonal open d3-g6, diagonal open d3-a6] }\n9... b6\n{ [%eval +1.16] [%theme \"center_space,king_safety\"] [%tactic \"diagonal open c8-a6\"] {[gained: tag.diagonal.open.c8-a6], [lost: tag.diagonal.open.c7-a5, tag.bishop.bad], [roles_gained: pawn_b6:role.activity.low_mobility], [roles_lost: bishop_c8:role.activity.low_mobility, pawn_b7:role.activity.low_mobility], [threats: diagonal open c8-a6] }\n10. Qe2\n{ [%eval +1.09] [%theme \"center_space,king_safety\"] [%tactic \"none\"] {[gained: none], [lost: tag.diagonal.open.d3-f1, tag.undeveloped.queen], [roles_gained: queen_e2:role.defending.king, queen_e2:role.activity.high_mobility], [roles_lost: bishop_d3:role.defending.king, queen_d1:role.activity.moderate_mobility, rook_e1:role.activity.moderate_mobility], [threats: none] }\n10... Bb7\n{ [%eval +1.06] [%theme \"center_space,piece_activity\"] [%tactic \"castling available queenside\"] {[gained: tag.castling.available.queenside], [lost: tag.diagonal.open.c8-a6], [roles_gained: rook_a8:role.defending.king], [roles_lost: bishop_c8:role.defending.king], [threats: castling available queenside] }\n11. Ne5\n{ [%eval +1.14] [%theme \"center_space,piece_activity\"] [%tactic \"center control near\"] {[gained: tag.center.control.near, tag.space.advantage, tag.diagonal.open.e2-h5], [lost: tag.center.control.core, tag.diagonal.open.c7-g3], [roles_gained: knight_e5:role.activity.moderate_mobility, knight_e5:role.control.outpost], [roles_lost: knight_f3:role.activity.moderate_mobility, knight_f3:role.defending.king], [threats: center control near, space advantage, diagonal open e2-h5] }\n11... Bd6\n{ [%eval +1.34] [%theme \"center_space,piece_activity\"] [%tactic \"diagonal open d6-f8\"] {[gained: tag.diagonal.open.d6-f8, tag.diagonal.open.d6-a3, tag.castling.available.kingside], [lost: tag.diagonal.open.f8-a3], [roles_gained: bishop_d6:role.activity.moderate_mobility, queen_c7:role.activity.moderate_mobility, bishop_d6:role.defending.king], [roles_lost: bishop_f8:role.activity.moderate_mobility, queen_c7:role.activity.high_mobility, bishop_f8:role.defending.king], [threats: diagonal open d6-f8, diagonal open d6-a3, castling available kingside] }\n*",
+    "themes_identified": [
+      "center_space",
+      "piece_activity",
+      "king_safety",
+      "pawn_structure",
+      "development"
+    ],
+    "commentary": {
+      "Bh3": "Best move (D16). Themes: center_space, piece_activity, king_safety.",
+      "c6": "D2 overestimates."
+    },
+    "evidence_index": [
+      {
+        "moves": [
+          "c6",
+          "Nf3",
+          "Qc7",
+          "d4"
+        ],
+        "source": "pv",
+        "context": "exploration_tree"
+      },
+      {
+        "moves": [
+          "Nf3",
+          "Qc7",
+          "d4",
+          "Nd7"
+        ],
+        "source": "pv",
+        "context": "exploration_tree"
+      },
+      {
+        "moves": [
+          "c6",
+          "Nf3",
+          "Qc7",
+          "d4"
+        ],
+        "source": "pv",
+        "context": "after_move"
+      }
+    ],
+    "evidence_starting_fen": "rnb1kbnr/ppp1pppp/8/4q3/8/2N5/PPPPBPPP/R1BQK1NR b KQkq - 3 4",
+    "evidence_pgn_line": "c6 Nf3 Qc7 d4",
+    "evidence_main_line_moves": [
+      "c6",
+      "Nf3",
+      "Qc7",
+      "d4"
+    ],
+    "evidence_per_move_deltas": [
+      {
+        "ply": 1,
+        "move": "c6",
+        "fen_before": "rnb1kbnr/ppp1pppp/8/4q3/8/2N5/PPPPBPPP/R1BQK1NR b KQkq - 3 4",
+        "fen_after": "rnb1kbnr/pp2pppp/2p5/4q3/8/2N5/PPPPBPPP/R1BQK1NR w KQkq - 0 5",
+        "tags_gained": [
+          "tag.center.control.core",
+          "tag.diagonal.open.e5-c7",
+          "tag.key.d5"
+        ],
+        "tags_lost": [],
+        "tags_gained_structured": [
+          {
+            "tag_name": "tag.center.control.core",
+            "side": "black",
+            "squares": [
+              "d4",
+              "d5"
+            ],
+            "details": {
+              "count": 2
+            },
+            "pieces": []
+          },
+          {
+            "tag_name": "tag.diagonal.open.e5-c7",
+            "side": "black",
+            "pieces": [
+              "Qe5"
+            ],
+            "squares": [
+              "d6",
+              "c7"
+            ],
+            "direction": "nw",
+            "details": {
+              "length": 2,
+              "open": true
+            }
+          },
+          {
+            "tag_name": "tag.key.d5",
+            "side": "black",
+            "squares": [
+              "d5"
+            ],
+            "controlling_pieces": [
+              {
+                "square": "e5",
+                "piece": "q",
+                "piece_name": "Queen"
+              },
+              {
+                "square": "c6",
+                "piece": "p",
+                "piece_name": "Pawn"
+              }
+            ],
+            "details": {},
+            "pieces": []
+          }
+        ],
+        "tags_lost_structured": [],
+        "roles_gained": [
+          "black_pawn_c6:role.activity.low_mobility"
+        ],
+        "roles_lost": [
+          "black_pawn_c7:role.activity.low_mobility"
+        ]
+      },
+      {
+        "ply": 2,
+        "move": "Nf3",
+        "fen_before": "rnb1kbnr/pp2pppp/2p5/4q3/8/2N5/PPPPBPPP/R1BQK1NR w KQkq - 0 5",
+        "fen_after": "rnb1kbnr/pp2pppp/2p5/4q3/8/2N2N2/PPPPBPPP/R1BQK2R b KQkq - 1 5",
+        "tags_gained": [
+          "tag.castling.available.kingside"
+        ],
+        "tags_lost": [
+          "tag.center.control.core",
+          "tag.diagonal.open.e2-h5",
+          "tag.key.d4",
+          "tag.piece.trapped",
+          "tag.space.advantage"
+        ],
+        "tags_gained_structured": [
+          {
+            "tag_name": "tag.castling.available.kingside",
+            "side": "white",
+            "squares": [],
+            "details": {
+              "legal": true
+            },
+            "pieces": []
+          },
+          {
+            "tag_name": "tag.key.e5",
+            "side": "white",
+            "squares": [
+              "e5"
+            ],
+            "controlling_pieces": [
+              {
+                "square": "f3",
+                "piece": "N",
+                "piece_name": "Knight"
+              }
+            ],
+            "details": {},
+            "pieces": []
+          }
+        ],
+        "tags_lost_structured": [
+          {
+            "tag_name": "tag.center.control.core",
+            "side": "black",
+            "squares": [
+              "d4",
+              "d5"
+            ],
+            "details": {
+              "count": 2
+            },
+            "pieces": []
+          },
+          {
+            "tag_name": "tag.diagonal.open.e2-h5",
+            "side": "white",
+            "pieces": [
+              "Be2"
+            ],
+            "squares": [
+              "f3",
+              "g4",
+              "h5"
+            ],
+            "direction": "ne",
+            "details": {
+              "length": 3,
+              "open": true
+            }
+          },
+          {
+            "tag_name": "tag.key.d4",
+            "side": "black",
+            "squares": [
+              "d4"
+            ],
+            "controlling_pieces": [
+              {
+                "square": "e5",
+                "piece": "q",
+                "piece_name": "Queen"
+              }
+            ],
+            "details": {},
+            "pieces": []
+          },
+          {
+            "tag_name": "tag.piece.trapped",
+            "side": "white",
+            "piece_type": "Knight",
+            "pieces": [
+              "Ng1"
+            ],
+            "squares": [
+              "g1"
+            ],
+            "safe_squares_count": 1,
+            "safe_squares": [
+              "f3"
+            ],
+            "attacked_squares": [
+              "e2",
+              "h3"
+            ],
+            "details": {
+              "safe_squares": 1
+            }
+          },
+          {
+            "tag_name": "tag.piece.trapped",
+            "side": "white",
+            "piece_type": "Rook",
+            "pieces": [
+              "Rh1"
+            ],
+            "squares": [
+              "h1"
+            ],
+            "safe_squares_count": 1,
+            "safe_squares": [
+              "g1"
+            ],
+            "attacked_squares": [
+              "h2"
+            ],
+            "details": {
+              "safe_squares": 1
+            }
+          },
+          {
+            "tag_name": "tag.space.advantage",
+            "side": "black",
+            "squares": [],
+            "details": {
+              "differential": 6
+            },
+            "pieces": []
+          },
+          {
+            "tag_name": "tag.undeveloped.knight",
+            "side": "white",
+            "squares": [
+              "g1"
+            ],
+            "pieces": [
+              "Ng1"
+            ],
+            "details": {
+              "count": 1,
+              "count_total": 1
+            }
+          }
+        ],
+        "roles_gained": [
+          "black_queen_e5:role.status.hanging",
+          "white_bishop_e2:role.activity.moderate_mobility",
+          "white_knight_f3:role.activity.moderate_mobility",
+          "white_knight_f3:role.defending.king",
+          "white_rook_h1:role.defending.king"
+        ],
+        "roles_lost": [
+          "white_bishop_e2:role.activity.high_mobility",
+          "white_knight_g1:role.defending.king",
+          "white_knight_g1:role.status.trapped",
+          "white_rook_h1:role.activity.low_mobility",
+          "white_rook_h1:role.status.trapped"
+        ]
+      },
+      {
+        "ply": 3,
+        "move": "Qc7",
+        "fen_before": "rnb1kbnr/pp2pppp/2p5/4q3/8/2N2N2/PPPPBPPP/R1BQK2R b KQkq - 1 5",
+        "fen_after": "rnb1kbnr/ppq1pppp/2p5/8/8/2N2N2/PPPPBPPP/R1BQK2R w KQkq - 2 6",
+        "tags_gained": [
+          "tag.center.control.core",
+          "tag.diagonal.open.c7-a5",
+          "tag.diagonal.open.c7-g3",
+          "tag.key.d4",
+          "tag.key.e4"
+        ],
+        "tags_lost": [
+          "tag.diagonal.open.e5-c7",
+          "tag.diagonal.open.e5-g3",
+          "tag.key.d5",
+          "tag.key.e5"
+        ],
+        "tags_gained_structured": [
+          {
+            "tag_name": "tag.center.control.core",
+            "side": "white",
+            "squares": [
+              "d4",
+              "e4"
+            ],
+            "details": {
+              "count": 2
+            },
+            "pieces": []
+          },
+          {
+            "tag_name": "tag.center.control.near",
+            "side": "black",
+            "squares": [
+              "f4",
+              "f5"
+            ],
+            "details": {
+              "count": 2
+            },
+            "pieces": []
+          },
+          {
+            "tag_name": "tag.diagonal.open.c7-a5",
+            "side": "black",
+            "pieces": [
+              "Qc7"
+            ],
+            "squares": [
+              "b6",
+              "a5"
+            ],
+            "direction": "sw",
+            "details": {
+              "length": 2,
+              "open": true
+            }
+          },
+          {
+            "tag_name": "tag.diagonal.open.c7-g3",
+            "side": "black",
+            "pieces": [
+              "Qc7"
+            ],
+            "squares": [
+              "d6",
+              "e5",
+              "f4",
+              "g3"
+            ],
+            "direction": "se",
+            "details": {
+              "length": 4,
+              "open": true
+            }
+          },
+          {
+            "tag_name": "tag.key.d4",
+            "side": "white",
+            "squares": [
+              "d4"
+            ],
+            "controlling_pieces": [
+              {
+                "square": "f3",
+                "piece": "N",
+                "piece_name": "Knight"
+              }
+            ],
+            "details": {},
+            "pieces": []
+          },
+          {
+            "tag_name": "tag.key.e4",
+            "side": "white",
+            "squares": [
+              "e4"
+            ],
+            "controlling_pieces": [
+              {
+                "square": "c3",
+                "piece": "N",
+                "piece_name": "Knight"
+              }
+            ],
+            "details": {},
+            "pieces": []
+          }
+        ],
+        "tags_lost_structured": [
+          {
+            "tag_name": "tag.center.control.near",
+            "side": "black",
+            "squares": [
+              "f4",
+              "c5",
+              "f5"
+            ],
+            "details": {
+              "count": 3
+            },
+            "pieces": []
+          },
+          {
+            "tag_name": "tag.diagonal.open.e5-c7",
+            "side": "black",
+            "pieces": [
+              "Qe5"
+            ],
+            "squares": [
+              "d6",
+              "c7"
+            ],
+            "direction": "nw",
+            "details": {
+              "length": 2,
+              "open": true
+            }
+          },
+          {
+            "tag_name": "tag.diagonal.open.e5-g3",
+            "side": "black",
+            "pieces": [
+              "Qe5"
+            ],
+            "squares": [
+              "f4",
+              "g3"
+            ],
+            "direction": "se",
+            "details": {
+              "length": 2,
+              "open": true
+            }
+          },
+          {
+            "tag_name": "tag.key.d5",
+            "side": "black",
+            "squares": [
+              "d5"
+            ],
+            "controlling_pieces": [
+              {
+                "square": "e5",
+                "piece": "q",
+                "piece_name": "Queen"
+              },
+              {
+                "square": "c6",
+                "piece": "p",
+                "piece_name": "Pawn"
+              }
+            ],
+            "details": {},
+            "pieces": []
+          },
+          {
+            "tag_name": "tag.key.e5",
+            "side": "black",
+            "squares": [
+              "e5"
+            ],
+            "controlling_pieces": [
+              {
+                "square": "e5",
+                "piece": "q",
+                "piece_name": "Queen",
+                "occupying": true
+              }
+            ],
+            "details": {},
+            "pieces": []
+          },
+          {
+            "tag_name": "tag.key.e5",
+            "side": "white",
+            "squares": [
+              "e5"
+            ],
+            "controlling_pieces": [
+              {
+                "square": "f3",
+                "piece": "N",
+                "piece_name": "Knight"
+              }
+            ],
+            "details": {},
+            "pieces": []
+          }
+        ],
+        "roles_gained": [
+          "black_queen_c7:role.activity.high_mobility",
+          "black_queen_c7:role.defending.king"
+        ],
+        "roles_lost": [
+          "black_queen_e5:role.activity.high_mobility",
+          "black_queen_e5:role.defending.king",
+          "black_queen_e5:role.status.hanging"
+        ]
+      },
+      {
+        "ply": 4,
+        "move": "d4",
+        "fen_before": "rnb1kbnr/ppq1pppp/2p5/8/8/2N2N2/PPPPBPPP/R1BQK2R w KQkq - 2 6",
+        "fen_after": "rnb1kbnr/ppq1pppp/2p5/8/3P4/2N2N2/PPP1BPPP/R1BQK2R b KQkq - 0 6",
+        "tags_gained": [
+          "tag.diagonal.open.c1-h6",
+          "tag.key.e5"
+        ],
+        "tags_lost": [],
+        "tags_gained_structured": [
+          {
+            "tag_name": "tag.center.control.core",
+            "side": "white",
+            "squares": [
+              "d4",
+              "e4",
+              "e5"
+            ],
+            "details": {
+              "count": 3
+            },
+            "pieces": []
+          },
+          {
+            "tag_name": "tag.center.control.near",
+            "side": "white",
+            "squares": [
+              "c4",
+              "c5"
+            ],
+            "details": {
+              "count": 2
+            },
+            "pieces": []
+          },
+          {
+            "tag_name": "tag.diagonal.open.c1-h6",
+            "side": "white",
+            "pieces": [
+              "Bc1"
+            ],
+            "squares": [
+              "d2",
+              "e3",
+              "f4",
+              "g5",
+              "h6"
+            ],
+            "direction": "ne",
+            "details": {
+              "length": 5,
+              "open": true
+            }
+          },
+          {
+            "tag_name": "tag.key.e5",
+            "side": "white",
+            "squares": [
+              "e5"
+            ],
+            "controlling_pieces": [
+              {
+                "square": "f3",
+                "piece": "N",
+                "piece_name": "Knight"
+              },
+              {
+                "square": "d4",
+                "piece": "P",
+                "piece_name": "Pawn"
+              }
+            ],
+            "details": {},
+            "pieces": []
+          }
+        ],
+        "tags_lost_structured": [
+          {
+            "tag_name": "tag.center.control.core",
+            "side": "white",
+            "squares": [
+              "d4",
+              "e4"
+            ],
+            "details": {
+              "count": 2
+            },
+            "pieces": []
+          },
+          {
+            "tag_name": "tag.center.control.near",
+            "side": "black",
+            "squares": [
+              "f4",
+              "f5"
+            ],
+            "details": {
+              "count": 2
+            },
+            "pieces": []
+          }
+        ],
+        "roles_gained": [
+          "white_bishop_c1:role.activity.moderate_mobility",
+          "white_pawn_d4:role.activity.low_mobility",
+          "white_queen_d1:role.activity.moderate_mobility"
+        ],
+        "roles_lost": [
+          "white_bishop_c1:role.activity.low_mobility",
+          "white_pawn_d2:role.activity.low_mobility"
+        ]
+      }
+    ],
+    "evidence_per_move_stats": [
+      {
+        "ply": 1,
+        "move_san": "c6",
+        "fen_before": "rnb1kbnr/ppp1pppp/8/4q3/8/2N5/PPPPBPPP/R1BQK1NR b KQkq - 3 4",
+        "fen_after": "rnb1kbnr/pp2pppp/2p5/4q3/8/2N5/PPPPBPPP/R1BQK1NR w KQkq - 0 5",
+        "eval_before": 0.97,
+        "eval_after": 0.94,
+        "eval_delta": -0.030000000000000027,
+        "material_before": 0.0,
+        "material_after": 0.0,
+        "material_delta": 0.0,
+        "positional_before": 0.97,
+        "positional_after": 0.94,
+        "positional_delta": -0.030000000000000027
+      },
+      {
+        "ply": 2,
+        "move_san": "Nf3",
+        "fen_before": "rnb1kbnr/pp2pppp/2p5/4q3/8/2N5/PPPPBPPP/R1BQK1NR w KQkq - 0 5",
+        "fen_after": "rnb1kbnr/pp2pppp/2p5/4q3/8/2N2N2/PPPPBPPP/R1BQK2R b KQkq - 1 5",
+        "eval_before": 0.94,
+        "eval_after": 0.95,
+        "eval_delta": 0.010000000000000009,
+        "material_before": 0.0,
+        "material_after": 0.0,
+        "material_delta": 0.0,
+        "positional_before": 0.94,
+        "positional_after": 0.95,
+        "positional_delta": 0.010000000000000009
+      },
+      {
+        "ply": 3,
+        "move_san": "Qc7",
+        "fen_before": "rnb1kbnr/pp2pppp/2p5/4q3/8/2N2N2/PPPPBPPP/R1BQK2R b KQkq - 1 5",
+        "fen_after": "rnb1kbnr/ppq1pppp/2p5/8/8/2N2N2/PPPPBPPP/R1BQK2R w KQkq - 2 6",
+        "eval_before": 0.95,
+        "eval_after": 0.94,
+        "eval_delta": -0.010000000000000009,
+        "material_before": 0.0,
+        "material_after": 0.0,
+        "material_delta": 0.0,
+        "positional_before": 0.95,
+        "positional_after": 0.94,
+        "positional_delta": -0.010000000000000009
+      },
+      {
+        "ply": 4,
+        "move_san": "d4",
+        "fen_before": "rnb1kbnr/ppq1pppp/2p5/8/8/2N2N2/PPPPBPPP/R1BQK2R w KQkq - 2 6",
+        "fen_after": "rnb1kbnr/ppq1pppp/2p5/8/3P4/2N2N2/PPP1BPPP/R1BQK2R b KQkq - 0 6",
+        "eval_before": 0.94,
+        "eval_after": 0.95,
+        "eval_delta": 0.010000000000000009,
+        "material_before": 0.0,
+        "material_after": 0.0,
+        "material_delta": 0.0,
+        "positional_before": 0.94,
+        "positional_after": 0.95,
+        "positional_delta": 0.010000000000000009
+      }
+    ],
+    "evidence_tags_gained_net": [
+      "tag.castling.available.kingside",
+      "tag.center.control.core",
+      "tag.center.control.near"
+    ],
+    "evidence_tags_lost_net": [
+      "tag.piece.trapped",
+      "tag.space.advantage",
+      "tag.center.control.core",
+      "tag.undeveloped.knight",
+      "tag.center.control.near"
+    ],
+    "evidence_tags_gained_net_raw": [
+      "tag.castling.available.kingside",
+      "tag.center.control.core",
+      "tag.diagonal.open.c7-a5",
+      "tag.diagonal.open.c7-g3",
+      "tag.key.e4",
+      "tag.diagonal.open.c1-h6",
+      "tag.key.d4",
+      "tag.center.control.near",
+      "tag.key.e5"
+    ],
+    "evidence_tags_lost_net_raw": [
+      "tag.diagonal.open.e2-h5",
+      "tag.piece.trapped",
+      "tag.space.advantage",
+      "tag.diagonal.open.e5-c7",
+      "tag.diagonal.open.e5-g3",
+      "tag.key.d5",
+      "tag.center.control.core",
+      "tag.undeveloped.knight",
+      "tag.center.control.near"
+    ],
+    "evidence_tags_gained_net_structured": [
+      {
+        "tag_name": "tag.castling.available.kingside",
+        "side": "white",
+        "squares": [],
+        "details": {
+          "legal": true
+        },
+        "pieces": []
+      },
+      {
+        "tag_name": "tag.diagonal.open.c7-a5",
+        "side": "black",
+        "pieces": [
+          "Qc7"
+        ],
+        "squares": [
+          "b6",
+          "a5"
+        ],
+        "direction": "sw",
+        "details": {
+          "length": 2,
+          "open": true
+        }
+      },
+      {
+        "tag_name": "tag.diagonal.open.c7-g3",
+        "side": "black",
+        "pieces": [
+          "Qc7"
+        ],
+        "squares": [
+          "d6",
+          "e5",
+          "f4",
+          "g3"
+        ],
+        "direction": "se",
+        "details": {
+          "length": 4,
+          "open": true
+        }
+      },
+      {
+        "tag_name": "tag.key.d4",
+        "side": "white",
+        "squares": [
+          "d4"
+        ],
+        "controlling_pieces": [
+          {
+            "square": "f3",
+            "piece": "N",
+            "piece_name": "Knight"
+          }
+        ],
+        "details": {},
+        "pieces": []
+      },
+      {
+        "tag_name": "tag.key.e4",
+        "side": "white",
+        "squares": [
+          "e4"
+        ],
+        "controlling_pieces": [
+          {
+            "square": "c3",
+            "piece": "N",
+            "piece_name": "Knight"
+          }
+        ],
+        "details": {},
+        "pieces": []
+      },
+      {
+        "tag_name": "tag.center.control.core",
+        "side": "white",
+        "squares": [
+          "d4",
+          "e4",
+          "e5"
+        ],
+        "details": {
+          "count": 3
+        },
+        "pieces": []
+      },
+      {
+        "tag_name": "tag.center.control.near",
+        "side": "white",
+        "squares": [
+          "c4",
+          "c5"
+        ],
+        "details": {
+          "count": 2
+        },
+        "pieces": []
+      },
+      {
+        "tag_name": "tag.diagonal.open.c1-h6",
+        "side": "white",
+        "pieces": [
+          "Bc1"
+        ],
+        "squares": [
+          "d2",
+          "e3",
+          "f4",
+          "g5",
+          "h6"
+        ],
+        "direction": "ne",
+        "details": {
+          "length": 5,
+          "open": true
+        }
+      },
+      {
+        "tag_name": "tag.key.e5",
+        "side": "white",
+        "squares": [
+          "e5"
+        ],
+        "controlling_pieces": [
+          {
+            "square": "f3",
+            "piece": "N",
+            "piece_name": "Knight"
+          },
+          {
+            "square": "d4",
+            "piece": "P",
+            "piece_name": "Pawn"
+          }
+        ],
+        "details": {},
+        "pieces": []
+      }
+    ],
+    "evidence_tags_lost_net_structured": [
+      {
+        "tag_name": "tag.center.control.core",
+        "side": "black",
+        "squares": [
+          "d4",
+          "d5"
+        ],
+        "details": {
+          "count": 2
+        },
+        "pieces": []
+      },
+      {
+        "tag_name": "tag.diagonal.open.e2-h5",
+        "side": "white",
+        "pieces": [
+          "Be2"
+        ],
+        "squares": [
+          "f3",
+          "g4",
+          "h5"
+        ],
+        "direction": "ne",
+        "details": {
+          "length": 3,
+          "open": true
+        }
+      },
+      {
+        "tag_name": "tag.key.d4",
+        "side": "black",
+        "squares": [
+          "d4"
+        ],
+        "controlling_pieces": [
+          {
+            "square": "e5",
+            "piece": "q",
+            "piece_name": "Queen"
+          }
+        ],
+        "details": {},
+        "pieces": []
+      },
+      {
+        "tag_name": "tag.piece.trapped",
+        "side": "white",
+        "piece_type": "Knight",
+        "pieces": [
+          "Ng1"
+        ],
+        "squares": [
+          "g1"
+        ],
+        "safe_squares_count": 1,
+        "safe_squares": [
+          "f3"
+        ],
+        "attacked_squares": [
+          "e2",
+          "h3"
+        ],
+        "details": {
+          "safe_squares": 1
+        }
+      },
+      {
+        "tag_name": "tag.piece.trapped",
+        "side": "white",
+        "piece_type": "Rook",
+        "pieces": [
+          "Rh1"
+        ],
+        "squares": [
+          "h1"
+        ],
+        "safe_squares_count": 1,
+        "safe_squares": [
+          "g1"
+        ],
+        "attacked_squares": [
+          "h2"
+        ],
+        "details": {
+          "safe_squares": 1
+        }
+      },
+      {
+        "tag_name": "tag.space.advantage",
+        "side": "black",
+        "squares": [],
+        "details": {
+          "differential": 6
+        },
+        "pieces": []
+      },
+      {
+        "tag_name": "tag.undeveloped.knight",
+        "side": "white",
+        "squares": [
+          "g1"
+        ],
+        "pieces": [
+          "Ng1"
+        ],
+        "details": {
+          "count": 1,
+          "count_total": 1
+        }
+      },
+      {
+        "tag_name": "tag.center.control.near",
+        "side": "black",
+        "squares": [
+          "f4",
+          "c5",
+          "f5"
+        ],
+        "details": {
+          "count": 3
+        },
+        "pieces": []
+      },
+      {
+        "tag_name": "tag.diagonal.open.e5-c7",
+        "side": "black",
+        "pieces": [
+          "Qe5"
+        ],
+        "squares": [
+          "d6",
+          "c7"
+        ],
+        "direction": "nw",
+        "details": {
+          "length": 2,
+          "open": true
+        }
+      },
+      {
+        "tag_name": "tag.diagonal.open.e5-g3",
+        "side": "black",
+        "pieces": [
+          "Qe5"
+        ],
+        "squares": [
+          "f4",
+          "g3"
+        ],
+        "direction": "se",
+        "details": {
+          "length": 2,
+          "open": true
+        }
+      },
+      {
+        "tag_name": "tag.key.d5",
+        "side": "black",
+        "squares": [
+          "d5"
+        ],
+        "controlling_pieces": [
+          {
+            "square": "e5",
+            "piece": "q",
+            "piece_name": "Queen"
+          },
+          {
+            "square": "c6",
+            "piece": "p",
+            "piece_name": "Pawn"
+          }
+        ],
+        "details": {},
+        "pieces": []
+      },
+      {
+        "tag_name": "tag.key.e5",
+        "side": "black",
+        "squares": [
+          "e5"
+        ],
+        "controlling_pieces": [
+          {
+            "square": "e5",
+            "piece": "q",
+            "piece_name": "Queen",
+            "occupying": true
+          }
+        ],
+        "details": {},
+        "pieces": []
+      },
+      {
+        "tag_name": "tag.center.control.core",
+        "side": "white",
+        "squares": [
+          "d4",
+          "e4"
+        ],
+        "details": {
+          "count": 2
+        },
+        "pieces": []
+      },
+      {
+        "tag_name": "tag.center.control.near",
+        "side": "black",
+        "squares": [
+          "f4",
+          "f5"
+        ],
+        "details": {
+          "count": 2
+        },
+        "pieces": []
+      }
+    ],
+    "evidence_roles_gained_net": [
+      "black_pawn_c6:role.activity.low_mobility",
+      "white_bishop_e2:role.activity.moderate_mobility",
+      "white_knight_f3:role.activity.moderate_mobility",
+      "white_knight_f3:role.defending.king",
+      "white_rook_h1:role.defending.king",
+      "black_queen_c7:role.activity.high_mobility",
+      "black_queen_c7:role.defending.king",
+      "white_bishop_c1:role.activity.moderate_mobility",
+      "white_pawn_d4:role.activity.low_mobility",
+      "white_queen_d1:role.activity.moderate_mobility"
+    ],
+    "evidence_roles_lost_net": [
+      "black_pawn_c7:role.activity.low_mobility",
+      "white_bishop_e2:role.activity.high_mobility",
+      "white_knight_g1:role.defending.king",
+      "white_knight_g1:role.status.trapped",
+      "white_rook_h1:role.activity.low_mobility",
+      "white_rook_h1:role.status.trapped",
+      "black_queen_e5:role.activity.high_mobility",
+      "black_queen_e5:role.defending.king",
+      "black_queen_e5:role.status.hanging",
+      "white_bishop_c1:role.activity.low_mobility",
+      "white_pawn_d2:role.activity.low_mobility"
+    ],
+    "evidence_end_fen": "rnb1kbnr/ppq1pppp/2p5/8/3P4/2N2N2/PPP1BPPP/R1BQK2R b KQkq - 0 6",
+    "evidence_eval_start": 0.97,
+    "evidence_eval_end": 0.95,
+    "evidence_eval_delta": -0.020000000000000018,
+    "evidence_material_start": 0.0,
+    "evidence_material_end": 0.0,
+    "evidence_positional_start": 0.97,
+    "evidence_positional_end": 0.95,
+    "goal_search_results": {}
+  },
+  "timestamp": 1767093573.5556731
+}

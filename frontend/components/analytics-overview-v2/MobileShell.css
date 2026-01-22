@@ -1,0 +1,52 @@
+.v2-mobile-shell .top-bar {
+  padding-top: env(safe-area-inset-top);
+  height: calc(100px + env(safe-area-inset-top));
+}
+
+.v2-mobile-shell .chat-layout {
+  padding-top: calc(124px + env(safe-area-inset-top));
+}
+
+.v2-mobile-shell .bottom-composer {
+  left: 0;
+  right: 0;
+  width: 100%;
+  padding: 12px;
+  padding-bottom: max(12px, env(safe-area-inset-bottom));
+}
+
+.v2-mobile-shell .bottom-composer .composer-inner {
+  max-width: 100%;
+  padding: 0;
+}
+
+.v2-mobile-shell .bottom-composer .bottom-input {
+  width: 100%;
+}
+
+.v2-mobile-shell .conversation-container {
+  padding-bottom: calc(140px + env(safe-area-inset-bottom));
+}
+
+.v2-mobile-section {
+  margin-bottom: 24px;
+}
+
+.v2-mobile-shell .board-dock {
+  padding: 0 0 12px;
+}
+
+.v2-mobile-shell .board-dock-inner {
+  width: 100%;
+}
+
+.v2-mobile-shell .board-container,
+.v2-mobile-shell .board-and-analysis {
+  width: 100%;
+  max-width: 100%;
+}
+
+.v2-mobile-shell .board-with-eval {
+  width: 100%;
+}
+

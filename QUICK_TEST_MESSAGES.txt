@@ -1,0 +1,81 @@
+# Quick Test Messages - Copy & Paste
+
+## Setup: Start a game first
+"let's play a game"
+
+## Category 1: Clear High-Confidence Intents
+"end this game"
+"I resign"
+"reset board"
+"end walkthrough"
+
+## Category 2: Ambiguous (Need Clarification)
+"end"
+"stop"
+"end this"
+"quit"
+
+## Category 3: Low Confidence / Fallback
+"end something"
+"do something"
+"ending"
+
+## Category 4: Confirmation Responses
+"yes"
+"y"
+"no"
+"n"
+
+## Category 5: Clarifying Question Responses
+"1"
+"2"
+"3"
+"end the game"
+"end walkthrough"
+
+## Category 6: Context Tests
+"end" (with only game active)
+"end" (with game + walkthrough active)
+"end" (with nothing active)
+
+## Category 7: Edge Cases
+"end game and reset board"
+"edn game"
+"please end this game now"
+"don't end the game"
+"how do I end the game?"
+
+## Category 8: Non-Critical Intents (General Use)
+"play a game"
+"give me a puzzle"
+"what should I do"
+"switch to analyze mode"
+"go to discuss mode"
+"enter tactics mode"
+"help"
+"what can you do"
+"describe this position"
+"review this game"
+"what are my candidate moves"
+"what's the evaluation"
+"start lesson"
+"create opening lesson"
+
+## Category 9: Integration Tests
+"end this game"
+"yes"
+"play a game"
+
+## Category 10: Response Format Tests
+"yes"
+"y"
+"YES"
+"Y"
+"no"
+"n"
+"NO"
+"N"
+"1"
+" 1 "
+"one"
+
