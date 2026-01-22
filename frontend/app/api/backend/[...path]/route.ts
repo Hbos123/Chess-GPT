@@ -84,12 +84,50 @@ async function proxyRequest(
       body: body || undefined,
     });
 
-    // Get response body
+    const contentType = response.headers.get('Content-Type') || '';
+
+    // IMPORTANT: Do not buffer SSE streams.
+    // If we call response.text() here, we will accumulate the entire stream and the UI
+    // will only see status events at the end (instead of progressively).
+    if (contentType.includes('text/event-stream')) {
+      const streamHeaders: HeadersInit = {
+        'Content-Type': contentType,
+        // Prevent intermediary/proxy buffering and transforms
+        'Cache-Control': 'no-cache, no-transform',
+        'Connection': 'keep-alive',
+        // Nginx-style: disable response buffering if present in the chain
+        'X-Accel-Buffering': 'no',
+        // Keep prior behavior (safe even for same-origin)
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, PATCH, OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+      };
+
+      // Copy other headers from backend response
+      response.headers.forEach((value, key) => {
+        const lowerKey = key.toLowerCase();
+        if (
+          lowerKey !== 'content-encoding' &&
+          lowerKey !== 'transfer-encoding' &&
+          lowerKey !== 'content-length'
+        ) {
+          streamHeaders[key] = value;
+        }
+      });
+
+      return new NextResponse(response.body, {
+        status: response.status,
+        statusText: response.statusText,
+        headers: streamHeaders,
+      });
+    }
+
+    // Non-stream responses can be buffered safely
     const responseBody = await response.text();
-    
+
     // Forward response with same status and headers
     const responseHeaders: HeadersInit = {
-      'Content-Type': response.headers.get('Content-Type') || 'application/json',
+      'Content-Type': contentType || 'application/json',
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, PATCH, OPTIONS',
       'Access-Control-Allow-Headers': 'Content-Type, Authorization',
