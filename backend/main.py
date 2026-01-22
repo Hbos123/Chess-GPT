@@ -645,9 +645,9 @@ async def lifespan(app: FastAPI):
         training_planner=training_planner,
         srs_scheduler=srs_scheduler,
         supabase_client=supabase_client,
-        openai_client=openai_client
-    ),
+        openai_client=openai_client,
         llm_router=llm_router
+    )
     print("✅ Tool executor initialized for chat")
     
     # Initialize Request Interpreter for chat preprocessing
