@@ -3947,8 +3947,14 @@ async def llm_chat_stream(request: LLMRequest):
                 except Exception as e:
                     print(f"   ❌ JSON serialization error for event {event_type}: {e}")
                     return f"event: error\ndata: {{\"message\": \"JSON serialization failed for {event_type}\"}}\n\n"
+            # Helper to send SSE event and ensure it's flushed immediately
+            async def send_status_event_flushed(event_type: str, data: dict):
+                """Send SSE event and ensure it's flushed immediately for progressive updates"""
+                yield send_event(event_type, data)
+                yield ": keepalive\n\n"
+                await asyncio.sleep(0.01)  # Small delay to ensure FastAPI flushes the buffer
             
-            # Helper to strip massive raw analysis data from tool results
+# Helper to strip massive raw analysis data from tool results
             def _strip_raw_analysis_from_tool_result(result: dict) -> dict:
                 """Strip massive raw_before/raw_after from game reviews to reduce SSE event size"""
                 if not isinstance(result, dict):
@@ -3977,13 +3983,15 @@ async def llm_chat_stream(request: LLMRequest):
             # ============================================================
             # PHASE 1: INTERPRETATION
             # ============================================================
-            yield send_event("status", {
+            async for event in send_status_event_flushed("status", {
                 "phase": "interpreting",
                 "message": "Understanding your request...",
                 "timestamp": _time.time()
-            })
-            all_status_messages.append({"phase": "interpreting", "message": "Understanding your request...", "timestamp": _time.time()})
-            await asyncio.sleep(0)  # Allow event to be sent
+            }):
+
+                yield event
+
+            all_status_messages.append({"phase": "interpreting", "message": "Understanding your request...", "timestamp": _time.time()})  # Allow event to be sent
             
             orchestration_plan = None
             pre_computed_analysis = {}
@@ -4012,23 +4020,27 @@ async def llm_chat_stream(request: LLMRequest):
                 )
                 
                 # Send interpreter results
-                yield send_event("status", {
+                async for event in send_status_event_flushed("status", {
                     "phase": "interpreting",
                     "message": f"Detected: {orchestration_plan.user_intent_summary}",
                     "timestamp": _time.time()
-                })
-                all_status_messages.append({"phase": "interpreting", "message": f"Detected: {orchestration_plan.user_intent_summary}", "timestamp": _time.time()})
-                await asyncio.sleep(0)
+                }):
+
+                    yield event
+
+                all_status_messages.append({"phase": "interpreting", "message": "Understanding your request...", "timestamp": _time.time()})
                 
                 if orchestration_plan.tool_sequence:
                     tools_str = ', '.join([t.name for t in orchestration_plan.tool_sequence])
-                    yield send_event("status", {
+                    async for event in send_status_event_flushed("status", {
                         "phase": "planning",
                         "message": f"Planning to use: {tools_str}",
                         "timestamp": _time.time()
-                    })
-                    all_status_messages.append({"phase": "planning", "message": f"Planning to use: {tools_str}", "timestamp": _time.time()})
-                    await asyncio.sleep(0)
+                    }):
+
+                        yield event
+
+                    all_status_messages.append({"phase": "interpreting", "message": "Understanding your request...", "timestamp": _time.time()})
             
             # ============================================================
             # HANDLE CLARIFICATION REQUESTS
@@ -4037,12 +4049,12 @@ async def llm_chat_stream(request: LLMRequest):
                 print(f"   ❓ Interpreter needs clarification - responding with question")
                 clarification_response = orchestration_plan.clarification_question
                 
-                yield send_event("status", {
+                async for event in send_status_event_flushed("status", {
                     "phase": "clarifying",
                     "message": "Asking for clarification...",
                     "timestamp": _time.time()
-                })
-                await asyncio.sleep(0)
+                }):
+                    yield event
                 
                 response_data = {
                     "response": clarification_response,
@@ -4087,13 +4099,17 @@ async def llm_chat_stream(request: LLMRequest):
                             if last_user_msg:
                                 tool_args["query"] = last_user_msg
                     
-                    yield send_event("status", {
+                    async for event in send_status_event_flushed("status", {
                         "phase": "executing",
                         "message": f"Running {tool_name}...",
                         "timestamp": _time.time()
-                    })
-                    all_status_messages.append({"phase": "executing", "message": f"Running {tool_name}...", "timestamp": _time.time()})
-                    await asyncio.sleep(0)
+                    }):
+
+                    
+                        yield event
+
+                    
+                    all_status_messages.append({"phase": "interpreting", "message": "Understanding your request...", "timestamp": _time.time()})
                     
                     # Use async queue for real-time status streaming during tool execution
                     status_queue = asyncio.Queue()
@@ -4128,7 +4144,9 @@ async def llm_chat_stream(request: LLMRequest):
                         try:
                             status_msg = await asyncio.wait_for(status_queue.get(), timeout=0.1)
                             all_status_messages.append(status_msg)
-                            yield send_event("status", status_msg)
+                            async for event in send_status_event_flushed("status", status_msg):
+
+                                yield event
                         except asyncio.TimeoutError:
                             pass
                     
@@ -4137,7 +4155,9 @@ async def llm_chat_stream(request: LLMRequest):
                         try:
                             status_msg = status_queue.get_nowait()
                             all_status_messages.append(status_msg)
-                            yield send_event("status", status_msg)
+                            async for event in send_status_event_flushed("status", status_msg):
+
+                                yield event
                         except asyncio.QueueEmpty:
                             break
                     
@@ -4267,13 +4287,15 @@ async def llm_chat_stream(request: LLMRequest):
             # ============================================================
             # PHASE 3: LLM CALL (with tool execution)
             # ============================================================
-            yield send_event("status", {
+            async for event in send_status_event_flushed("status", {
                 "phase": "executing",
                 "message": "Thinking...",
                 "timestamp": _time.time()
-            })
-            all_status_messages.append({"phase": "executing", "message": "Thinking...", "timestamp": _time.time()})
-            await asyncio.sleep(0)
+            }):
+
+                yield event
+
+            all_status_messages.append({"phase": "interpreting", "message": "Understanding your request...", "timestamp": _time.time()})
             
             # Include pre-executed tool calls in the list (normalize structure)
             tool_calls_made = []
@@ -4383,7 +4405,9 @@ async def llm_chat_stream(request: LLMRequest):
                         "timestamp": _time.time()
                     }
                     all_status_messages.append(tool_start_status)
-                    yield send_event("status", tool_start_status)
+                    async for event in send_status_event_flushed("status", tool_start_status):
+
+                        yield event
                     await asyncio.sleep(0)
                     
                     # Merge with planned arguments from orchestration_plan
@@ -4441,7 +4465,9 @@ async def llm_chat_stream(request: LLMRequest):
                             # Wait for status with short timeout
                             status_msg = await asyncio.wait_for(status_queue.get(), timeout=0.1)
                             all_status_messages.append(status_msg)
-                            yield send_event("status", status_msg)
+                            async for event in send_status_event_flushed("status", status_msg):
+
+                                yield event
                         except asyncio.TimeoutError:
                             # No status available, check if task is done
                             await asyncio.sleep(0)
@@ -4450,7 +4476,9 @@ async def llm_chat_stream(request: LLMRequest):
                     while not status_queue.empty():
                         status_msg = await status_queue.get()
                         all_status_messages.append(status_msg)
-                        yield send_event("status", status_msg)
+                        async for event in send_status_event_flushed("status", status_msg):
+
+                            yield event
                     
                     # Get tool result
                     tool_result = await tool_task
@@ -4473,7 +4501,9 @@ async def llm_chat_stream(request: LLMRequest):
                             "timestamp": _time.time()
                         }
                         all_status_messages.append(tool_complete_status)
-                        yield send_event("status", tool_complete_status)
+                        async for event in send_status_event_flushed("status", tool_complete_status):
+
+                            yield event
                     else:
                         print(f"   ❌ SSE: Tool {tool_name} failed: {tool_result['error']}")
                         result = {"error": tool_result["error"]}
@@ -4487,7 +4517,9 @@ async def llm_chat_stream(request: LLMRequest):
                             "timestamp": _time.time()
                         }
                         all_status_messages.append(error_status)
-                        yield send_event("status", error_status)
+                        async for event in send_status_event_flushed("status", error_status):
+
+                            yield event
                     
                     tool_results.append({
                         "role": "tool",
