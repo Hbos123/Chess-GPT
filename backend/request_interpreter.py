@@ -1848,9 +1848,6 @@ Output ONLY valid JSON:"""
                 return plan
             else:
                 print(f"   ⚠️ Failed to parse interpreter response:")
-                import traceback
-                print(f"      Traceback:")
-                traceback.print_exc()
                 print(f"      Raw: {plan_text[:500]}...")
                 # Ask for clarification instead of guessing
                 return self._build_clarification_plan(message, "I couldn't parse the request properly")
@@ -2195,39 +2192,110 @@ Output ONLY valid JSON:"""
         return plan
     
     def _extract_json(self, text: str) -> Optional[Dict[str, Any]]:
-        """Extract JSON from LLM response"""
-        # Try direct parse first
-        try:
-            return json.loads(text)
-        except:
-            pass
-        
-        # Try to extract from markdown code blocks
-        if "```json" in text:
+        """
+        Extract JSON from LLM response.
+
+        The interpreter prompt requests "ONLY valid JSON", but models sometimes return:
+        - Markdown fences (```json ... ```)
+        - Leading/trailing commentary
+        - Multiple JSON objects
+        - Trailing commas
+
+        This function is intentionally defensive to avoid unnecessary clarification fallbacks.
+        """
+        if not text:
+            return None
+
+        def _strip_code_fences(s: str) -> str:
+            s = s.strip()
+            if "```" not in s:
+                return s
+            if "```json" in s:
+                try:
+                    return s.split("```json", 1)[1].split("```", 1)[0].strip()
+                except Exception:
+                    return s.strip()
             try:
-                json_str = text.split("```json")[1].split("```")[0].strip()
-                return json.loads(json_str)
-            except:
-                pass
-        
-        if "```" in text:
+                return s.split("```", 1)[1].split("```", 1)[0].strip()
+            except Exception:
+                return s.strip()
+
+        def _find_first_json_span(s: str) -> Optional[str]:
+            start_obj = s.find("{")
+            start_arr = s.find("[")
+            if start_obj == -1 and start_arr == -1:
+                return None
+            if start_obj == -1:
+                start = start_arr
+                open_ch, close_ch = "[", "]"
+            elif start_arr == -1:
+                start = start_obj
+                open_ch, close_ch = "{", "}"
+            else:
+                start = min(start_obj, start_arr)
+                open_ch, close_ch = ("{", "}") if start == start_obj else ("[", "]")
+
+            depth = 0
+            in_str = False
+            esc = False
+            for i in range(start, len(s)):
+                ch = s[i]
+                if in_str:
+                    if esc:
+                        esc = False
+                        continue
+                    if ch == "\\":
+                        esc = True
+                        continue
+                    if ch == '"':
+                        in_str = False
+                        continue
+                    continue
+                else:
+                    if ch == '"':
+                        in_str = True
+                        continue
+                    if ch == open_ch:
+                        depth += 1
+                    elif ch == close_ch:
+                        depth -= 1
+                        if depth == 0:
+                            return s[start : i + 1]
+            return None
+
+        def _try_load(s: str) -> Optional[Dict[str, Any]]:
             try:
-                json_str = text.split("```")[1].split("```")[0].strip()
-                return json.loads(json_str)
-            except:
+                loaded = json.loads(s)
+                return loaded if isinstance(loaded, dict) else None
+            except Exception:
+                return None
+
+        d1 = _try_load(text.strip())
+        if d1 is not None:
+            return d1
+
+        stripped = _strip_code_fences(text)
+        d2 = _try_load(stripped)
+        if d2 is not None:
+            return d2
+
+        for source in (stripped, text):
+            span = _find_first_json_span(source)
+            if not span:
+                continue
+            d3 = _try_load(span)
+            if d3 is not None:
+                return d3
+            try:
+                cleaned = re.sub(r",\s*([}\]])", r"", span)
+                d4 = _try_load(cleaned)
+                if d4 is not None:
+                    return d4
+            except Exception:
                 pass
-        
-        # Try to find JSON object in text
-        try:
-            start = text.find("{")
-            end = text.rfind("}") + 1
-            if start >= 0 and end > start:
-                return json.loads(text[start:end])
-        except:
-            pass
-        
+
         return None
-    
+
     def _extract_username_platform(
         self,
         message: str,
