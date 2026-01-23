@@ -27,7 +27,7 @@ export function IntentBox({ intent, toolsUsed, statusHistory, mode }: IntentBoxP
       if (acc.some(m => m.message === msg.message && m.phase === msg.phase)) return acc;
       return [...acc, msg];
     }, []);
-  }, [uniqueHistory]);
+  }, [statusHistory]);
 
   // Calculate thinking time from status history
   const thinkingTime: string | null = useMemo(() => {
@@ -36,7 +36,7 @@ export function IntentBox({ intent, toolsUsed, statusHistory, mode }: IntentBoxP
     const last = uniqueHistory[uniqueHistory.length - 1]?.timestamp || 0;
     const seconds = (last - first);
     return seconds > 1000 ? (seconds / 1000).toFixed(1) : seconds.toFixed(1);
-  }, [uniqueHistory]);
+  }, [statusHistory]);
   
   if (!intent && toolsUsed.length === 0) {
     return null;
