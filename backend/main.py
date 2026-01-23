@@ -602,9 +602,6 @@ async def lifespan(app: FastAPI):
             game_window_manager = None
             account_init_manager = None
 
-    # Board tree store for D2/D16 tree-first analysis
-    board_tree_store = None
-    
     # Initialize LLMRouter with OpenAI provider (GPT-5-mini) - "openai-vllm route"
     # This provides session management, prefix caching, and identical structure to vLLM calls
     llm_router = None
@@ -7385,6 +7382,149 @@ async def get_srs_queue_endpoint(username: str, max_cards: int = 20):
         error_detail = f"Get SRS queue error: {str(e)}\n{traceback.format_exc()}"
         print(error_detail)
         raise HTTPException(status_code=500, detail=f"Failed to get SRS queue: {str(e)}")
+
+
+# ============================================================================
+# BOARD TREE API ENDPOINTS
+# ============================================================================
+
+@app.get("/board/tree/get")
+async def get_board_tree(
+    thread_id: str = Query(..., description="Thread/tab ID"),
+    include_scan: bool = Query(False, description="Include scan data")
+):
+    """Get the board tree for a thread"""
+    if not board_tree_store:
+        raise HTTPException(status_code=503, detail="Board tree store not initialized")
+    
+    tree = await board_tree_store.get_tree(thread_id=thread_id)
+    if not tree:
+        return {"success": False, "tree": None}
+    
+    # Convert tree to dict format
+    tree_dict = {
+        "root_id": tree.root_id,
+        "current_id": tree.current_id,
+        "nodes": {}
+    }
+    
+    for node_id, node in tree.nodes.items():
+        node_dict = {
+            "id": node.id,
+            "fen": node.fen,
+            "parent_id": node.parent_id,
+            "move_san": node.move_san,
+            "is_mainline": node.is_mainline,
+            "children": node.children,
+        }
+        if include_scan and node.scan:
+            node_dict["scan"] = node.scan
+        tree_dict["nodes"][node_id] = node_dict
+    
+    return {"success": True, "tree": tree_dict}
+
+
+class InitBoardTreeRequest(BaseModel):
+    thread_id: str
+    start_fen: str = Field(default_factory=lambda: chess.Board().fen())
+
+
+@app.post("/board/tree/init")
+async def init_board_tree(request: InitBoardTreeRequest):
+    """Initialize a new board tree for a thread"""
+    if not board_tree_store:
+        raise HTTPException(status_code=503, detail="Board tree store not initialized")
+    
+    # Create root node
+    root_node = BoardTreeNode(
+        id="root",
+        fen=request.start_fen,
+        parent_id=None,
+        move_san="",
+        is_mainline=True
+    )
+    
+    tree = BoardTree(
+        root_id="root",
+        current_id="root",
+        nodes={"root": root_node}
+    )
+    
+    await board_tree_store.set_tree(thread_id=request.thread_id, tree=tree)
+    return {"success": True, "tree_id": "root"}
+
+
+class AddMoveToTreeRequest(BaseModel):
+    thread_id: str
+    from_fen: str
+    move_san: str
+    parent_id: str = "root"
+
+
+@app.post("/board/tree/add_move")
+async def add_move_to_tree(request: AddMoveToTreeRequest):
+    """Add a move to the board tree"""
+    if not board_tree_store:
+        raise HTTPException(status_code=503, detail="Board tree store not initialized")
+    
+    tree = await board_tree_store.get_tree(thread_id=request.thread_id)
+    if not tree:
+        raise HTTPException(status_code=404, detail="Tree not found. Call /board/tree/init first")
+    
+    # Apply move to get new FEN
+    board = chess.Board(request.from_fen)
+    try:
+        move = board.parse_san(request.move_san)
+        board.push(move)
+        new_fen = board.fen()
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Invalid move: {e}")
+    
+    # Create new node
+    node_id = new_node_id()
+    new_node = BoardTreeNode(
+        id=node_id,
+        fen=new_fen,
+        parent_id=request.parent_id,
+        move_san=request.move_san,
+        is_mainline=False  # Could be determined by logic
+    )
+    
+    # Add to parent's children list
+    parent_node = tree.nodes.get(request.parent_id)
+    if parent_node:
+        if node_id not in parent_node.children:
+            parent_node.children.append(node_id)
+    
+    tree.nodes[node_id] = new_node
+    tree.current_id = node_id
+    
+    await board_tree_store.set_tree(thread_id=request.thread_id, tree=tree)
+    return {"success": True, "node_id": node_id}
+
+
+class BaselineIntuitionRequest(BaseModel):
+    fen: Optional[str] = None
+    thread_id: Optional[str] = None
+
+
+@app.post("/board/baseline_intuition_start")
+async def baseline_intuition_start(request: BaselineIntuitionRequest):
+    """Start baseline intuition analysis (placeholder)"""
+    # This endpoint might need actual implementation based on your needs
+    return {"success": True, "message": "Baseline intuition started"}
+
+
+class LogBehaviorRequest(BaseModel):
+    behavior_type: str
+    data: Dict[str, Any] = Field(default_factory=dict)
+
+
+@app.post("/learning/log_behavior")
+async def log_behavior(request: LogBehaviorRequest):
+    """Log user behavior for learning (placeholder)"""
+    # This endpoint might need actual implementation based on your needs
+    return {"success": True, "message": "Behavior logged"}
 
 
 if __name__ == "__main__":

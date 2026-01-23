@@ -382,11 +382,12 @@ class ToolExecutor:
         
         try:
             async with aiohttp.ClientSession() as session:
+                # Convert all parameters to strings for query params (aiohttp requires this)
                 params = {
                     "fen": fen,
-                    "lines": lines,
-                    "depth": depth,
-                    "light_mode": light_mode
+                    "lines": str(lines),
+                    "depth": str(depth),
+                    "light_mode": "true" if light_mode else "false"  # Convert boolean to string
                 }
                 
                 backend_port = int(os.getenv("BACKEND_PORT", "8001"))
