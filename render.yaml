@@ -1,0 +1,57 @@
+services:
+  - type: web
+    name: chess-gpt-backend
+    env: python
+    region: oregon
+    rootDir: backend
+    buildCommand: |
+      pip install --upgrade pip
+      pip install -r requirements.txt
+      # Download regular Stockfish for standard analysis
+      if [ ! -f stockfish ] || [ ! -x stockfish ]; then
+        echo "Downloading regular Stockfish..."
+        wget -q --timeout=30 --tries=3 https://github.com/official-stockfish/Stockfish/releases/download/sf_16/stockfish-ubuntu-x86-64-avx2.tar -O stockfish.tar
+        if [ $? -eq 0 ] && [ -f stockfish.tar ]; then
+          tar -xf stockfish.tar
+          if [ -f stockfish/stockfish-ubuntu-x86-64-avx2 ]; then
+            mv stockfish/stockfish-ubuntu-x86-64-avx2 ./stockfish-bin
+            rm -rf stockfish stockfish.tar
+            mv ./stockfish-bin ./stockfish
+            chmod +x ./stockfish
+            if [ -f stockfish ] && [ -x stockfish ]; then
+              echo "✅ Regular Stockfish downloaded and ready at $(pwd)/stockfish"
+              ./stockfish --version || echo "Stockfish binary exists but version check failed"
+            else
+              echo "⚠️ Stockfish binary not found or not executable after download"
+            fi
+          else
+            echo "⚠️ Stockfish binary not found in archive"
+          fi
+        else
+          echo "⚠️ Failed to download Stockfish tar file"
+        fi
+      else
+        echo "✅ Stockfish already exists and is executable"
+      fi
+
+      # Compile patched Stockfish for NNUE dumps
+      if [ ! -f Stockfish-sf_16/src/stockfish ]; then
+        echo "Compiling patched Stockfish for NNUE dumps..."
+        cd Stockfish-sf_16/src
+        make clean || true
+        make build ARCH=x86-64-modern -j2
+        chmod +x stockfish
+        cd ../..
+        echo "Patched Stockfish compiled and ready"
+      else
+        echo "Patched Stockfish already exists, skipping compilation"
+      fi
+
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    plan: standard
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.0
+      - key: ENGINE_POOL_SIZE
+        value: "2"
