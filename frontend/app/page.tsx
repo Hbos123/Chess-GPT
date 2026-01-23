@@ -2482,16 +2482,39 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
       // Avoid extra load during lessons / explicit play loops
       if (lessonMode || aiGameActive) return;
 
+      const isVerboseAI =
+        typeof window !== "undefined" &&
+        (new URLSearchParams(window.location.search).get("verbose_ai") === "1" ||
+          localStorage.getItem("CHESSTER_VERBOSE_AI") === "1" ||
+          process.env.NEXT_PUBLIC_VERBOSE_AI_LOGGING === "1");
+
+      if (isVerboseAI) console.log('🔄 [BASELINE PREFETCH] Starting baseline intuition prefetch:', {
+        fen: targetFen.substring(0, 50) + '...',
+        mode,
+        thread_id: activeTab?.id || sessionId || null
+      });
+
       const { buildLearningHeaders } = await import("@/lib/learningClient");
       const { headers } = await buildLearningHeaders();
-      await fetch(`${getBackendBase()}/board/baseline_intuition_start`, {
+      const response = await fetch(`${getBackendBase()}/board/baseline_intuition_start`, {
         method: "POST",
         headers: { "Content-Type": "application/json", ...headers },
         body: JSON.stringify({ start_fen: targetFen, thread_id: activeTab?.id || sessionId || null })
       });
+      
+      if (response.ok) {
+        const result = await response.json();
+        if (isVerboseAI) console.log('✅ [BASELINE PREFETCH] Baseline intuition started:', {
+          success: result.success,
+          key: result.key,
+          status: result.status
+        });
+      } else {
+        if (isVerboseAI) console.warn('⚠️ [BASELINE PREFETCH] Failed to start baseline intuition:', response.status);
+      }
     } catch (e) {
       // Non-fatal prefetch; chat will still await baseline server-side if needed.
-      console.warn("Baseline intuition prefetch failed:", e);
+      console.warn("❌ [BASELINE PREFETCH] Baseline intuition prefetch failed:", e);
     }
   }, [mode, lessonMode, aiGameActive, activeTab?.id, sessionId]);
 
@@ -2502,15 +2525,25 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
       // Fast path: if we already have a node pointer, assume tree exists.
       if (backendTreeNodeByTabRef.current[tabId]) return;
 
+      const isVerboseAI =
+        typeof window !== "undefined" &&
+        (new URLSearchParams(window.location.search).get("verbose_ai") === "1" ||
+          localStorage.getItem("CHESSTER_VERBOSE_AI") === "1" ||
+          process.env.NEXT_PUBLIC_VERBOSE_AI_LOGGING === "1");
+
+      if (isVerboseAI) console.log("🌳 [BACKEND TREE] ensureBackendTreeForTab start", { tabId, fen: startFen.slice(0, 50) + "..." });
+
       const getResp = await fetch(
         `${getBackendBase()}/board/tree/get?thread_id=${encodeURIComponent(tabId)}&include_scan=false`
       );
+      if (isVerboseAI) console.log("🌳 [BACKEND TREE] tree/get", { ok: getResp.ok, status: getResp.status });
       if (getResp.ok) {
         const data = await getResp.json().catch(() => null);
         // Backend returns { success: false, tree: null } when tree doesn't exist yet.
         if (data?.success && data?.tree) {
           const currentId = data?.tree?.current_id || "root";
           backendTreeNodeByTabRef.current[tabId] = currentId;
+          if (isVerboseAI) console.log("🌳 [BACKEND TREE] tree exists", { currentId });
           return;
         }
       }
@@ -2521,6 +2554,7 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
         body: JSON.stringify({ thread_id: tabId, start_fen: startFen }),
       });
       backendTreeNodeByTabRef.current[tabId] = "root";
+      if (isVerboseAI) console.log("🌳 [BACKEND TREE] tree initialized", { tabId });
     } catch (e) {
       console.warn("ensureBackendTreeForTab failed:", e);
     }
@@ -3262,6 +3296,20 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
     return new Promise((resolve, reject) => {
       // Per-request run id to avoid cross-run status mixing in the UI.
       const streamRunId = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+      const isVerboseAI =
+        typeof window !== "undefined" &&
+        (new URLSearchParams(window.location.search).get("verbose_ai") === "1" ||
+          localStorage.getItem("CHESSTER_VERBOSE_AI") === "1" ||
+          process.env.NEXT_PUBLIC_VERBOSE_AI_LOGGING === "1");
+
+      const vLog = (...args: any[]) => {
+        if (!isVerboseAI) return;
+        console.log(`[AI_VERBOSE][run=${streamRunId}]`, ...args);
+      };
+      const vWarn = (...args: any[]) => {
+        if (!isVerboseAI) return;
+        console.warn(`[AI_VERBOSE][run=${streamRunId}]`, ...args);
+      };
       // Local capture of what the UI actually received during this run.
       const streamedStatusHistory: any[] = [];
       // Note: backend replaces the first system message with its interpreter-driven prompt,
@@ -3302,8 +3350,30 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
         last_move: lastMoveInfo,
         inline_boards: [],
         connected_accounts: connectedAccounts,  // Chess.com/Lichess accounts
-        aiGameActive: aiGameActive  // Whether AI game mode is active
+        aiGameActive: aiGameActive,  // Whether AI game mode is active
+        active_tab_id: activeTabId,  // Add this for baseline_intuition lookup
+        session_id: sessionId  // Add this too
       };
+      
+      // VERBOSE LOGGING FOR AI PATHWAY (enable with ?verbose_ai=1 or localStorage.CHESSTER_VERBOSE_AI=1)
+      if (isVerboseAI) {
+        console.log('\n' + '='.repeat(80));
+        console.log(`🤖 FRONTEND: AI PATHWAY DEBUG (run=${streamRunId})`);
+        console.log('='.repeat(80));
+        console.log('Model:', model);
+        console.log('Mode:', mode);
+        console.log('FEN:', fen);
+        console.log('Has cached_analysis:', !!cachedAnalysis);
+        console.log('Context keys:', Object.keys(context));
+        console.log('Context size:', JSON.stringify(context).length, 'chars');
+        console.log('Last move:', lastMoveInfo);
+        if (cachedAnalysis) {
+          console.log('Cached analysis keys:', Object.keys(cachedAnalysis));
+        }
+        console.log('Active tab ID:', activeTabId);
+        console.log('Session ID:', sessionId);
+        console.log('='.repeat(80) + '\n');
+      }
       
       const requestBody = JSON.stringify({
         messages: finalMessages,
@@ -3314,6 +3384,7 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
         task_id: activeTab?.id || null,
         context
       });
+      vLog("POST /llm_chat_stream bytes", requestBody.length);
       
       // Use fetch with ReadableStream for SSE (learning-first logging headers + passive next-action flush)
       Promise.resolve()
@@ -3384,6 +3455,11 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
                 
                 // Use the current event type (persisted across buffer chunks)
                 const eventType = currentEventType;
+                vLog("SSE", {
+                  type: eventType,
+                  keys: data && typeof data === "object" ? Object.keys(data) : [],
+                  preview: JSON.stringify(data).slice(0, 220),
+                });
                 
                 if (eventType === "status") {
                   const enriched = { ...data, _runId: streamRunId };
@@ -3492,12 +3568,12 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
                   });
                 } else if (eventType === "plan_created") {
                   // Execution plan created by Planner
-                  console.log("📋 SSE plan_created received:", data);
+                  vLog("📋 SSE plan_created received", data);
                   setAnalysisInProgress(true);
                   setExecutionPlan({ ...data, startTime: Date.now() });
                 } else if (eventType === "step_update") {
                   // Step status update from Executor
-                  console.log("📝 SSE step_update received:", data);
+                  vLog("📝 SSE step_update received", data);
                   setExecutionPlan((prev: any) => {
                     if (!prev) return prev;
                     // Plans can expand at runtime (executor may inject additional steps).
@@ -3528,11 +3604,11 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
                   });
                 } else if (eventType === "thinking_started") {
                   // Thinking stage started during investigation
-                  console.log("🧠 SSE thinking_started received:", data);
+                  vLog("🧠 SSE thinking_started received", data);
                   setThinkingStage({ ...data, startTime: Date.now() });
                 } else if (eventType === "plan_progress") {
                   // Overall plan progress update
-                  console.log("📊 SSE plan_progress received:", data);
+                  vLog("📊 SSE plan_progress received", data);
                   // Keep plan totals in sync (executor-injected steps can change total).
                   if (typeof data.total === "number") {
                     setExecutionPlan((prev: any) => {
@@ -3565,7 +3641,7 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
                   }
                 } else if (eventType === "pgn_update") {
                   // PGN update during investigation (for live board view)
-                  console.log("♟️ SSE pgn_update received:", data);
+                  vLog("♟️ SSE pgn_update received", data);
                   // Handle status messages from pgn_update
                   if (data.type === "status" && data.message) {
                     onStatus({ phase: "investigating", message: data.message, timestamp: Date.now() });
@@ -3574,7 +3650,7 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
                   }
                 } else if (eventType === "board_state") {
                   // NEW: FEN updates during investigation (for board preview)
-                  console.log("♟️ SSE board_state received:", data);
+                  vLog("♟️ SSE board_state received", data);
                   if (data.type === "move_investigation_start" || data.type === "move_played") {
                     // Show FEN preview during investigation
                     if (data.fen) {
@@ -3589,26 +3665,26 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
                   }
                 } else if (eventType === "game_loaded") {
                   // Chunked SSE: Game data for tab loading
-                  console.log("📦 SSE game_loaded received");
+                  vLog("📦 SSE game_loaded received");
                   chunkedGameData = data;
                   onStatus({ phase: "loading", message: "Game loaded...", progress: 0.92, timestamp: Date.now() });
                 } else if (eventType === "stats_ready") {
                   // Chunked SSE: Statistics and charts
-                  console.log("📊 SSE stats_ready received");
+                  vLog("📊 SSE stats_ready received");
                   chunkedStatsData = data;
                   onStatus({ phase: "loading", message: "Statistics ready...", progress: 0.94, timestamp: Date.now() });
                 } else if (eventType === "narrative") {
                   // Chunked SSE: Narrative text
-                  console.log("📝 SSE narrative received");
+                  vLog("📝 SSE narrative received");
                   chunkedNarrativeData = data;
                   onStatus({ phase: "loading", message: "Narrative ready...", progress: 0.96, timestamp: Date.now() });
                 } else if (eventType === "walkthrough_data") {
                   // Chunked SSE: Walkthrough data (minimal ply records)
-                  console.log("🚶 SSE walkthrough_data received:", data.ply_records?.length, "plies");
+                  vLog("🚶 SSE walkthrough_data received", { plies: data.ply_records?.length });
                   chunkedWalkthroughData = data;
                   onStatus({ phase: "loading", message: "Walkthrough ready...", progress: 0.98, timestamp: Date.now() });
                 } else if (eventType === "complete") {
-                  console.log("🎉 SSE complete received:", data.response?.slice(0, 100) || data.content?.slice(0, 100));
+                  vLog("🎉 SSE complete received", (data.response?.slice(0, 140) || data.content?.slice(0, 140)));
                   setAnalysisInProgress(false);
                   
                   // Merge chunked data into tool_calls if available

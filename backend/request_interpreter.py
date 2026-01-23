@@ -1018,9 +1018,9 @@ INVESTIGATION REQUESTS (from prior pass):
         """
         msg_lower = message.lower().strip()
         
-        # Skip trivial detection for anything longer than a simple phrase
-        if len(msg_lower) > 50:
-            return None
+        # IMPORTANT: Even if the message is long (multi-intent), we still want to catch
+        # obvious "rate the last move" requests. Users often append this to other text.
+        # Everything else stays strict to avoid mis-routing.
         
         # PLAY MODE - only ultra-obvious triggers
         if msg_lower in ["let's play", "play a game", "your move", "your turn"]:
@@ -1028,8 +1028,23 @@ INVESTIGATION REQUESTS (from prior pass):
             plan.user_intent_summary = "Start/continue a game"
             return plan
         
-        # RATE LAST MOVE - only exact phrases
-        if msg_lower in ["rate that move", "rate that", "how was that", "rate the move"]:
+        # RATE LAST MOVE - detect anywhere in message (can be appended to other requests)
+        move_quality_triggers = [
+            "rate that move",
+            "rate the move",
+            "rate last move",
+            "rate the last move",
+            "how was that move",
+            "how was that last move",
+            "how good was that",
+            "how good was that move",
+            "how good was that last move",
+            "how good was the last move",
+            "was that a good move",
+            "was that good",
+            "good move?",
+        ]
+        if any(t in msg_lower for t in move_quality_triggers):
             fen = context.get("board_state") or context.get("fen")
             last_move = context.get("last_move", {})
             if fen and last_move.get("move"):
@@ -1038,6 +1053,10 @@ INVESTIGATION REQUESTS (from prior pass):
                     fen_after=fen,
                     move_san=last_move.get("move")
                 )
+
+        # Skip trivial detection for anything longer than a simple phrase
+        if len(msg_lower) > 50:
+            return None
         
         # Everything else → LLM
         return None
@@ -2210,17 +2229,20 @@ Output ONLY valid JSON:"""
             s = s.strip()
             if "```" not in s:
                 return s
+            # Prefer ```json fenced block if present
             if "```json" in s:
                 try:
                     return s.split("```json", 1)[1].split("```", 1)[0].strip()
                 except Exception:
                     return s.strip()
+            # Otherwise take the first fenced block content
             try:
                 return s.split("```", 1)[1].split("```", 1)[0].strip()
             except Exception:
                 return s.strip()
 
         def _find_first_json_span(s: str) -> Optional[str]:
+            # Find first '{' or '[' and return the smallest balanced JSON substring.
             start_obj = s.find("{")
             start_arr = s.find("[")
             if start_obj == -1 and start_arr == -1:
@@ -2247,12 +2269,12 @@ Output ONLY valid JSON:"""
                     if ch == "\\":
                         esc = True
                         continue
-                    if ch == '"':
+                    if ch == "\"":
                         in_str = False
                         continue
                     continue
                 else:
-                    if ch == '"':
+                    if ch == "\"":
                         in_str = True
                         continue
                     if ch == open_ch:
@@ -2270,32 +2292,37 @@ Output ONLY valid JSON:"""
             except Exception:
                 return None
 
-        d1 = _try_load(text.strip())
-        if d1 is not None:
-            return d1
+        # 1) Direct parse
+        direct = _try_load(text.strip())
+        if direct is not None:
+            return direct
 
+        # 2) Strip fences and retry
         stripped = _strip_code_fences(text)
-        d2 = _try_load(stripped)
-        if d2 is not None:
-            return d2
+        direct2 = _try_load(stripped)
+        if direct2 is not None:
+            return direct2
 
-        for source in (stripped, text):
-            span = _find_first_json_span(source)
+        # 3) Extract balanced JSON substring and retry (from stripped + original)
+        for candidate_source in (stripped, text):
+            span = _find_first_json_span(candidate_source)
             if not span:
                 continue
-            d3 = _try_load(span)
-            if d3 is not None:
-                return d3
+            parsed = _try_load(span)
+            if parsed is not None:
+                return parsed
+
+            # 4) Common cleanup: trailing commas before } or ]
             try:
-                cleaned = re.sub(r",\s*([}\]])", r"", span)
-                d4 = _try_load(cleaned)
-                if d4 is not None:
-                    return d4
+                cleaned = re.sub(r",\s*([}\]])", r"\1", span)
+                parsed2 = _try_load(cleaned)
+                if parsed2 is not None:
+                    return parsed2
             except Exception:
                 pass
 
         return None
-
+    
     def _extract_username_platform(
         self,
         message: str,
@@ -2513,7 +2540,7 @@ async def execute_analysis_requests(
                         
                         # Build profiles using existing tags from analysis (no separate tag call needed)
                         # Pass None for nnue_dump and tags - profiler will handle it
-                        profiles_before = build_piece_profiles(request.fen, nnue_dump=None, tags=None)
+                        profiles_before = await build_piece_profiles(request.fen, nnue_dump=None, tags=None)
                         
                         results[result_key]["piece_profiles_before"] = profiles_before
                         results[result_key]["profile_summary_before"] = get_profile_summary(profiles_before)
@@ -2526,7 +2553,7 @@ async def execute_analysis_requests(
                             board_after.push(move)
                             fen_after = board_after.fen()
                             
-                            profiles_after = build_piece_profiles(fen_after, nnue_dump=None, tags=None)
+                            profiles_after = await build_piece_profiles(fen_after, nnue_dump=None, tags=None)
                             
                             results[result_key]["piece_profiles_after"] = profiles_after
                             results[result_key]["profile_summary_after"] = get_profile_summary(profiles_after)
@@ -2611,7 +2638,7 @@ async def execute_analysis_requests(
                     try:
                         from piece_profiler import build_piece_profiles, get_profile_summary
                         
-                        profiles = build_piece_profiles(request.fen, nnue_dump=None, tags=None)
+                        profiles = await build_piece_profiles(request.fen, nnue_dump=None, tags=None)
                         
                         results[result_key]["piece_profiles"] = profiles
                         results[result_key]["profile_summary"] = get_profile_summary(profiles)
@@ -2654,7 +2681,7 @@ async def analyze_pv_trajectory(
         from piece_profiler import build_piece_profiles
         
         # Get initial profiles
-        prev_profiles = build_piece_profiles(current_fen, nnue_dump=None, tags=None)
+        prev_profiles = await build_piece_profiles(current_fen, nnue_dump=None, tags=None)
         
         for i, move_san in enumerate(pv_moves[:max_moves]):
             try:
@@ -2663,7 +2690,7 @@ async def analyze_pv_trajectory(
                 current_fen = board.fen()
                 
                 # Get profiles after this move
-                curr_profiles = build_piece_profiles(current_fen, nnue_dump=None, tags=None)
+                curr_profiles = await build_piece_profiles(current_fen, nnue_dump=None, tags=None)
                 
                 # Compute changes for this step
                 step_changes = _compute_profile_changes(prev_profiles, curr_profiles, move_san)
