@@ -603,7 +603,7 @@ async def lifespan(app: FastAPI):
             account_init_manager = None
 
     # Board tree store for D2/D16 tree-first analysis
-    board_tree_store: Optional[BoardTreeStore] = None
+    board_tree_store = None
     
     # Initialize LLMRouter with OpenAI provider (GPT-5-mini) - "openai-vllm route"
     # This provides session management, prefix caching, and identical structure to vLLM calls

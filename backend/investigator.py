@@ -9,6 +9,7 @@ import chess
 import chess.engine
 import chess.pgn
 import io
+import os
 import re
 from typing import Dict, Any, List, Optional, Callable, Tuple
 from dataclasses import dataclass, field

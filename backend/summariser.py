@@ -2957,6 +2957,21 @@ class Summariser:
         evidence_tags = first_payload.raw_tags if first_payload else []
         evidence_pgn = first_payload.pgn_line if first_payload else None
 
+        # Extract recommendation payload BEFORE reconciliation logic
+        rec_payload = None
+        for c in (narrative_decision.claims or []):
+            if getattr(c, "hints", None) and getattr(c.hints, "role", None) == "recommendation":
+                rec_payload = getattr(c, "evidence_payload", None)
+                break
+        if not rec_payload:
+            # fallback: first payload from any claim
+            for c in (narrative_decision.claims or []):
+                if getattr(c, "evidence_payload", None):
+                    rec_payload = c.evidence_payload
+                    break
+        
+        rec_eval_after = rec_payload.eval_after if rec_payload else None
+        
         # Simple timing classification from psychological frame (avoid inventing eval logic here)
         # BUT: If final_verdict recommends a move, reconcile timing to align with recommendation
         frame_lower = (narrative_decision.psychological_frame or "").lower()
@@ -2995,14 +3010,7 @@ class Summariser:
 
         # Deterministic final verdict to reconcile "best move" with any risk clauses.
         # Evidence-locked to recommendation payload: eval + material change.
-        rec_payload = None
-        for c in (narrative_decision.claims or []):
-            if getattr(getattr(c, "hints", None), "role", None) == "recommendation":
-                rec_payload = getattr(c, "evidence_payload", None)
-                break
-
         has_consequence = any(getattr(getattr(c, "hints", None), "role", None) == "consequence" for c in (narrative_decision.claims or []))
-        rec_eval_after = rec_payload.eval_after if rec_payload else None
         rec_eval_drop = rec_payload.eval_drop if rec_payload else None
         rec_material = rec_payload.material_change if rec_payload else None
 

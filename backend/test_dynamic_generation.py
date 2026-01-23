@@ -4,6 +4,7 @@ Run: python3 backend/test_dynamic_generation.py
 """
 
 import asyncio
+import os
 import sys
 import time
 
