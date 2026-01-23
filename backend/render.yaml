@@ -18,9 +18,12 @@ services:
       fi
     startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /health
-    plan: professional
+    plan: standard
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.0
       - key: PORT
         value: 10000
+      - key: ENGINE_POOL_SIZE
+        value: "2"
+ENGINE_POOL_SIZE
