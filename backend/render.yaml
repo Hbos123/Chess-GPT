@@ -8,11 +8,12 @@ services:
       pip install -r requirements.txt
       if [ ! -f stockfish ]; then
         echo "Downloading Stockfish..."
-        wget -q https://github.com/official-stockfish/Stockfish/releases/download/sf_16/stockfish_16_linux_x64_avx2.zip -O stockfish.zip
-        unzip -q stockfish.zip
-        chmod +x stockfish_16_linux_x64_avx2/stockfish
-        mv stockfish_16_linux_x64_avx2/stockfish ./stockfish
-        rm -rf stockfish_16_linux_x64_avx2 stockfish.zip
+        wget -q https://github.com/official-stockfish/Stockfish/releases/download/sf_16/stockfish-ubuntu-x86-64-avx2.tar -O stockfish.tar
+        tar -xf stockfish.tar
+        mv stockfish/stockfish-ubuntu-x86-64-avx2 ./stockfish-bin
+        rm -rf stockfish stockfish.tar
+        mv ./stockfish-bin ./stockfish
+        chmod +x ./stockfish
         echo "Stockfish downloaded and ready"
       fi
     startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
