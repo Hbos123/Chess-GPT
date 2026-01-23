@@ -30,7 +30,7 @@ export function IntentBox({ intent, toolsUsed, statusHistory, mode }: IntentBoxP
   }, [uniqueHistory]);
 
   // Calculate thinking time from status history
-  const thinkingTime = useMemo(() => {
+  const thinkingTime: string | null = useMemo(() => {
     if (!uniqueHistory || uniqueHistory.length < 2) return null;
     const first = uniqueHistory[0]?.timestamp || 0;
     const last = uniqueHistory[uniqueHistory.length - 1]?.timestamp || 0;
