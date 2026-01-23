@@ -275,13 +275,9 @@ async def initialize_engine():
         
         if os.path.exists(STOCKFISH_PATH):
             # Verify it's executable
-if os.path.exists(STOCKFISH_PATH):
             if not os.access(STOCKFISH_PATH, os.X_OK):
-if os.path.exists(STOCKFISH_PATH):
                 os.chmod(STOCKFISH_PATH, os.stat(STOCKFISH_PATH).st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
-if os.path.exists(STOCKFISH_PATH):
             
-if os.path.exists(STOCKFISH_PATH):
             transport, engine = await chess.engine.popen_uci(STOCKFISH_PATH)
             await engine.configure({
                 "Threads": 1,
