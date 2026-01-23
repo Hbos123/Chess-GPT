@@ -86,6 +86,10 @@ def test_rapid_consecutive_moves(client):
 
 def test_pgn_context_for_llm_tools(client):
     """Test that LLM analyze_move receives correct PGN context."""
+    import os
+    if not os.getenv("OPENAI_API_KEY"):
+        pytest.skip("OPENAI_API_KEY not set, skipping LLM chat test")
+    
     # Position BEFORE e4
     fen_before = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
     pgn_before = ""  # Starting position, no moves yet

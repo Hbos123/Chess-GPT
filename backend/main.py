@@ -278,8 +278,7 @@ async def initialize_engine():
 async def lifespan(app: FastAPI):
     """Initialize and cleanup the Stockfish engine and explorer client."""
     # Keep globals here limited to names assigned directly in this scope.
-    # (flake8 F824 flags globals that aren't assigned in the function body.)
-    global PRE_GENERATED_POSITIONS, explorer_client, game_fetcher, review_aggregator, stats_manager, archive_manager, llm_planner, llm_reporter, position_miner, drill_generator, training_planner, srs_scheduler, tool_executor, profile_indexer, profile_analytics_engine, supabase_client, engine_pool_instance, board_tree_store
+    # (flake8 F824 flags globals that aren't assigned in the function body.)\n    global PRE_GENERATED_POSITIONS, explorer_client, game_fetcher, review_aggregator, stats_manager, archive_manager, llm_planner, llm_reporter, position_miner, drill_generator, training_planner, srs_scheduler, tool_executor, profile_indexer, profile_analytics_engine, supabase_client, engine_pool_instance, board_tree_store
     
     _ensure_stockfish_present()
     await initialize_engine()
@@ -4009,7 +4008,7 @@ async def llm_chat_stream(request: LLMRequest):
             if request_interpreter and last_user_message:
                 # Status callback that yields SSE events
                 async def stream_status(phase: str, message: str, **kwargs):
-                    nonlocal all_status_messages  # noqa: F824 - list is mutated (append), not rebound
+                    nonlocal all_status_messages  # noqa: F824
                     status_entry = {
                         "phase": phase,
                         "message": message,

@@ -51,7 +51,8 @@ class _FakeChatCompletions:
               "suppressed_tags": [],
               "suppressed_roles": [],
               "claims": [
-                {"summary":"The move a3 is a stable candidate.","claim_type":"general","connector":null,"evidence_moves":["a3","a6"],"reason":"candidate A","key_evidence":{"key_tags_gained":[],"key_tags_lost":[],"key_roles_gained":[],"key_roles_lost":[],"key_material_change":null}}
+                {"summary":"The move a3 is a stable candidate.","claim_type":"general","connector":null,"evidence_moves":["a3","a6"],"reason":"candidate A","key_evidence":{"key_tags_gained":[],"key_tags_lost":[],"key_roles_gained":[],"key_roles_lost":[],"key_material_change":null}},
+                {"summary":"The move h3 is less stable.","claim_type":"general","connector":null,"evidence_moves":["h3","h6"],"reason":"candidate B","key_evidence":{"key_tags_gained":[],"key_tags_lost":[],"key_roles_gained":[],"key_roles_lost":[],"key_material_change":null}}
               ],
               "emphasis": ["primary_narrative"],
               "takeaway": "Prefer improving moves that keep the position stable under best reply.",

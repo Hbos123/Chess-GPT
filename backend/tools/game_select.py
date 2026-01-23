@@ -254,10 +254,23 @@ def select_games_from_candidates(
         pool = sort_games(pool, sort)
 
         # Apply uniqueness + offset among eligible matches
+        # Offset counts positions in sorted pool, not unused games
         picked: List[Dict[str, Any]] = []
         skipped = 0
         for g in pool:
             key = _game_identity_key(g)
+            
+            # Apply offset BEFORE checking uniqueness
+            # Offset counts positions in sorted pool, not unused games
+            if skipped < offset:
+                skipped += 1
+                # Still mark as used if it's already been used (for tracking)
+                if key in used_keys:
+                    continue
+                # Skip this position for offset purposes
+                continue
+            
+            # Now check uniqueness after offset
             if key in used_keys:
                 if allow_reuse:
                     # Reuse existing ref without consuming an additional unique slot.
@@ -279,10 +292,6 @@ def select_games_from_candidates(
                 except Exception:
                     # If global_limit is malformed, ignore it.
                     pass
-
-            if skipped < offset:
-                skipped += 1
-                continue
 
             ref = to_ref(g)
             picked.append(ref)
