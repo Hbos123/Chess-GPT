@@ -26,4 +26,3 @@ services:
         value: 10000
       - key: ENGINE_POOL_SIZE
         value: "2"
-ENGINE_POOL_SIZE
