@@ -36,7 +36,7 @@ export function IntentBox({ intent, toolsUsed, statusHistory, mode }: IntentBoxP
     const last = uniqueHistory[uniqueHistory.length - 1]?.timestamp || 0;
     const seconds = (last - first);
     return seconds > 1000 ? (seconds / 1000).toFixed(1) : seconds.toFixed(1);
-  }, [statusHistory]);
+  }, [uniqueHistory]);
   
   if (!intent && toolsUsed.length === 0) {
     return null;
