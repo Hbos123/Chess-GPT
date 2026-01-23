@@ -11,7 +11,6 @@ import platform
 import shutil
 import stat
 import tempfile
-import tarfile
 import zipfile
 from datetime import datetime
 
@@ -168,35 +167,34 @@ def _ensure_stockfish_present() -> bool:
         if platform.system().lower() != "linux":
             return False
 
-        # NOTE: Render logs show the zip asset URL is 404; use the tar asset instead.
-        url = "https://github.com/official-stockfish/Stockfish/releases/download/sf_16/stockfish-ubuntu-x86-64-avx2.tar"
+        url = "https://github.com/official-stockfish/Stockfish/releases/download/sf_16/stockfish_16_linux_x64_avx2.zip"
         print(f"⬇️  Stockfish missing; downloading from {url}")
 
         target_path = os.path.abspath(STOCKFISH_PATH)
         os.makedirs(os.path.dirname(target_path), exist_ok=True)
 
         with tempfile.TemporaryDirectory() as td:
-            tar_path = os.path.join(td, "stockfish.tar")
-            urllib.request.urlretrieve(url, tar_path)  # nosec - static URL
+            zip_path = os.path.join(td, "stockfish.zip")
+            urllib.request.urlretrieve(url, zip_path)  # nosec - static URL
 
             extracted_path = os.path.join(td, "stockfish_extracted")
-            with tarfile.open(tar_path, "r:*") as tf:
-                # Expected tar layout contains: stockfish/stockfish-ubuntu-x86-64-avx2
+            with zipfile.ZipFile(zip_path, "r") as zf:
+                # Preferred layout: stockfish_16_linux_x64_avx2/stockfish
                 candidate = None
-                for m in tf.getmembers():
-                    if m.isfile() and m.name.endswith("stockfish-ubuntu-x86-64-avx2"):
-                        candidate = m
+                for name in zf.namelist():
+                    if name.endswith("/stockfish") and ("linux" in name) and ("avx2" in name):
+                        candidate = name
                         break
                 if not candidate:
-                    print("⚠️  Stockfish archive did not contain the expected binary")
+                    for name in zf.namelist():
+                        if name.endswith("/stockfish"):
+                            candidate = name
+                            break
+                if not candidate:
+                    print("⚠️  Stockfish archive did not contain a stockfish binary")
                     return False
 
-                src = tf.extractfile(candidate)
-                if not src:
-                    print("⚠️  Failed to extract Stockfish binary from tar")
-                    return False
-
-                with open(extracted_path, "wb") as dst:
+                with zf.open(candidate) as src, open(extracted_path, "wb") as dst:
                     shutil.copyfileobj(src, dst)
 
             shutil.move(extracted_path, target_path)
@@ -277,8 +275,7 @@ async def initialize_engine():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Initialize and cleanup the Stockfish engine and explorer client."""
-    # Keep globals here limited to names assigned directly in this scope.
-    # (flake8 F824 flags globals that aren't assigned in the function body.)\n    global PRE_GENERATED_POSITIONS, explorer_client, game_fetcher, review_aggregator, stats_manager, archive_manager, llm_planner, llm_reporter, position_miner, drill_generator, training_planner, srs_scheduler, tool_executor, profile_indexer, profile_analytics_engine, supabase_client, engine_pool_instance, board_tree_store
+    global engine, engine_queue, PRE_GENERATED_POSITIONS, explorer_client, game_fetcher, review_aggregator, stats_manager, archive_manager, llm_planner, llm_reporter, position_miner, drill_generator, training_planner, srs_scheduler, card_databases, tool_executor, profile_indexer, profile_analytics_engine, supabase_client, engine_pool_instance, board_tree_store
     
     _ensure_stockfish_present()
     await initialize_engine()
@@ -707,6 +704,7 @@ async def lifespan(app: FastAPI):
     yield
     
     # Shutdown: Stop queue processor and cancel pending requests
+    global queue_processor_task
     if engine_queue:
         engine_queue.stop()
         await engine_queue.cancel_all_pending()
@@ -2986,6 +2984,7 @@ async def review_game(
     Comprehensive game review with theme-based analysis per move.
     Returns move-by-move analysis with full position themes, key points, and statistics.
     """
+    global engine
     result = await _review_game_internal(pgn_string, side_focus, include_timestamps, depth, engine)
     
     if "error" in result:
@@ -4008,7 +4007,7 @@ async def llm_chat_stream(request: LLMRequest):
             if request_interpreter and last_user_message:
                 # Status callback that yields SSE events
                 async def stream_status(phase: str, message: str, **kwargs):
-                    nonlocal all_status_messages  # noqa: F824
+                    nonlocal all_status_messages
                     status_entry = {
                         "phase": phase,
                         "message": message,
@@ -6100,6 +6099,7 @@ async def profile_overview(user_id: str):
     
     # Trigger account initialization check (non-blocking)
     # Also ensure background indexing is active
+    global account_init_manager
     if account_init_manager:
         try:
             # Check this specific account (non-blocking)
@@ -6553,6 +6553,7 @@ async def get_pattern_history(
 @app.post("/admin/check-all-accounts")
 async def check_all_accounts():
     """Manually trigger account initialization check"""
+    global account_init_manager
     if not account_init_manager:
         raise HTTPException(status_code=503, detail="Account initialization manager not available")
     
