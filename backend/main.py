@@ -156,6 +156,16 @@ def _ensure_stockfish_present() -> bool:
     command is overridden, this runtime fallback keeps engine-backed features working.
     """
     try:
+        # Try to ensure Stockfish is present (runtime fallback if build-time download failed)
+
+        if not os.path.exists(STOCKFISH_PATH):
+
+            print(f"⚠ Stockfish not found at {STOCKFISH_PATH}, attempting runtime download...")
+
+            _ensure_stockfish_present()
+
+        
+
         if os.path.exists(STOCKFISH_PATH):
             return True
 
@@ -248,7 +258,30 @@ async def initialize_engine():
             except:
                 pass
         
+        # Try to ensure Stockfish is present (runtime fallback if build-time download failed)
+
+        
+        if not os.path.exists(STOCKFISH_PATH):
+
+        
+            print(f"⚠ Stockfish not found at {STOCKFISH_PATH}, attempting runtime download...")
+
+        
+            _ensure_stockfish_present()
+
+        
+        
+
+        
         if os.path.exists(STOCKFISH_PATH):
+            # Verify it's executable
+if os.path.exists(STOCKFISH_PATH):
+            if not os.access(STOCKFISH_PATH, os.X_OK):
+if os.path.exists(STOCKFISH_PATH):
+                os.chmod(STOCKFISH_PATH, os.stat(STOCKFISH_PATH).st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+if os.path.exists(STOCKFISH_PATH):
+            
+if os.path.exists(STOCKFISH_PATH):
             transport, engine = await chess.engine.popen_uci(STOCKFISH_PATH)
             await engine.configure({
                 "Threads": 1,
@@ -264,7 +297,7 @@ async def initialize_engine():
             print(f"✓ Stockfish engine initialized with request queue at {STOCKFISH_PATH}")
             return True
         else:
-            print(f"⚠ Stockfish not found at {STOCKFISH_PATH}")
+            print(f"⚠ Stockfish not found at {STOCKFISH_PATH} after download attempt")
             engine = None
             engine_queue = None
             queue_processor_task = None
@@ -286,6 +319,16 @@ async def lifespan(app: FastAPI):
     await initialize_engine()
     
     # Initialize engine pool for parallel analysis (4 instances)
+    # Try to ensure Stockfish is present (runtime fallback if build-time download failed)
+
+    if not os.path.exists(STOCKFISH_PATH):
+
+        print(f"⚠ Stockfish not found at {STOCKFISH_PATH}, attempting runtime download...")
+
+        _ensure_stockfish_present()
+
+    
+
     if os.path.exists(STOCKFISH_PATH):
         try:
             engine_pool_instance = EnginePool(pool_size=4, stockfish_path=STOCKFISH_PATH)
