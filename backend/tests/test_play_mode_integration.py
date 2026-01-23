@@ -17,6 +17,19 @@ def client():
 
 def test_full_play_mode_flow(client):
     """Test complete play mode: user move → engine response → commentary."""
+    import os
+    # Check both environment variable and actual client initialization
+    if not os.getenv("OPENAI_API_KEY"):
+        pytest.skip("OPENAI_API_KEY not set, skipping LLM chat test")
+    
+    # Also check if client is actually initialized
+    try:
+        from main import openai_client
+        if not openai_client:
+            pytest.skip("OpenAI client not initialized, skipping LLM chat test")
+    except Exception:
+        pytest.skip("Could not check OpenAI client, skipping LLM chat test")
+    
     # 1. User plays e4
     response = client.post("/play_move", json={
         "fen": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",

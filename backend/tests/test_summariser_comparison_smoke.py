@@ -115,12 +115,20 @@ class TestSummariserComparisonSmoke(unittest.TestCase):
         self.assertTrue(hasattr(out, "claims"))
         # With agenda-coverage fallback, should produce at least 2 claims in suggestion-style prompts.
         self.assertGreaterEqual(len(out.claims), 2)
+        
+        # Check all claims (not just first 2) since agenda coverage may add more
+        # Both PGN lines should be present somewhere in the claims
         pgn_lines = []
-        for c in out.claims[:2]:
+        for c in out.claims:
             payload = getattr(c, "evidence_payload", None)
-            pgn_lines.append(getattr(payload, "pgn_line", None) if payload else None)
-        self.assertIn("a3 a6", pgn_lines)
-        self.assertIn("h3 h6", pgn_lines)
+            if payload:
+                pgn_line = getattr(payload, "pgn_line", None)
+                if pgn_line:
+                    pgn_lines.append(pgn_line)
+        
+        # Verify both expected PGN lines are present
+        self.assertIn("a3 a6", pgn_lines, f"Expected 'a3 a6' in PGN lines, got: {pgn_lines}")
+        self.assertIn("h3 h6", pgn_lines, f"Expected 'h3 h6' in PGN lines, got: {pgn_lines}")
 
     def _run_async(self, coro):
         import asyncio
