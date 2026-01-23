@@ -143,6 +143,10 @@ def test_confidence_raise_position(client):
 
 def test_llm_chat_basic(client):
     """Test /llm_chat with basic message."""
+    import os
+    if not os.getenv("OPENAI_API_KEY"):
+        pytest.skip("OPENAI_API_KEY not set, skipping LLM chat test")
+    
     payload = {
         "messages": [{"role": "user", "content": "What is chess?"}],
         "context": {
