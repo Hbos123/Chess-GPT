@@ -186,6 +186,8 @@ class FrontendCommandType(str, Enum):
     CREATE_TAB = "create_tab"            # Create a new tab
     SWITCH_TAB = "switch_tab"            # Switch to a different tab
     LIST_TABS = "list_tabs"              # List all available tabs
+    SHOW_QUICK_ACTIONS = "show_quick_actions"  # Show quick action buttons
+    FOCUS_INPUT = "focus_input"         # Focus the input field
 
 
 @dataclass

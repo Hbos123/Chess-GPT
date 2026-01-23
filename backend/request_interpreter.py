@@ -1848,7 +1848,10 @@ Output ONLY valid JSON:"""
                 return plan
             else:
                 print(f"   ⚠️ Failed to parse interpreter response:")
-                print(f"      Raw: {plan_text[:200]}...")
+                import traceback
+                print(f"      Traceback:")
+                traceback.print_exc()
+                print(f"      Raw: {plan_text[:500]}...")
                 # Ask for clarification instead of guessing
                 return self._build_clarification_plan(message, "I couldn't parse the request properly")
         

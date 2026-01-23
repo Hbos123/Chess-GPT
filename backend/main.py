@@ -65,6 +65,7 @@ from board_vision import analyze_board_image, BoardVisionError
 from concurrent.futures import ProcessPoolExecutor
 from parallel_analyzer import compute_themes_and_tags, compute_theme_scores
 from llm_router import LLMRouter, LLMRouterConfig
+from board_tree_store import BoardTreeStore, BoardTree, BoardTreeNode, new_node_id
 
 load_dotenv()
 
@@ -122,6 +123,9 @@ profile_indexer: Optional[ProfileIndexingManager] = None
 # Profile analytics engine
 profile_analytics_engine: Optional[ProfileAnalyticsEngine] = None
 game_window_manager = None
+
+# Board tree store for D2/D16 tree-first analysis
+board_tree_store: Optional[BoardTreeStore] = None
 account_init_manager = None
 
 # Supabase client
@@ -271,7 +275,7 @@ async def initialize_engine():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Initialize and cleanup the Stockfish engine and explorer client."""
-    global engine, engine_queue, PRE_GENERATED_POSITIONS, explorer_client, game_fetcher, review_aggregator, stats_manager, archive_manager, llm_planner, llm_reporter, position_miner, drill_generator, training_planner, srs_scheduler, card_databases, tool_executor, profile_indexer, profile_analytics_engine, supabase_client, engine_pool_instance
+    global engine, engine_queue, PRE_GENERATED_POSITIONS, explorer_client, game_fetcher, review_aggregator, stats_manager, archive_manager, llm_planner, llm_reporter, position_miner, drill_generator, training_planner, srs_scheduler, card_databases, tool_executor, profile_indexer, profile_analytics_engine, supabase_client, engine_pool_instance, board_tree_store
     
     _ensure_stockfish_present()
     await initialize_engine()
@@ -581,6 +585,9 @@ async def lifespan(app: FastAPI):
     
     # Initialize Game Window Manager and Account Initialization Manager
     game_window_manager = None
+
+# Board tree store for D2/D16 tree-first analysis
+board_tree_store: Optional[BoardTreeStore] = None
     account_init_manager = None
     if supabase_client:
         try:
@@ -596,6 +603,9 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             print(f"⚠️ Failed to initialize window/account managers: {e}")
             game_window_manager = None
+
+# Board tree store for D2/D16 tree-first analysis
+board_tree_store: Optional[BoardTreeStore] = None
             account_init_manager = None
     
     # Initialize LLMRouter with OpenAI provider (GPT-5-mini) - "openai-vllm route"
@@ -687,6 +697,10 @@ async def lifespan(app: FastAPI):
                     print(f"📊 Account check completed: {results['accounts_checked']} accounts checked")
                 except Exception as e:
                     print(f"❌ Account check error: {e}")
+    
+    # Initialize board tree store
+    board_tree_store = BoardTreeStore(ttl_s=1800.0)
+    print("✅ Board tree store initialized")
     
     # Start background task
     if account_init_manager:
