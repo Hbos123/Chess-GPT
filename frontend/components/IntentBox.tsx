@@ -21,7 +21,7 @@ export function IntentBox({ intent, toolsUsed, statusHistory, mode }: IntentBoxP
   
   // Deduplicate history so repeated early-phase messages (e.g. "Understanding your request...")
   // don't spam the expanded view (this matches StatusIndicator behavior).
-  const uniqueHistory = useMemo(() => {
+  const uniqueHistory: StatusMessage[] = useMemo(() => {
     const src = Array.isArray(statusHistory) ? statusHistory : [];
     return src.reduce((acc: StatusMessage[], msg) => {
       if (acc.some(m => m.message === msg.message && m.phase === msg.phase)) return acc;
