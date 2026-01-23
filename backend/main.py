@@ -7,10 +7,12 @@ from contextlib import asynccontextmanager
 from io import StringIO
 import urllib.parse
 import urllib.request
+import urllib.error
 import platform
 import shutil
 import stat
 import tempfile
+import tarfile
 import zipfile
 from datetime import datetime
 
@@ -147,75 +149,85 @@ PRE_GENERATED_POSITIONS: Dict[str, List[Dict]] = {}
 
 STOCKFISH_PATH = os.getenv("STOCKFISH_PATH", "./stockfish")
 
+# Prevent concurrent runtime downloads (e.g. multiple startup paths)
+_downloading_stockfish = False
+
 
 def _ensure_stockfish_present() -> bool:
-    """
-    Best-effort: ensure a Stockfish binary exists at STOCKFISH_PATH.
+    """Best-effort: ensure a Stockfish binary exists at STOCKFISH_PATH.
 
-    This repo often relies on a build-time download step (Render blueprint). If the build
-    command is overridden, this runtime fallback keeps engine-backed features working.
+    Primary path is build-time download (Render buildCommand). This is a runtime fallback.
     """
+    global _downloading_stockfish
+
+    if os.path.exists(STOCKFISH_PATH):
+        return True
+
+    # Avoid concurrent/recursive attempts
+    if _downloading_stockfish:
+        return False
+
+    # Only auto-fetch for the default path; don't surprise users with downloads when
+    # they configured a custom STOCKFISH_PATH.
+    if os.getenv("STOCKFISH_PATH") and os.getenv("STOCKFISH_PATH") != "./stockfish":
+        return False
+
+    if platform.system().lower() != "linux":
+        return False
+
+    url = "https://github.com/official-stockfish/Stockfish/releases/download/sf_16/stockfish-ubuntu-x86-64-avx2.tar"
+
     try:
-        # Try to ensure Stockfish is present (runtime fallback if build-time download failed)
-
-        if not os.path.exists(STOCKFISH_PATH):
-
-            print(f"⚠ Stockfish not found at {STOCKFISH_PATH}, attempting runtime download...")
-
-            _ensure_stockfish_present()
-
-        
-
-        if os.path.exists(STOCKFISH_PATH):
-            return True
-
-        # Only auto-fetch for the default path; don't surprise users with downloads when
-        # they configured a custom STOCKFISH_PATH.
-        if os.getenv("STOCKFISH_PATH") and os.getenv("STOCKFISH_PATH") != "./stockfish":
-            return False
-
-        if platform.system().lower() != "linux":
-            return False
-
-        url = "https://github.com/official-stockfish/Stockfish/releases/download/sf_16/stockfish_16_linux_x64_avx2.zip"
+        _downloading_stockfish = True
         print(f"⬇️  Stockfish missing; downloading from {url}")
 
         target_path = os.path.abspath(STOCKFISH_PATH)
-        os.makedirs(os.path.dirname(target_path), exist_ok=True)
+        target_dir = os.path.dirname(target_path) or "."
+        os.makedirs(target_dir, exist_ok=True)
 
         with tempfile.TemporaryDirectory() as td:
-            zip_path = os.path.join(td, "stockfish.zip")
-            urllib.request.urlretrieve(url, zip_path)  # nosec - static URL
+            tar_path = os.path.join(td, "stockfish.tar")
+            urllib.request.urlretrieve(url, tar_path)  # nosec - static URL
 
             extracted_path = os.path.join(td, "stockfish_extracted")
-            with zipfile.ZipFile(zip_path, "r") as zf:
-                # Preferred layout: stockfish_16_linux_x64_avx2/stockfish
+            with tarfile.open(tar_path, "r:*") as tf:
                 candidate = None
-                for name in zf.namelist():
-                    if name.endswith("/stockfish") and ("linux" in name) and ("avx2" in name):
-                        candidate = name
+                for m in tf.getmembers():
+                    if m.isfile() and m.name.endswith("stockfish-ubuntu-x86-64-avx2"):
+                        candidate = m
                         break
                 if not candidate:
-                    for name in zf.namelist():
-                        if name.endswith("/stockfish"):
-                            candidate = name
-                            break
-                if not candidate:
-                    print("⚠️  Stockfish archive did not contain a stockfish binary")
+                    print("⚠️  Stockfish archive did not contain the expected binary")
                     return False
 
-                with zf.open(candidate) as src, open(extracted_path, "wb") as dst:
-                    shutil.copyfileobj(src, dst)
+                src = tf.extractfile(candidate)
+                if not src:
+                    print("⚠️  Failed to extract Stockfish binary from tar")
+                    return False
+
+                with open(extracted_path, "wb") as dst:
+                    dst.write(src.read())
 
             shutil.move(extracted_path, target_path)
             os.chmod(target_path, os.stat(target_path).st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
 
         print(f"✅ Stockfish downloaded to {target_path}")
         return True
-    except Exception as e:
-        print(f"⚠️  Failed to download Stockfish automatically: {e}")
-        return False
 
+    except urllib.error.HTTPError as e:
+        print(f"⚠️  Failed to download Stockfish: HTTP {e.code} - {e.reason}")
+        return False
+    except urllib.error.URLError as e:
+        print(f"⚠️  Failed to download Stockfish: URL error - {type(e).__name__}")
+        return False
+    except Exception as e:
+        # Keep message safe
+        print(f"⚠️  Failed to download Stockfish automatically: {type(e).__name__}: {str(e)[:200]}")
+        return False
+    finally:
+        _downloading_stockfish = False
+
+# System prompt
 # System prompt for the LLM
 SYSTEM_PROMPT = """You are Chess GPT. You must not invent concrete evaluations, tablebase facts, or long variations. For any concrete claims (evals, PVs, winning lines, best moves), you rely on tool outputs the client provides from backend endpoints:
 
@@ -257,22 +269,7 @@ async def initialize_engine():
                 await engine.quit()
             except:
                 pass
-        
-        # Try to ensure Stockfish is present (runtime fallback if build-time download failed)
-
-        
-        if not os.path.exists(STOCKFISH_PATH):
-
-        
-            print(f"⚠ Stockfish not found at {STOCKFISH_PATH}, attempting runtime download...")
-
-        
-            _ensure_stockfish_present()
-
-        
-        
-
-        
+        # Stockfish should be ensured during lifespan(); don't retry downloads here
         if os.path.exists(STOCKFISH_PATH):
             # Verify it's executable
             if not os.access(STOCKFISH_PATH, os.X_OK):
@@ -313,22 +310,12 @@ async def lifespan(app: FastAPI):
     
     _ensure_stockfish_present()
     await initialize_engine()
-    
-    # Initialize engine pool for parallel analysis (4 instances)
-    # Try to ensure Stockfish is present (runtime fallback if build-time download failed)
-
-    if not os.path.exists(STOCKFISH_PATH):
-
-        print(f"⚠ Stockfish not found at {STOCKFISH_PATH}, attempting runtime download...")
-
-        _ensure_stockfish_present()
-
-    
-
+    # Initialize engine pool for parallel analysis (configurable; default 2 for Standard)
+    pool_size = int(os.getenv("ENGINE_POOL_SIZE", "2"))
     if os.path.exists(STOCKFISH_PATH):
         try:
-            engine_pool_instance = EnginePool(pool_size=4, stockfish_path=STOCKFISH_PATH)
-            await engine_pool_instance.initialize()
+            engine_pool_instance = EnginePool(pool_size=pool_size, stockfish_path=STOCKFISH_PATH)
+            await asyncio.wait_for(engine_pool_instance.initialize(), timeout=30.0)
         except Exception as e:
             print(f"⚠️  Failed to initialize engine pool: {e}")
             engine_pool_instance = None
