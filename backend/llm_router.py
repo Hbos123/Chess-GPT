@@ -380,7 +380,9 @@ class LLMRouter:
 
         if provider == "vllm":
             # Fail fast if vLLM is unhealthy; prevents hidden fallbacks + confusing partial behavior.
+            # NOTE: Health check is skipped for OpenAI provider (default) to save time
             self.check_vllm_health()
+        # OpenAI provider (default) skips health check - no overhead
 
         skey = self._session_key(session_id, subsession or stage)
         state = self.sessions.get_or_create(skey, system_prompt or "")

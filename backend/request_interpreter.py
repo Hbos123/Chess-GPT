@@ -86,6 +86,10 @@ class RequestInterpreter:
         self._interpreter_loop = None
         if enable_multi_pass:
             self._init_interpreter_loop(game_fetcher, engine_queue)
+        
+        # Warm up system prompt if router is available (pre-process to cache it)
+        if self.llm_router:
+            self._warm_up_system_prompt()
     
     def _init_interpreter_loop(self, game_fetcher, engine_queue):
         """Initialize the interpreter loop for multi-pass mode"""
@@ -116,6 +120,38 @@ class RequestInterpreter:
             import traceback
             traceback.print_exc()
             self._interpreter_loop = None
+    
+    def _warm_up_system_prompt(self):
+        """
+        Pre-process/warm up the system prompt by initializing the session.
+        This caches the system prompt in the router's session store so the first
+        actual call is faster (system prompt already processed).
+        """
+        if not self.llm_router:
+            return
+        
+        try:
+            system_prompt = (
+                INTERPRETER_SYSTEM_PROMPT_COMPACT 
+                if self.use_compact_prompt 
+                else INTERPRETER_SYSTEM_PROMPT
+            )
+            
+            # Initialize session with system prompt (this caches it)
+            # Use a dummy session_id for warm-up that won't conflict with real sessions
+            # The ensure_session call will cache the system prompt in the session store
+            session_id = "__warmup_interpreter__"
+            self.llm_router.ensure_session(
+                task_id=session_id,
+                subsession="interpreter",
+                system_prompt=system_prompt,
+                task_seed=None
+            )
+            
+            print(f"   🔥 Interpreter system prompt warmed up ({len(system_prompt)} chars cached)")
+        except Exception as e:
+            print(f"   ⚠️ Failed to warm up system prompt: {e}")
+            # Non-fatal, continue without warm-up
     
     def _extract_moves_from_message(self, message: str) -> tuple[list[str], str]:
         """
@@ -1833,37 +1869,66 @@ Output ONLY valid JSON:"""
             print(f"   user_prompt (full, {len(user_prompt)} chars):\n{user_prompt}")
             print(f"   model={self.model} use_compact_prompt={self.use_compact_prompt}")
             
-            # gpt-5 models don't support custom temperature, only default (1.0)
-            llm_kwargs = {
-                "model": self.model,  # Configurable model (default: gpt-4o for reliability)
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
-                ],
-            }
-            # No token limits - let model use defaults
-            if not self.model.startswith("gpt-5"):
-                llm_kwargs["temperature"] = 0.3  # Slightly higher for more natural understanding
-            
-            print(f"   llm_kwargs (full):\n{llm_kwargs}")
-            
-            response = self.client.chat.completions.create(**llm_kwargs)
-            
-            plan_text = response.choices[0].message.content.strip()
-            
-            # Log full raw output for _llm_interpret
-            print(f"🔍 [INTERPRETER_RAW_OUTPUT] _llm_interpret response")
-            print(f"   plan_text (full, {len(plan_text)} chars):\n{plan_text}")
-            print(f"   response object: {response}")
-            try:
-                usage = getattr(response, "usage", None)
-                if usage:
-                    print(f"   usage: prompt_tokens={getattr(usage, 'prompt_tokens', None)} completion_tokens={getattr(usage, 'completion_tokens', None)} total_tokens={getattr(usage, 'total_tokens', None)}")
-            except Exception:
-                pass
-            
-            # Parse JSON
-            plan_json = self._extract_json(plan_text)
+            # Use router if available (enables prefix caching and session management)
+            if self.llm_router:
+                # Get session_id from context or use default
+                session_id = context.get("session_id", "interpreter_default")
+                
+                # Set temperature (gpt-5 models don't support custom temperature)
+                temperature = None if self.model.startswith("gpt-5") else 0.3
+                
+                print(f"   Using llm_router with session_id={session_id}, subsession=interpreter")
+                
+                # Use router's complete_json for prefix caching and session management
+                plan_json = self.llm_router.complete_json(
+                    session_id=session_id,
+                    stage="interpreter",
+                    system_prompt=system_prompt,
+                    user_text=user_prompt,
+                    subsession="interpreter",
+                    model=self.model,
+                    temperature=temperature,
+                    provider="openai",  # Explicitly use OpenAI provider (default, skips vLLM health check)
+                )
+                
+                # Router already returns parsed JSON
+                print(f"🔍 [INTERPRETER_RAW_OUTPUT] _llm_interpret response (via router)")
+                print(f"   plan_json keys: {list(plan_json.keys()) if isinstance(plan_json, dict) else 'not a dict'}")
+            else:
+                # Fallback to direct client if router not available
+                print(f"   ⚠️ Router not available, using direct client (no prefix caching)")
+                
+                # gpt-5 models don't support custom temperature, only default (1.0)
+                llm_kwargs = {
+                    "model": self.model,
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt}
+                    ],
+                }
+                # No token limits - let model use defaults
+                if not self.model.startswith("gpt-5"):
+                    llm_kwargs["temperature"] = 0.3
+                
+                print(f"   llm_kwargs (full):\n{llm_kwargs}")
+                
+                response = self.client.chat.completions.create(**llm_kwargs)
+                
+                plan_text = response.choices[0].message.content.strip()
+                
+                # Log full raw output for _llm_interpret
+                print(f"🔍 [INTERPRETER_RAW_OUTPUT] _llm_interpret response")
+                print(f"   plan_text (full, {len(plan_text)} chars):\n{plan_text}")
+                print(f"   response object: {response}")
+                try:
+                    usage = getattr(response, "usage", None)
+                    if usage:
+                        print(f"   usage: prompt_tokens={getattr(usage, 'prompt_tokens', None)} completion_tokens={getattr(usage, 'completion_tokens', None)} total_tokens={getattr(usage, 'total_tokens', None)}")
+                except Exception:
+                    pass
+                
+                # Parse JSON
+                plan_json = self._extract_json(plan_text)
             
             if plan_json:
                 try:
