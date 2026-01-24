@@ -4207,6 +4207,9 @@ async def llm_chat_stream(request: LLMRequest):
                     async def run_pre_exec_tool():
                         try:
                             res = await tool_executor.execute_tool(tool_name, tool_args, context, pre_exec_status_callback)
+                            # Check if result contains an error (tools return {"error": "..."} on failure)
+                            if isinstance(res, dict) and "error" in res:
+                                return {"success": False, "error": res["error"], "result": res}
                             return {"success": True, "result": res}
                         except Exception as e:
                             import traceback
@@ -4599,6 +4602,9 @@ async def llm_chat_stream(request: LLMRequest):
                     async def run_tool():
                         try:
                             res = await tool_executor.execute_tool(tool_name, final_tool_args, context, tool_status_callback)
+                            # Check if result contains an error (tools return {"error": "..."} on failure)
+                            if isinstance(res, dict) and "error" in res:
+                                return {"success": False, "error": res["error"], "result": res}
                             return {"success": True, "result": res}
                         except Exception as e:
                             return {"success": False, "error": str(e)}
