@@ -104,8 +104,7 @@ class EnginePool:
                     await engine.configure({
                         "Threads": 1,
                         "Hash": 32,
-                        "MultiPV": 2,
-                        "Ponder": False
+                                                "Ponder": False
                     })
                     self.engines.append(engine)
                     await self.available.put((i, engine))
@@ -1009,8 +1008,7 @@ class EnginePool:
                 await new_engine.configure({
                     "Threads": 1,
                     "Hash": 32,
-                    "MultiPV": 2,
-                    "Ponder": False
+                                        "Ponder": False
                 })
                 if engine_id < len(self.engines):
                     self.engines[engine_id] = new_engine
