@@ -3323,55 +3323,124 @@ Write your response now based on the game data provided."""
             return msg
         
         elif tool_name == "analyze_move":
-            move_played = result.get("move_played") or result.get("move_san", "unknown")
-            is_best = result.get("is_best_move", False)
-            cp_loss = result.get("cp_loss", 0)
-            move_category = result.get("move_category", "")
+            # Get all data from endpoint_response
+            endpoint_response = result.get("endpoint_response", {})
             
-            if is_best:
-                return f"Move {move_played} is the best move (CP loss: 0). {move_category}"
-            else:
-                # For retry feedback - DO NOT reveal best_move
-                played_desc = result.get("played_move_description", {})
-                unique_tags = result.get("unique_best_tag_descriptions", [])
-                neglected_tags = result.get("neglected_tag_descriptions", [])
+            # Core metrics
+            move_played = result.get("move") or result.get("move_san") or endpoint_response.get("move_played") or endpoint_response.get("move_san", "unknown")
+            is_best = result.get("is_best_move") or endpoint_response.get("is_best_move", False)
+            cp_loss = result.get("cp_loss") or endpoint_response.get("cp_loss", 0)
+            move_category = endpoint_response.get("move_category", "")
+            eval_before = endpoint_response.get("eval_before_cp", 0)
+            eval_after = endpoint_response.get("eval_after_cp", 0)
+            best_move = endpoint_response.get("best_move_san") or endpoint_response.get("best_move", "")
+            
+            # Extract PV moves from analysis or confidence data
+            def extract_pv_san(analysis_obj_key, fen_before):
+                """Extract PV in SAN format from analysis objects"""
+                pv_san = None
                 
-                # Build description of what played move did (positive)
-                if isinstance(played_desc, dict):
-                    tags_gained = played_desc.get("tags_gained", [])
-                    tags_lost = played_desc.get("tags_lost", [])
-                    if tags_gained:
-                        played_what = f"{tags_gained[0]}"
-                    elif tags_lost:
-                        played_what = f"fixed {tags_lost[0]}"
-                    else:
-                        played_what = "made a positional adjustment"
-                else:
-                    played_what = "made a move"
+                # Try to get PV from analysis candidate_moves (most direct)
+                if analysis and isinstance(analysis, dict):
+                    af_obj = analysis.get(analysis_obj_key, {})
+                    if af_obj:
+                        candidates = af_obj.get("candidate_moves", [])
+                        if candidates and len(candidates) > 0:
+                            pv_san = candidates[0].get("pv_san", "")
+                            if pv_san:
+                                return pv_san
                 
-                # Build what it neglected (use context="neglected" for better phrasing)
-                neglected_what = ""
-                if neglected_tags:
-                    neglected_desc = translate_tag_to_natural_english(neglected_tags[0], context="neglected")
-                    neglected_what = f"However, this neglects to {neglected_desc}"
-                elif unique_tags:
-                    # Fallback: use unique tags to infer what's missing
-                    unique_desc = translate_tag_to_natural_english(unique_tags[0], context="neglected")
-                    neglected_what = f"However, this doesn't {unique_desc}"
-                else:
-                    neglected_what = "However, there's a more important consideration"
+                # Fallback: try to get PV from confidence data and convert UCI to SAN
+                if confidence and isinstance(confidence, dict):
+                    conf_key = "played_move" if analysis_obj_key == "af_played" else "best_move"
+                    conf_data = confidence.get(conf_key, {})
+                    if conf_data and isinstance(conf_data, dict):
+                        nodes = conf_data.get("nodes", [])
+                        if nodes:
+                            main_line = nodes[0] if nodes else None
+                            if main_line and isinstance(main_line, dict):
+                                pv_moves = main_line.get("pv", [])
+                                if pv_moves and isinstance(pv_moves, list):
+                                    # Convert UCI to SAN
+                                    try:
+                                        import chess
+                                        board_temp = chess.Board(fen_before)
+                                        pv_san_list = []
+                                        for move_uci in pv_moves[:8]:  # Limit to 8 moves
+                                            try:
+                                                move_obj = chess.Move.from_uci(str(move_uci))
+                                                pv_san_list.append(board_temp.san(move_obj))
+                                                board_temp.push(move_obj)
+                                            except:
+                                                break
+                                        if pv_san_list:
+                                            pv_san = " ".join(pv_san_list)
+                                    except Exception as e:
+                                        pass
                 
-                # Build hint (use context="hint" for better phrasing)
-                hint = ""
-                if unique_tags:
-                    hint_desc = translate_tag_to_natural_english(unique_tags[0], context="hint")
-                    hint = f"Look for something that {hint_desc}"
-                else:
-                    hint = "Look for a move that improves the position"
-                
-                return f"Move {move_played} analysis: {move_category} (CP loss: {cp_loss}). " \
-                       f"You played {move_played}, which {played_what}. {neglected_what}. {hint}. " \
-                       f"CRITICAL: DO NOT reveal the actual best move name - only use the hints above."
+                return pv_san
+            
+            # Get PV for played move
+            analysis = endpoint_response.get("analysis", {})
+            confidence = endpoint_response.get("confidence", {})
+            fen_before = endpoint_response.get("fen_before", "")
+            played_pv_san = extract_pv_san("af_played", fen_before)
+            
+            # Get PV for best move (if not best move)
+            best_pv_san = None
+            if not is_best:
+                best_pv_san = extract_pv_san("af_best", fen_before)
+            
+            # CLAIM LINE: Significant tag deltas from compare_tags_for_move_analysis
+            played_move_description = endpoint_response.get("played_move_description", {})
+            claim_line = {
+                "tags_gained": played_move_description.get("tags_gained", []),
+                "tags_lost": played_move_description.get("tags_lost", []),
+                "theme_changes": played_move_description.get("theme_changes", {}),
+                "summary": played_move_description.get("summary", ""),
+                "principal_variation": played_pv_san  # PV that supports the claim line
+            }
+            
+            # Best move description (if not best move)
+            best_move_description = endpoint_response.get("best_move_description", {}) if not is_best else None
+            if best_move_description:
+                claim_line["best_move_claim_line"] = {
+                    "tags_gained": best_move_description.get("tags_gained", []),
+                    "tags_lost": best_move_description.get("tags_lost", []),
+                    "theme_changes": best_move_description.get("theme_changes", {}),
+                    "summary": best_move_description.get("summary", ""),
+                    "principal_variation": best_pv_san  # PV for best move
+                }
+            
+            # Additional context
+            opening_name = endpoint_response.get("opening_name", "")
+            is_theory = endpoint_response.get("is_theory", False)
+            threat_info = endpoint_response.get("played_move_threat_category") or endpoint_response.get("played_move_threat_description", "")
+            
+            # Build comprehensive data structure - let LLM format based on system_prompt_additions
+            formatted_data = {
+                "move": move_played,
+                "is_best_move": is_best,
+                "quality": move_category,
+                "cp_loss": cp_loss,
+                "evaluation": {
+                    "before_cp": eval_before,
+                    "after_cp": eval_after,
+                    "before_pawns": round(eval_before / 100.0, 2),
+                    "after_pawns": round(eval_after / 100.0, 2)
+                },
+                "best_move": best_move if not is_best else None,
+                "claim_line": claim_line,  # Significant tag deltas with PV for citation
+                "opening": {
+                    "name": opening_name,
+                    "is_theory": is_theory
+                },
+                "threat": threat_info if threat_info else None
+            }
+            
+            # Return as JSON - LLM will format based on system_prompt_additions
+            import json
+            return json.dumps(formatted_data, indent=2)
         
         else:
             return json.dumps(result, indent=2)
