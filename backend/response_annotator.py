@@ -116,15 +116,28 @@ def parse_response_for_annotations(
             analysis_tags.extend(cached_analysis.get("black_analysis", {}).get("tags", []))
     
     # Match mentioned tags to analysis tags
+    print(f"🔍 [ANNOTATION_DEBUG] Matching {len(annotations['tags_found'])} extracted tags against {len(analysis_tags)} analysis tags")
+    matched_count = 0
     for tag_name in annotations["tags_found"]:
+        print(f"   Looking for tag: {tag_name}")
         for tag_data in analysis_tags:
             tag_data_name = tag_data.get("name", "") if isinstance(tag_data, dict) else str(tag_data)
             # Match if tag_name is in tag_data_name or vice versa (handles partial matches)
             if tag_name.lower() in tag_data_name.lower() or tag_data_name.lower() in tag_name.lower():
+                print(f"   ✅ Matched '{tag_name}' to '{tag_data_name}'")
                 # Generate annotations for this tag
                 tag_annotations = generate_annotations_for_tag(tag_data, fen)
+                arrows_added = len(tag_annotations.get("arrows", []))
+                highlights_added = len(tag_annotations.get("highlights", []))
                 annotations["arrows"].extend(tag_annotations.get("arrows", []))
                 annotations["highlights"].extend(tag_annotations.get("highlights", []))
+                print(f"      Generated {arrows_added} arrows, {highlights_added} highlights")
+                matched_count += 1
+                break  # Found match, move to next tag
+    
+    if matched_count == 0 and annotations["tags_found"]:
+        print(f"   ⚠️ WARNING: No tags matched! Extracted tags: {annotations['tags_found']}")
+        print(f"   Available analysis tag names (first 10): {[t.get('name', '') if isinstance(t, dict) else str(t) for t in analysis_tags[:10]]}")
     
     # ALSO process ALL cached analysis tags (not just mentioned ones)
     # This ensures important tactical/positional tags are always shown

@@ -4049,11 +4049,15 @@ async def llm_chat_stream(request: LLMRequest):
                     return status_entry
                 
                 # Run interpreter
+                import time
+                interpreter_start = time.time()
                 orchestration_plan = await request_interpreter.interpret(
                     message=last_user_message,
                     context=context,
                     conversation_history=request.messages
                 )
+                interpreter_time = time.time() - interpreter_start
+                print(f"🔍 [PERFORMANCE] Interpreter took {interpreter_time:.2f}s")
                 
                 # Log full orchestration plan
                 print(f"🔍 [DOWNSTREAM_FLOW] Interpreter returned orchestration_plan")
@@ -4743,6 +4747,42 @@ async def llm_chat_stream(request: LLMRequest):
                 try:
                     cached_analysis = context.get("cached_analysis", {})
                     
+                    # Extract tags from pre_executed tool results (especially analyze_move)
+                    tool_tags = []
+                    if pre_executed_tool_calls:
+                        for tc in pre_executed_tool_calls:
+                            if tc.get("name") == "analyze_move":
+                                result = tc.get("result", {})
+                                endpoint_response = result.get("endpoint_response", {})
+                                analysis = endpoint_response.get("analysis", {})
+                                
+                                # Extract tags from all analysis objects
+                                for af_key in ["af_starting", "af_played", "af_best", "af_pv_best", "af_pv_played"]:
+                                    af_data = analysis.get(af_key, {})
+                                    if af_data and isinstance(af_data, dict):
+                                        af_tags = af_data.get("tags", [])
+                                        if af_tags:
+                                            tool_tags.extend(af_tags)
+                    
+                    # Merge tool tags into cached_analysis for annotation matching
+                    if tool_tags:
+                        if not isinstance(cached_analysis, dict):
+                            cached_analysis = {}
+                        else:
+                            cached_analysis = cached_analysis.copy()
+                        
+                        if "tags" not in cached_analysis:
+                            cached_analysis["tags"] = []
+                        
+                        # Add unique tags (avoid duplicates)
+                        existing_tag_names = {t.get("name", "") if isinstance(t, dict) else str(t) for t in cached_analysis["tags"]}
+                        for tag in tool_tags:
+                            tag_name = tag.get("name", "") if isinstance(tag, dict) else str(tag)
+                            if tag_name and tag_name not in existing_tag_names:
+                                cached_analysis["tags"].append(tag)
+                        print(f"🔍 [DOWNSTREAM_FLOW] Added {len(tool_tags)} tags from tool results to cached_analysis")
+                        print(f"   Total tags in cached_analysis: {len(cached_analysis.get('tags', []))}")
+                    
                     # Extract tags from brackets in final_content
                     from response_annotator import extract_tags_from_brackets
                     cleaned_content, extracted_tags = extract_tags_from_brackets(final_content)
@@ -4761,6 +4801,8 @@ async def llm_chat_stream(request: LLMRequest):
                     )
                     print(f"🔍 [DOWNSTREAM_FLOW] Annotations generated")
                     print(f"   annotations (full): {json.dumps(annotations, default=str, indent=2)}")
+                    print(f"   highlights count: {len(annotations.get('highlights', []))}")
+                    print(f"   arrows count: {len(annotations.get('arrows', []))}")
                 except Exception as ann_err:
                     print(f"   Annotation error: {ann_err}")
                     import traceback
