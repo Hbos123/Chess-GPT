@@ -4742,10 +4742,22 @@ async def llm_chat_stream(request: LLMRequest):
             if fen and final_content:
                 try:
                     cached_analysis = context.get("cached_analysis", {})
+                    
+                    # Extract tags from brackets in final_content
+                    from response_annotator import extract_tags_from_brackets
+                    cleaned_content, extracted_tags = extract_tags_from_brackets(final_content)
+                    
+                    # Update final_content to remove tag brackets
+                    if extracted_tags:
+                        final_content = cleaned_content
+                        print(f"🔍 [DOWNSTREAM_FLOW] Extracted tags from response: {extracted_tags}")
+                    
+                    # Generate annotations (will use extracted_tags if available)
                     annotations = parse_response_for_annotations(
-                        final_content, 
+                        cleaned_content, 
                         fen, 
-                        cached_analysis
+                        cached_analysis,
+                        explicit_tags=extracted_tags if extracted_tags else None
                     )
                     print(f"🔍 [DOWNSTREAM_FLOW] Annotations generated")
                     print(f"   annotations (full): {json.dumps(annotations, default=str, indent=2)}")

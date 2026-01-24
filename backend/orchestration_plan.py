@@ -926,8 +926,10 @@ def build_analyze_plan(
             ToolCall(name="analyze_move", arguments={"fen": fen, "move_san": move})
         )
         plan.system_prompt_additions = (
-            f"Analyzing move {move}. Provide quality rating (preference rank, CP loss, word rating). "
-            "Describe what the move does strategically using piece profile changes."
+            f"Rate the move {move} with a quality label (excellent/good/inaccuracy/mistake/blunder) and CP loss. "
+            "Provide a concise justification. Format your response without extra line breaks - keep the quality rating and move name on the same line. "
+            "At the end of your response, append a comma-separated list of relevant tag names in brackets, like (tag.diagonal.open.a1h8,tag.center.control,tag.threat.attack). "
+            "Only include tags that are mentioned or relevant to your explanation. Use verbatim tag names from the analysis data."
         )
         if compare_before_after:
             plan.system_prompt_additions += " Compare the raw analysis before and after the move to explain impact."
@@ -1783,20 +1785,22 @@ def build_move_impact_plan(
         )
     )
     
+    plan.tool_sequence.append(
+        ToolCall(name="analyze_move", arguments={"fen": fen_before, "move_san": move, "depth": depth})
+    )
+    
+    plan.system_prompt_additions = (
+        f"Rate the move {move} with a quality label (excellent/good/inaccuracy/mistake/blunder) and CP loss. "
+        "Provide a concise justification based on the before/after analysis. Format your response without extra line breaks - keep the quality rating and move name on the same line. "
+        "At the end of your response, append a comma-separated list of relevant tag names in brackets, like (tag.diagonal.open.a1h8,tag.center.control,tag.threat.attack). "
+        "Only include tags that are mentioned or relevant to your explanation. Use verbatim tag names from the analysis data."
+    )
+    
     plan.frontend_commands.append(
         FrontendCommand(
             type=FrontendCommandType.SHOW_ANALYSIS,
             payload={"fen": fen_after, "highlight_move": move}
         )
-    )
-    
-    plan.system_prompt_additions = (
-        f"Analyzing move {move} with full impact analysis. "
-        "Describe: 1) Move quality (preference rank, CP loss, rating), "
-        "2) What the move does strategically, "
-        "3) How piece profiles changed (activity, roles, threats), "
-        "4) How this compares to alternatives. "
-        "Use the before/after raw analysis data to explain impact concretely."
     )
     
     plan.user_intent_summary = f"Full impact analysis of {move}"

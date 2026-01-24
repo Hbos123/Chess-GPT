@@ -50,10 +50,31 @@ ARROW_COLORS = {
 }
 
 
+def extract_tags_from_brackets(text: str) -> Tuple[str, List[str]]:
+    """
+    Extract tag list from brackets at end of text like (tag1,tag2,tag3)
+    Returns: (cleaned_text, list_of_tags)
+    """
+    # Pattern to match tags in brackets at end: (tag1,tag2,tag3) or (tag1, tag2, tag3)
+    pattern = r'\(([^)]+)\)\s*$'
+    match = re.search(pattern, text)
+    
+    if match:
+        tags_str = match.group(1)
+        # Split by comma and clean
+        tags = [tag.strip() for tag in tags_str.split(',') if tag.strip()]
+        # Remove the brackets section from text
+        cleaned_text = text[:match.start()].rstrip()
+        return cleaned_text, tags
+    
+    return text, []
+
+
 def parse_response_for_annotations(
     llm_response: str,
     cached_analysis: Optional[Dict] = None,
-    fen: Optional[str] = None
+    fen: Optional[str] = None,
+    explicit_tags: Optional[List[str]] = None
 ) -> Dict[str, Any]:
     """
     Parse LLM response text and generate board annotations.
@@ -76,9 +97,13 @@ def parse_response_for_annotations(
     if not llm_response:
         return annotations
     
-    # Extract explicit tags from response
-    explicit_tags = re.findall(r'tag\.[\w.]+', llm_response.lower())
-    annotations["tags_found"] = list(set(explicit_tags))
+    # Use explicit_tags if provided (from brackets extraction), otherwise extract from text
+    if explicit_tags:
+        annotations["tags_found"] = explicit_tags
+    else:
+        # Extract explicit tags from response
+        found_tags = re.findall(r'tag\.[\w.]+', llm_response.lower())
+        annotations["tags_found"] = list(set(found_tags))
     
     # Get tags from cached analysis if available
     analysis_tags = []
@@ -94,7 +119,8 @@ def parse_response_for_annotations(
     for tag_name in annotations["tags_found"]:
         for tag_data in analysis_tags:
             tag_data_name = tag_data.get("name", "") if isinstance(tag_data, dict) else str(tag_data)
-            if tag_name in tag_data_name.lower():
+            # Match if tag_name is in tag_data_name or vice versa (handles partial matches)
+            if tag_name.lower() in tag_data_name.lower() or tag_data_name.lower() in tag_name.lower():
                 # Generate annotations for this tag
                 tag_annotations = generate_annotations_for_tag(tag_data, fen)
                 annotations["arrows"].extend(tag_annotations.get("arrows", []))
