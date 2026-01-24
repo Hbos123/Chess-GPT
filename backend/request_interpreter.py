@@ -73,8 +73,8 @@ class RequestInterpreter:
         self.enable_multi_pass = enable_multi_pass
         
         # Model configuration - can override via INTERPRETER_MODEL environment variable
-        # Default to gpt-5-mini for speed; higher layers can stay on gpt-5.
-        self.model = os.getenv("INTERPRETER_MODEL", "gpt-5-mini")
+        # Default to gpt-4o-mini for low-latency intent routing; higher layers can stay on gpt-5.
+        self.model = os.getenv("INTERPRETER_MODEL", "gpt-4o-mini")
         # Logs should be provider-agnostic; vLLM model id is logged by LLMRouter per-call.
         print(f"   🤖 Interpreter initialized (LLM provider=vllm)")
         # Debug/audit: last LLM I/O (prompts + raw response texts + parsed JSON)
