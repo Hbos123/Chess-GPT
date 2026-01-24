@@ -390,9 +390,13 @@ class ToolExecutor:
                     "light_mode": "true" if light_mode else "false"  # Convert boolean to string
                 }
                 
-                backend_port = int(os.getenv("BACKEND_PORT", "8001"))
+                # Use BACKEND_URL if set, otherwise default to localhost with BACKEND_PORT
+                backend_url = os.getenv("BACKEND_URL")
+                if not backend_url:
+                    backend_port = int(os.getenv("BACKEND_PORT", "8001"))
+                    backend_url = f"http://localhost:{backend_port}"
                 async with session.get(
-                    f"http://localhost:{backend_port}/analyze_position",
+                    f"{backend_url}/analyze_position",
                     params=params,
                     timeout=aiohttp.ClientTimeout(total=60)
                 ) as response:
@@ -501,11 +505,15 @@ class ToolExecutor:
         # Tree-first: call backend /analyze_move which is rebased to D2/D16.
         import aiohttp
         try:
-            backend_port = int(os.getenv("BACKEND_PORT", "8001"))
+            # Use BACKEND_URL if set, otherwise default to localhost with BACKEND_PORT
+            backend_url = os.getenv("BACKEND_URL")
+            if not backend_url:
+                backend_port = int(os.getenv("BACKEND_PORT", "8001"))
+                backend_url = f"http://localhost:{backend_port}"
             async with aiohttp.ClientSession() as session:
                 params = {"fen": fen, "move_san": move_san, "depth": int(depth)}
                 async with session.post(
-                    f"http://localhost:{backend_port}/analyze_move",
+                    f"{backend_url}/analyze_move",
                     params=params,
                     timeout=aiohttp.ClientTimeout(total=90),
                 ) as response:
@@ -545,10 +553,14 @@ class ToolExecutor:
 
         import aiohttp
         try:
-            backend_port = int(os.getenv("BACKEND_PORT", "8001"))
+            # Use BACKEND_URL if set, otherwise default to localhost with BACKEND_PORT
+            backend_url = os.getenv("BACKEND_URL")
+            if not backend_url:
+                backend_port = int(os.getenv("BACKEND_PORT", "8001"))
+                backend_url = f"http://localhost:{backend_port}"
             async with aiohttp.ClientSession() as session:
                 async with session.post(
-                    f"http://localhost:{backend_port}/board/tree/search",
+                    f"{backend_url}/board/tree/search",
                     json={"thread_id": thread_id, "query": query, "limit": limit},
                     timeout=aiohttp.ClientTimeout(total=30),
                 ) as response:

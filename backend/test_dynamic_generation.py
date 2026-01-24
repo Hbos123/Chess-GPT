@@ -97,8 +97,12 @@ async def test_generation():
         import json
         
         # Test generation endpoint
-        port = os.getenv("BACKEND_PORT", "8001")
-        url = f"http://localhost:{port}/generate_positions?topic_code=PS.IQP&count=1"
+        # Use BACKEND_URL if set, otherwise default to localhost with BACKEND_PORT
+        backend_url = os.getenv("BACKEND_URL")
+        if not backend_url:
+            port = os.getenv("BACKEND_PORT", "8001")
+            backend_url = f"http://localhost:{port}"
+        url = f"{backend_url}/generate_positions?topic_code=PS.IQP&count=1"
         
         print(f"\n✓ Testing: {url}")
         start = time.time()

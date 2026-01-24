@@ -277,9 +277,13 @@ class InterpreterActionExecutor:
                     "light_mode": "false"  # String for query param
                 }
                 
-                backend_port = int(os.getenv("BACKEND_PORT", "8001"))
+                # Use BACKEND_URL if set, otherwise default to localhost with BACKEND_PORT
+                backend_url = os.getenv("BACKEND_URL")
+                if not backend_url:
+                    backend_port = int(os.getenv("BACKEND_PORT", "8001"))
+                    backend_url = f"http://localhost:{backend_port}"
                 async with session.get(
-                    f"http://localhost:{backend_port}/analyze_position",
+                    f"{backend_url}/analyze_position",
                     params=request_params,
                     timeout=aiohttp.ClientTimeout(total=60)
                 ) as response:
