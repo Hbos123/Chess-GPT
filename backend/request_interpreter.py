@@ -504,6 +504,16 @@ The user is asking about this resulting position.
             if not self.model.startswith("gpt-5"):
                 llm_kwargs["temperature"] = 0.1
             
+            # Log full raw input for main interpreter flow
+            print(f"🔍 [INTERPRETER_RAW_INPUT] main interpreter flow")
+            print(f"   message (full, {len(message)} chars):\n{message}")
+            print(f"   cleaned_message (full, {len(cleaned_message) if cleaned_message else 0} chars):\n{cleaned_message}")
+            print(f"   context_summary (full, {len(context_summary) if context_summary else 0} chars):\n{context_summary}")
+            print(f"   user_prompt (full, {len(user_prompt)} chars):\n{user_prompt}")
+            print(f"   system_prompt=MIN_SYSTEM_PROMPT_V1 (full, {len(MIN_SYSTEM_PROMPT_V1)} chars):\n{MIN_SYSTEM_PROMPT_V1}")
+            print(f"   task_seed=INTERPRETER_CONTRACT_V1 (full, {len(INTERPRETER_CONTRACT_V1) if INTERPRETER_CONTRACT_V1 else 0} chars):\n{INTERPRETER_CONTRACT_V1}")
+            print(f"   model={self.model} session_id={session_id}")
+            
             with (_timer.span("interpreter:llm_call", {"model": self.model}) if _timer else nullcontext()):
                 import time as _time
                 _t0 = _time.perf_counter()
@@ -519,8 +529,10 @@ The user is asking about this resulting position.
                             user_text=user_prompt,
                             temperature=(0.1 if not self.model.startswith("gpt-5") else None),
                             model=self.model,
-                            max_tokens=int(os.getenv("INTERPRETER_MAX_TOKENS", "450")),
                         )
+                        # Log full raw output for main interpreter flow
+                        print(f"🔍 [INTERPRETER_RAW_OUTPUT] main interpreter flow - result_json")
+                        print(f"   result_json (full):\n{result_json}")
                     except Exception as e:
                         # Generic repair retry: ask for the *minimal* valid intent JSON.
                         # This handles cases where the model output was truncated or non-JSON.
@@ -535,6 +547,7 @@ The user is asking about this resulting position.
                                 },
                                 constraints={"json_only": True, "max_investigation_requests": 0},
                             )
+                            print(f"🔍 [INTERPRETER_RAW_INPUT] repair attempt - minimal_prompt (full, {len(minimal_prompt)} chars):\n{minimal_prompt}")
                             result_json = self.llm_router.complete_json(
                                 session_id=session_id or "default",
                                 stage="interpreter",
@@ -544,8 +557,8 @@ The user is asking about this resulting position.
                                 user_text=minimal_prompt,
                                 temperature=(0.0 if not self.model.startswith("gpt-5") else None),
                                 model=self.model,
-                                max_tokens=int(os.getenv("INTERPRETER_REPAIR_MAX_TOKENS", "260")),
                             )
+                            print(f"🔍 [INTERPRETER_RAW_OUTPUT] repair attempt - result_json (full):\n{result_json}")
                         except Exception:
                             raise
                     ok, errs = validate_interpreter_intent(result_json)
@@ -557,6 +570,9 @@ The user is asking about this resulting position.
                                 input={"errors": errs, "bad_json": result_json},
                                 constraints={"json_only": True},
                             )
+                            print(f"🔍 [INTERPRETER_RAW_INPUT] JSON repair attempt - repair_prompt (full, {len(repair_prompt)} chars):\n{repair_prompt}")
+                            print(f"   errors: {errs}")
+                            print(f"   bad_json: {result_json}")
                             result_json = self.llm_router.complete_json(
                                 session_id=session_id or "default",
                                 stage="interpreter",
@@ -566,8 +582,8 @@ The user is asking about this resulting position.
                                 user_text=repair_prompt,
                                 temperature=(0.0 if not self.model.startswith("gpt-5") else None),
                                 model=self.model,
-                                max_tokens=int(os.getenv("INTERPRETER_MAX_TOKENS", "450")),
                             )
+                            print(f"🔍 [INTERPRETER_RAW_OUTPUT] JSON repair attempt - result_json (full):\n{result_json}")
                         except Exception:
                             pass
                 else:
@@ -775,6 +791,12 @@ INVESTIGATION REQUESTS (from prior pass):
                                 connected_timeout_s = 2.0
 
                             rel_resp = None
+                            # Log full raw input for connected_ideas
+                            print(f"🔍 [INTERPRETER_RAW_INPUT] connected_ideas call")
+                            print(f"   rel_user_prompt (full, {len(rel_user_prompt)} chars):\n{rel_user_prompt}")
+                            print(f"   system_prompt=MIN_SYSTEM_PROMPT_V1 (full, {len(MIN_SYSTEM_PROMPT_V1)} chars):\n{MIN_SYSTEM_PROMPT_V1}")
+                            print(f"   connected_model={connected_model} timeout={connected_timeout_s}")
+                            
                             with (_timer.span("interpreter:connected_ideas:llm_call", {"model": connected_model, "timeout_s": connected_timeout_s}) if _timer else nullcontext()):
                                 try:
                                     import asyncio as _asyncio
@@ -790,11 +812,13 @@ INVESTIGATION REQUESTS (from prior pass):
                                             task_seed=None,
                                             temperature=0.0,
                                             model=connected_model,
-                                            max_tokens=int(os.getenv("CONNECTED_IDEAS_MAX_TOKENS", "450")),
                                         )
                                         return out, (_time.perf_counter() - _t0)
                                     rel_json, _dt_connected = await _asyncio.wait_for(_run_connected_router(), timeout=connected_timeout_s)
                                     rel_resp = rel_json
+                                    # Log full raw output for connected_ideas
+                                    print(f"🔍 [INTERPRETER_RAW_OUTPUT] connected_ideas response")
+                                    print(f"   rel_json (full):\n{rel_json}")
                                 except Exception as e:
                                     # Timeout or request failure: non-fatal, just skip.
                                     print(f"   ⚠️ [INTERPRETER] connected_ideas LLM call skipped (non-fatal): {e}")
@@ -1798,6 +1822,17 @@ Output ONLY valid JSON:"""
                 else INTERPRETER_SYSTEM_PROMPT
             )
             
+            # Log full raw input for _llm_interpret
+            print(f"🔍 [INTERPRETER_RAW_INPUT] _llm_interpret called")
+            print(f"   message (full, {len(message)} chars):\n{message}")
+            print(f"   context (full):\n{context}")
+            print(f"   conversation_history (full):\n{conversation_history}")
+            print(f"   context_summary (full, {len(context_summary)} chars):\n{context_summary}")
+            print(f"   history_summary (full, {len(history_summary)} chars):\n{history_summary}")
+            print(f"   system_prompt (full, {len(system_prompt)} chars):\n{system_prompt}")
+            print(f"   user_prompt (full, {len(user_prompt)} chars):\n{user_prompt}")
+            print(f"   model={self.model} use_compact_prompt={self.use_compact_prompt}")
+            
             # gpt-5 models don't support custom temperature, only default (1.0)
             llm_kwargs = {
                 "model": self.model,  # Configurable model (default: gpt-4o for reliability)
@@ -1806,16 +1841,26 @@ Output ONLY valid JSON:"""
                     {"role": "user", "content": user_prompt}
                 ],
             }
-            # GPT-5 models require max_completion_tokens instead of max_tokens
-            if self.model.startswith("gpt-5"):
-                llm_kwargs["max_completion_tokens"] = 1500
-            else:
-                llm_kwargs["max_tokens"] = 1500
+            # No token limits - let model use defaults
+            if not self.model.startswith("gpt-5"):
                 llm_kwargs["temperature"] = 0.3  # Slightly higher for more natural understanding
+            
+            print(f"   llm_kwargs (full):\n{llm_kwargs}")
             
             response = self.client.chat.completions.create(**llm_kwargs)
             
             plan_text = response.choices[0].message.content.strip()
+            
+            # Log full raw output for _llm_interpret
+            print(f"🔍 [INTERPRETER_RAW_OUTPUT] _llm_interpret response")
+            print(f"   plan_text (full, {len(plan_text)} chars):\n{plan_text}")
+            print(f"   response object: {response}")
+            try:
+                usage = getattr(response, "usage", None)
+                if usage:
+                    print(f"   usage: prompt_tokens={getattr(usage, 'prompt_tokens', None)} completion_tokens={getattr(usage, 'completion_tokens', None)} total_tokens={getattr(usage, 'total_tokens', None)}")
+            except Exception:
+                pass
             
             # Parse JSON
             plan_json = self._extract_json(plan_text)
@@ -1994,7 +2039,6 @@ Output ONLY valid JSON:"""
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt}
                 ],
-                "max_tokens": 1200
             }
             if not self.model.startswith("gpt-5"):
                 llm_kwargs["temperature"] = 0.3

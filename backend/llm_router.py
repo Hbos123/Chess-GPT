@@ -397,6 +397,16 @@ class LLMRouter:
             prompt_text += "\n\n"
         prompt_text += f"USER: {user_chunk}\nASSISTANT:"
 
+        # Log full raw input for complete method
+        print(f"🔍 [INTERPRETER_RAW_INPUT] complete method called")
+        print(f"   stage={stage} session_id={session_id} subsession={subsession or 'main'}")
+        print(f"   provider={provider} model={chosen_model}")
+        print(f"   system_prompt (full, {len(state.system_prompt)} chars):\n{state.system_prompt}")
+        print(f"   prefix/working_context (full, {len(prefix)} chars):\n{prefix}")
+        print(f"   user_chunk (full, {len(user_chunk)} chars):\n{user_chunk}")
+        print(f"   full_prompt_text (full, {len(prompt_text)} chars):\n{prompt_text}")
+        print(f"   response_format={response_format} temperature={temperature} max_tokens={max_tokens}")
+
         kwargs: Dict[str, Any] = {
             "model": chosen_model,
             "messages": [
@@ -451,6 +461,12 @@ class LLMRouter:
             tokens_in = None
             tokens_out = None
 
+        # Log full raw output for complete method
+        print(f"🔍 [INTERPRETER_RAW_OUTPUT] complete method response")
+        print(f"   stage={stage} session_id={session_id} subsession={subsession or 'main'}")
+        print(f"   raw_output (full, {len(content)} chars):\n{content}")
+        print(f"   ttft_ms={ttft_ms} total_ms={total_ms} tokens_in={tokens_in} tokens_out={tokens_out}")
+
         # Persist append-only transcript (KV-cache friendly).
         self.sessions.append_user(skey, user_chunk)
         self.sessions.append_assistant(skey, content)
@@ -485,6 +501,13 @@ class LLMRouter:
         model: Optional[str] = None,
         provider: Optional[Provider] = None,
     ) -> Dict[str, Any]:
+        # Log full raw input
+        print(f"🔍 [INTERPRETER_RAW_INPUT] complete_json called")
+        print(f"   stage={stage} session_id={session_id} subsession={subsession or 'main'}")
+        print(f"   system_prompt (full, {len(system_prompt)} chars):\n{system_prompt}")
+        print(f"   user_text (full, {len(user_text)} chars):\n{user_text}")
+        print(f"   task_seed={task_seed} max_tokens={max_tokens} temperature={temperature} model={model} provider={provider}")
+        
         txt = self.complete(
             session_id=session_id,
             stage=stage,
@@ -498,6 +521,12 @@ class LLMRouter:
             provider=provider,
             max_tokens=max_tokens,
         )
+        
+        # Log full raw output
+        print(f"🔍 [INTERPRETER_RAW_OUTPUT] complete_json response")
+        print(f"   stage={stage} session_id={session_id} subsession={subsession or 'main'}")
+        print(f"   raw_output (full, {len(txt)} chars):\n{txt}")
+        
         import json
         try:
             return json.loads(txt)
