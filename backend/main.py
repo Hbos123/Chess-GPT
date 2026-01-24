@@ -692,7 +692,8 @@ async def lifespan(app: FastAPI):
             use_compact_prompt=True,
             enable_multi_pass=False,  # Enable for multi-pass interpreter loop
             game_fetcher=game_fetcher,
-            engine_queue=engine_queue
+            engine_queue=engine_queue,
+            llm_router=llm_router  # Enable prefix caching and session management
         )
         print("✅ Request interpreter initialized")
     
