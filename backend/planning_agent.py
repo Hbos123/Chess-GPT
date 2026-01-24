@@ -399,7 +399,6 @@ Return the plan as JSON."""
                         {"role": "user", "content": user_prompt}
                     ],
                     temperature=0.3,
-                    max_tokens=2000
                 )
                 
                 content = response.choices[0].message.content.strip()

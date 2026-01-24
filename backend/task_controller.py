@@ -132,7 +132,6 @@ class TaskController:
                 user_text=cmd,
                 model=model,
                 temperature=temperature,
-                max_tokens=int(os.getenv("CHAT_MAX_TOKENS", "1200")),
             )
             # Handle both 'response' and 'explanation' keys from LLM
             if isinstance(res, dict):

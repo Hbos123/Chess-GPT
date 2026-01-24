@@ -102,7 +102,6 @@ Create the training blueprint:"""
                         {"role": "user", "content": user_message}
                     ],
                     temperature=0.3,
-                    max_tokens=800
                 )
                 
                 plan_text = response.choices[0].message.content.strip()

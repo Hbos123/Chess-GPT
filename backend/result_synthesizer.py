@@ -106,7 +106,6 @@ Create a comprehensive synthesis report."""
                     user_text=user_prompt,
                     temperature=0.4,
                     model="gpt-5",
-                    max_tokens=3000,
                 ).strip()
             else:
                 response = self.client.chat.completions.create(
@@ -116,7 +115,6 @@ Create a comprehensive synthesis report."""
                         {"role": "user", "content": user_prompt}
                     ],
                     temperature=0.4,
-                    max_tokens=3000
                 )
                 
                 content = response.choices[0].message.content.strip()

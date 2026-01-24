@@ -136,7 +136,6 @@ Create the analysis plan:"""
                         {"role": "user", "content": user_message}
                     ],
                     temperature=0.3,
-                    max_tokens=1000
                 )
             _dt = _time.perf_counter() - _t0
             try:

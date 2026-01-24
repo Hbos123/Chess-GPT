@@ -331,7 +331,6 @@ GOAL ANCHOR (optional): {goal_anchoring if goal_anchoring else "Connect to the u
                     user_text=cmd,
                     temperature=(0.7 if "gpt-5" not in self.model.lower() else None),
                     model=self.model,
-                    max_tokens=int(os.getenv("EXPLAINER_MAX_TOKENS", "1600")),
                 )
             else:
                 response = self.client.chat.completions.create(**model_params)

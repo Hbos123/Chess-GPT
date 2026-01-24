@@ -46,7 +46,7 @@ async def compress_memory(
             },
             "stop_reason": stop_reason,
         },
-        constraints={"json_only": True, "max_tokens": 350},
+        constraints={"json_only": True},
     )
     return llm_router.complete_json(
         session_id=task_id,
@@ -57,7 +57,6 @@ async def compress_memory(
         user_text=cmd,
         model=model,
         temperature=0.0 if not str(model).startswith("gpt-5") else None,
-        max_tokens=int(os.getenv("MEMORY_COMPRESS_MAX_TOKENS", "350")),
     )
 
 

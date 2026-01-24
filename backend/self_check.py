@@ -60,7 +60,6 @@ async def self_check(
         user_text=cmd,
         model=model,
         temperature=0.0 if not str(model).startswith("gpt-5") else None,
-        max_tokens=int(os.getenv("SELF_CHECK_MAX_TOKENS", "250")),
     )
 
 

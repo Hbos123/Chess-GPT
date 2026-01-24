@@ -242,7 +242,6 @@ class Planner:
                     user_text=prompt,
                     temperature=(0.2 if not str(self.model).startswith("gpt-5") else None),
                     model=self.model,
-                    max_tokens=int(os.getenv("PLANNER_MAX_TOKENS", "900")),
                 )
                 ok, errs = validate_planner_plan(result)
                 if not ok:
@@ -261,7 +260,6 @@ class Planner:
                             user_text=repair_prompt,
                             temperature=(0.0 if not str(self.model).startswith("gpt-5") else None),
                             model=self.model,
-                            max_tokens=int(os.getenv("PLANNER_MAX_TOKENS", "900")),
                         )
                     except Exception:
                         pass

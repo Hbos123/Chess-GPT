@@ -41,7 +41,6 @@ async def summarize_facts(
         user_text=cmd,
         model=model,
         temperature=0.0 if not str(model).startswith("gpt-5") else None,
-        max_tokens=int(os.getenv("SUMMARIZE_FACTS_MAX_TOKENS", "450")),
     )
 
 

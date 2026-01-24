@@ -183,7 +183,6 @@ async def justify_from_evidence(
             user_text=cmd,
             model=model,
             temperature=temperature,
-            max_tokens=int(os.getenv("JUSTIFY_MAX_TOKENS", "240")),
         )
     except Exception:
         # Single repair retry: ask for corrected JSON only (keeps pipeline resilient).
@@ -202,7 +201,6 @@ async def justify_from_evidence(
                 user_text=repair,
                 model=model,
                 temperature=0.0,
-                max_tokens=int(os.getenv("JUSTIFY_MAX_TOKENS", "240")),
             )
         except Exception:
             out = {}

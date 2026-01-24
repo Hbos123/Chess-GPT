@@ -325,7 +325,6 @@ async def explain_with_facts(
             user_text=cmd,
             model=model,
             temperature=temperature,
-            max_tokens=int(os.getenv("EXPLAIN_WITH_FACTS_MAX_TOKENS", "1200")),
         )
         return res if isinstance(res, dict) else {"explanation": str(res), "ui_commands": []}
     except Exception as e:

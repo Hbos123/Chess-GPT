@@ -433,7 +433,6 @@ class StepExecutor:
                     user_text=user_prompt,
                     temperature=0.5,
                     model="gpt-5",
-                    max_tokens=2000,
                 ).strip()
             
             response = self.client.chat.completions.create(
@@ -446,7 +445,6 @@ class StepExecutor:
                     {"role": "user", "content": user_prompt}
                 ],
                 temperature=0.5,
-                max_tokens=2000
             )
             
             return response.choices[0].message.content.strip()

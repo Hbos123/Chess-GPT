@@ -2153,7 +2153,6 @@ Write your response now based on the game data provided."""
                     user_text=context,
                     temperature=0.7,
                     model="gpt-5",
-                    max_tokens=300,
                 ).strip()
             
             loop = asyncio.get_event_loop()
@@ -2166,7 +2165,6 @@ Write your response now based on the game data provided."""
                             {"role": "system", "content": system_prompt},
                             {"role": "user", "content": context}
                         ],
-                        max_tokens=300,
                         temperature=0.7
                     )
                 )
