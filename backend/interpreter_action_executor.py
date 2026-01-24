@@ -277,8 +277,8 @@ class InterpreterActionExecutor:
                     "light_mode": "false"  # String for query param
                 }
                 
-                # Use BACKEND_URL if set, otherwise default to localhost with BACKEND_PORT
-                backend_url = os.getenv("BACKEND_URL")
+                # Use BACKEND_URL or NEXT_PUBLIC_BACKEND_URL if set, otherwise default to localhost with BACKEND_PORT
+                backend_url = os.getenv("BACKEND_URL") or os.getenv("NEXT_PUBLIC_BACKEND_URL")
                 if not backend_url:
                     backend_port = int(os.getenv("BACKEND_PORT", "8001"))
                     backend_url = f"http://localhost:{backend_port}"
