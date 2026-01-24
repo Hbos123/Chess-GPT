@@ -4055,6 +4055,29 @@ async def llm_chat_stream(request: LLMRequest):
                     conversation_history=request.messages
                 )
                 
+                # Log full orchestration plan
+                print(f"🔍 [DOWNSTREAM_FLOW] Interpreter returned orchestration_plan")
+                if orchestration_plan:
+                    try:
+                        plan_dict = {
+                            "mode": orchestration_plan.mode.value if hasattr(orchestration_plan.mode, 'value') else str(orchestration_plan.mode),
+                            "mode_confidence": orchestration_plan.mode_confidence,
+                            "user_intent_summary": orchestration_plan.user_intent_summary,
+                            "tool_sequence_count": len(orchestration_plan.tool_sequence) if orchestration_plan.tool_sequence else 0,
+                            "tool_sequence": [{"name": t.name, "arguments": t.arguments} for t in (orchestration_plan.tool_sequence or [])],
+                            "needs_clarification": orchestration_plan.needs_clarification,
+                            "skip_tools": orchestration_plan.skip_tools,
+                            "response_guidelines": orchestration_plan.response_guidelines.to_dict() if hasattr(orchestration_plan.response_guidelines, 'to_dict') else str(orchestration_plan.response_guidelines),
+                            "frontend_commands": [cmd.to_dict() if hasattr(cmd, 'to_dict') else str(cmd) for cmd in (orchestration_plan.frontend_commands or [])],
+                            "extracted_data": orchestration_plan.extracted_data.to_dict() if hasattr(orchestration_plan.extracted_data, 'to_dict') else orchestration_plan.extracted_data,
+                        }
+                        print(f"   orchestration_plan (full): {json.dumps(plan_dict, default=str, indent=2)}")
+                    except Exception as e:
+                        print(f"   ⚠️ Could not serialize orchestration_plan: {e}")
+                        print(f"   orchestration_plan (str): {str(orchestration_plan)}")
+                else:
+                    print(f"   ⚠️ orchestration_plan is None!")
+                
                 # Send interpreter results
                 async for event in send_status_event_flushed("status", {
                     "phase": "interpreting",
@@ -4081,6 +4104,12 @@ async def llm_chat_stream(request: LLMRequest):
             # ============================================================
             # HANDLE CLARIFICATION REQUESTS
             # ============================================================
+            print(f"🔍 [DOWNSTREAM_FLOW] Checking if clarification needed")
+            print(f"   orchestration_plan exists: {orchestration_plan is not None}")
+            if orchestration_plan:
+                print(f"   needs_clarification: {orchestration_plan.needs_clarification}")
+                print(f"   clarification_question: {orchestration_plan.clarification_question if hasattr(orchestration_plan, 'clarification_question') else 'N/A'}")
+            
             if orchestration_plan and orchestration_plan.needs_clarification:
                 print(f"   ❓ Interpreter needs clarification - responding with question")
                 clarification_response = orchestration_plan.clarification_question
@@ -4117,12 +4146,24 @@ async def llm_chat_stream(request: LLMRequest):
             pre_executed_results = {}
             pre_executed_tool_calls = []
             
+            print(f"🔍 [DOWNSTREAM_FLOW] Pre-execution phase starting")
+            if orchestration_plan:
+                tool_seq = orchestration_plan.tool_sequence or []
+                print(f"   tool_sequence count: {len(tool_seq)}")
+                if tool_seq:
+                    for idx, tool in enumerate(tool_seq):
+                        print(f"   tool[{idx}]: name={tool.name}, args={json.dumps(tool.arguments, default=str)}")
+            
             if orchestration_plan and orchestration_plan.tool_sequence and len(orchestration_plan.tool_sequence) > 0:
                 print(f"   🔧 Pre-executing {len(orchestration_plan.tool_sequence)} required tools")
                 
                 for tool_call in orchestration_plan.tool_sequence:
                     tool_name = tool_call.name
                     tool_args = tool_call.arguments or {}
+                    
+                    print(f"🔍 [DOWNSTREAM_FLOW] Pre-executing tool: {tool_name}")
+                    print(f"   tool_args (full): {json.dumps(tool_args, default=str, indent=2)}")
+                    print(f"   context keys: {list(context.keys())}")
                     
                     # Inject interpreter's intent for game review
                     if tool_name == "fetch_and_review_games" and orchestration_plan.user_intent_summary:
@@ -4200,7 +4241,13 @@ async def llm_chat_stream(request: LLMRequest):
                     # Get tool result
                     tool_result = await tool_task
                     
+                    print(f"🔍 [DOWNSTREAM_FLOW] Tool pre-execution result: {tool_name}")
+                    print(f"   success: {tool_result['success']}")
                     if tool_result["success"]:
+                        result_preview = json.dumps(tool_result["result"], default=str)
+                        if len(result_preview) > 2000:
+                            result_preview = result_preview[:2000] + f"... (truncated, total {len(result_preview)} chars)"
+                        print(f"   result (full): {result_preview}")
                         pre_executed_results[tool_name] = tool_result["result"]
                         pre_executed_tool_calls.append({
                             "name": tool_name,
@@ -4209,6 +4256,7 @@ async def llm_chat_stream(request: LLMRequest):
                         })
                         print(f"   ✅ Pre-executed {tool_name} successfully")
                     else:
+                        print(f"   error: {tool_result['error']}")
                         pre_executed_results[tool_name] = {"error": tool_result["error"]}
                         pre_executed_tool_calls.append({
                             "name": tool_name,
@@ -4290,6 +4338,10 @@ async def llm_chat_stream(request: LLMRequest):
                         pass
             
             # Add pre-executed tool calls and results to messages so LLM knows what happened
+            print(f"🔍 [DOWNSTREAM_FLOW] Building messages for LLM")
+            print(f"   pre_executed_tool_calls count: {len(pre_executed_tool_calls)}")
+            print(f"   messages count before adding tools: {len(messages)}")
+            
             if pre_executed_tool_calls:
                 # Add assistant message with tool calls
                 messages.append({
@@ -4319,6 +4371,20 @@ async def llm_chat_stream(request: LLMRequest):
                         "content": tool_result_text
                     })
                     print(f"   📝 Added pre-executed tool result for {tc['name']} to messages")
+                    print(f"      tool_result_text length: {len(tool_result_text)} chars")
+            
+            print(f"🔍 [DOWNSTREAM_FLOW] Messages built for LLM call")
+            print(f"   total messages: {len(messages)}")
+            for idx, msg in enumerate(messages):
+                role = msg.get("role", "unknown")
+                content_preview = ""
+                if "content" in msg and msg["content"]:
+                    content_preview = str(msg["content"])[:300]
+                elif "tool_calls" in msg and msg["tool_calls"]:
+                    content_preview = f"tool_calls: {len(msg['tool_calls'])}"
+                elif "name" in msg:
+                    content_preview = f"tool result for {msg.get('name', 'unknown')}"
+                print(f"   message[{idx}]: role={role}, preview={content_preview}...")
             
             # ============================================================
             # PHASE 3: LLM CALL (with tool execution)
@@ -4364,12 +4430,22 @@ async def llm_chat_stream(request: LLMRequest):
             )
             
             # Diagnostic logging before LLM call
+            print(f"🔍 [DOWNSTREAM_FLOW] About to call LLM")
+            print(f"   model: {request.model}")
+            print(f"   temperature: {request.temperature}")
+            print(f"   tools available: {len(tools) if tools else 0}")
+            print(f"   force_tool_call: {force_tool_call}")
+            print(f"   pre_executed tools: {len(pre_executed_tool_calls)}")
+            print(f"   messages count: {len(messages)}")
+            # Log full messages (truncate very long content)
+            messages_log = []
+            for msg in messages:
+                msg_copy = msg.copy()
+                if "content" in msg_copy and msg_copy["content"] and len(str(msg_copy["content"])) > 1000:
+                    msg_copy["content"] = str(msg_copy["content"])[:1000] + "... (truncated)"
+                messages_log.append(msg_copy)
+            print(f"   messages (full, truncated): {json.dumps(messages_log, default=str, indent=2)}")
             print(f"   🤖 About to call LLM (model={request.model}, tools={len(tools) if tools else 0}, pre_executed={len(pre_executed_tool_calls)})")
-            print(f"   📝 Messages count: {len(messages)}")
-            if messages:
-                last_msg = messages[-1]
-                last_msg_str = str(last_msg)[:300]
-                print(f"   📝 Last message preview: {last_msg_str}...")
             
             while iterations < max_iterations:
                 iterations += 1
@@ -4402,6 +4478,34 @@ async def llm_chat_stream(request: LLMRequest):
                         )
 
                     print(f"   ✅ LLM API call succeeded")
+                    
+                    # Log full LLM response
+                    print(f"🔍 [DOWNSTREAM_FLOW] LLM response received")
+                    response_summary = {
+                        "id": response.id,
+                        "model": response.model,
+                        "choices_count": len(response.choices),
+                        "usage": {
+                            "prompt_tokens": response.usage.prompt_tokens if hasattr(response, 'usage') and response.usage else None,
+                            "completion_tokens": response.usage.completion_tokens if hasattr(response, 'usage') and response.usage else None,
+                            "total_tokens": response.usage.total_tokens if hasattr(response, 'usage') and response.usage else None,
+                        } if hasattr(response, 'usage') and response.usage else None
+                    }
+                    if response.choices:
+                        choice = response.choices[0]
+                        response_summary["choice"] = {
+                            "index": choice.index,
+                            "finish_reason": choice.finish_reason,
+                            "message": {
+                                "role": choice.message.role,
+                                "content_preview": (choice.message.content[:500] if choice.message.content else None),
+                                "content_length": len(choice.message.content) if choice.message.content else 0,
+                                "tool_calls_count": len(choice.message.tool_calls) if choice.message.tool_calls else 0,
+                                "tool_calls": [{"id": tc.id, "type": tc.type, "function": {"name": tc.function.name, "arguments_preview": tc.function.arguments[:200]}} for tc in (choice.message.tool_calls or [])]
+                            }
+                        }
+                    print(f"   response (summary): {json.dumps(response_summary, default=str, indent=2)}")
+                    
                     response_message = response.choices[0].message
 
                     content_len = len(response_message.content) if response_message.content else 0
@@ -4412,6 +4516,8 @@ async def llm_chat_stream(request: LLMRequest):
 
                     if not response_message.tool_calls:
                         final_content = response_message.content or ""
+                        print(f"🔍 [DOWNSTREAM_FLOW] Final content determined")
+                        print(f"   final_content (full, {len(final_content)} chars): {final_content}")
                         print(f"   ✅ Got final content: {len(final_content)} chars")
                         if not final_content:
                             print(f"   ⚠️ WARNING: final_content is empty! Response was: {response_message}")
@@ -4432,6 +4538,10 @@ async def llm_chat_stream(request: LLMRequest):
                 for tool_call in response_message.tool_calls:
                     tool_name = tool_call.function.name
                     tool_args = json.loads(tool_call.function.arguments)
+                    
+                    print(f"🔍 [DOWNSTREAM_FLOW] Executing tool from LLM: {tool_name}")
+                    print(f"   tool_call_id: {tool_call.id}")
+                    print(f"   tool_args from LLM: {json.dumps(tool_args, default=str)}")
                     
                     # Send initial "called" status (not loading - just info)
                     tool_start_status = {
@@ -4467,6 +4577,7 @@ async def llm_chat_stream(request: LLMRequest):
                             if last_user_msg:
                                 final_tool_args["query"] = last_user_msg
                     
+                    print(f"   final_tool_args after merge: {json.dumps(final_tool_args, default=str)}")
                     print(f"   🔧 SSE: Executing {tool_name} with args: {final_tool_args}")
                     
                     # Use async queue for real-time status streaming during tool execution
@@ -4519,9 +4630,19 @@ async def llm_chat_stream(request: LLMRequest):
                     # Get tool result
                     tool_result = await tool_task
                     
+                    print(f"🔍 [DOWNSTREAM_FLOW] Tool execution completed: {tool_name}")
+                    print(f"   success: {tool_result['success']}")
+                    
                     if tool_result["success"]:
                         result = tool_result["result"]
+                        result_full = json.dumps(result, default=str)
                         result_text = json.dumps(result, indent=2, default=str)[:4000]
+                        if len(result_full) > 5000:
+                            result_preview = result_full[:5000] + f"... (truncated, total {len(result_full)} chars)"
+                        else:
+                            result_preview = result_full
+                        print(f"   result (full): {result_preview}")
+                        print(f"   result_text (full, first 4000 chars): {result_text}")
                         print(f"   ✅ SSE: Tool {tool_name} completed, result preview: {result_text[:200]}...")
                         
                         # Yield completion status with summary
@@ -4577,7 +4698,9 @@ async def llm_chat_stream(request: LLMRequest):
                     })
                 
                 # Add to messages and continue
-                messages.append({
+                print(f"🔍 [DOWNSTREAM_FLOW] Adding assistant message and tool results to messages")
+                print(f"   messages count before: {len(messages)}")
+                assistant_msg = {
                     "role": "assistant",
                     "content": response_message.content or "",
                     "tool_calls": [
@@ -4590,14 +4713,26 @@ async def llm_chat_stream(request: LLMRequest):
                             }
                         } for tc in response_message.tool_calls
                     ]
-                })
+                }
+                print(f"   assistant message: content_length={len(assistant_msg.get('content', '') or '')}, tool_calls={len(assistant_msg.get('tool_calls', []))}")
+                messages.append(assistant_msg)
+                print(f"   tool_results count: {len(tool_results)}")
+                for tr in tool_results:
+                    print(f"      tool_result: role={tr.get('role')}, name={tr.get('name')}, content_length={len(str(tr.get('content', '')))}")
                 messages.extend(tool_results)
+                print(f"   messages count after: {len(messages)}")
             
             # ============================================================
             # PHASE 4: GENERATE ANNOTATIONS
             # ============================================================
             annotations = {"arrows": [], "highlights": [], "tags_referenced": []}
             fen = context.get("fen", "")
+            
+            print(f"🔍 [DOWNSTREAM_FLOW] Generating annotations")
+            print(f"   fen: {fen}")
+            print(f"   final_content length: {len(final_content)}")
+            print(f"   has_cached_analysis: {'cached_analysis' in context}")
+            
             if fen and final_content:
                 try:
                     cached_analysis = context.get("cached_analysis", {})
@@ -4606,8 +4741,12 @@ async def llm_chat_stream(request: LLMRequest):
                         fen, 
                         cached_analysis
                     )
+                    print(f"🔍 [DOWNSTREAM_FLOW] Annotations generated")
+                    print(f"   annotations (full): {json.dumps(annotations, default=str, indent=2)}")
                 except Exception as ann_err:
-                    print(f"Annotation error: {ann_err}")
+                    print(f"   Annotation error: {ann_err}")
+                    import traceback
+                    traceback.print_exc()
             
             # ============================================================
             # PHASE 5: SEND FINAL RESPONSE
@@ -4632,6 +4771,12 @@ async def llm_chat_stream(request: LLMRequest):
             frontend_commands = []
             if orchestration_plan and orchestration_plan.frontend_commands:
                 frontend_commands = [cmd.to_dict() for cmd in orchestration_plan.frontend_commands]
+            
+            print(f"🔍 [DOWNSTREAM_FLOW] Building response_data")
+            print(f"   final_content length: {len(final_content)}")
+            print(f"   tool_calls_made count: {len(tool_calls_made)}")
+            print(f"   iterations: {iterations}")
+            print(f"   frontend_commands: {json.dumps(frontend_commands, default=str)}")
             
             response_data = {
                 "content": final_content,
@@ -4658,6 +4803,19 @@ async def llm_chat_stream(request: LLMRequest):
                 response_data["detected_intent"] = None
             
             print(f"   📦 Response data prepared: content={len(final_content)} chars, tools_used={response_data.get('tools_used', [])}")
+            
+            print(f"🔍 [DOWNSTREAM_FLOW] response_data built")
+            # Log response_data but truncate very large fields
+            response_data_log = response_data.copy()
+            if "tool_calls" in response_data_log:
+                for tc in response_data_log["tool_calls"]:
+                    if "result" in tc and isinstance(tc["result"], dict):
+                        result_str = json.dumps(tc["result"], default=str)
+                        if len(result_str) > 2000:
+                            tc["result"] = {"_truncated": True, "_size": len(result_str)}
+            if "status_messages" in response_data_log and len(response_data_log["status_messages"]) > 20:
+                response_data_log["status_messages"] = response_data_log["status_messages"][:20] + [{"_truncated": True, "_total": len(response_data["status_messages"])}]
+            print(f"   response_data (summary): {json.dumps(response_data_log, default=str, indent=2)}")
             
             # ============================================================
             # CHUNKED SSE: Send data in parts for large payloads
@@ -4802,6 +4960,12 @@ async def llm_chat_stream(request: LLMRequest):
                 }
             
             print(f"   🚀 Sending complete event...")
+            
+            print(f"🔍 [DOWNSTREAM_FLOW] Sending complete event")
+            print(f"   event_type: complete")
+            response_data_size = len(json.dumps(response_data, default=str))
+            print(f"   response_data size: {response_data_size} bytes ({response_data_size/1024:.2f} KB)")
+            print(f"   final_content: {final_content[:500]}..." if len(final_content) > 500 else f"   final_content: {final_content}")
             
             try:
                 event_str = send_event("complete", response_data)
