@@ -389,11 +389,11 @@ Return the plan as JSON."""
                     system_prompt=PLANNER_SYSTEM_PROMPT,
                     user_text=user_prompt,
                     temperature=0.3,
-                    model="gpt-5",
+                    model="gpt-5-mini",
                 )
             else:
                 response = self.client.chat.completions.create(
-                    model="gpt-5",
+                    model="gpt-5-mini",
                     messages=[
                         {"role": "system", "content": PLANNER_SYSTEM_PROMPT},
                         {"role": "user", "content": user_prompt}

@@ -432,11 +432,11 @@ class StepExecutor:
                     system_prompt="You are an expert chess analyst synthesizing investigation findings. Be thorough, balanced, and cite specific evidence from the results.",
                     user_text=user_prompt,
                     temperature=0.5,
-                    model="gpt-5",
+                    model="gpt-5-mini",
                 ).strip()
             
             response = self.client.chat.completions.create(
-                model="gpt-5",
+                model="gpt-5-mini",
                 messages=[
                     {
                         "role": "system",

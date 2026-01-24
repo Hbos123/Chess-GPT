@@ -20,7 +20,7 @@ class LLMReporter:
     def __init__(self, openai_client: OpenAI, llm_router=None):
         self.client = openai_client
         self.llm_router = llm_router
-        self.model = os.getenv("PERSONAL_REVIEW_REPORTER_MODEL", "gpt-5")
+        self.model = os.getenv("PERSONAL_REVIEW_REPORTER_MODEL", "gpt-5-mini")
     
     def generate_report(
         self, 

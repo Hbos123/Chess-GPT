@@ -699,14 +699,14 @@ Examples:
                 system_prompt="You are a chess game analyzer. Select the most relevant moves to show based on the user's query. Return only valid JSON.",
                 user_text=prompt,
                 temperature=0.3,
-                model="gpt-5",
+                model="gpt-5-mini",
             )
         else:
             loop = asyncio.get_event_loop()
             
             def call_openai():
                 return openai_client.chat.completions.create(
-                    model="gpt-5",
+                    model="gpt-5-mini",
                     messages=[
                         {"role": "system", "content": "You are a chess game analyzer. Select the most relevant moves to show based on the user's query. Return only valid JSON."},
                         {"role": "user", "content": prompt}

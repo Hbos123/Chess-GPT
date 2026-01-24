@@ -115,7 +115,7 @@ def analyze_board_image(
     )
 
     response = openai_client.responses.create(
-        model="gpt-5",
+        model="gpt-5-mini",
         input=[
             {"role": "system", "content": "You are a meticulous chessboard vision assistant."},
             {

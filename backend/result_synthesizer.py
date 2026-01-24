@@ -105,11 +105,11 @@ Create a comprehensive synthesis report."""
                     system_prompt=system_prompt,
                     user_text=user_prompt,
                     temperature=0.4,
-                    model="gpt-5",
+                    model="gpt-5-mini",
                 ).strip()
             else:
                 response = self.client.chat.completions.create(
-                    model="gpt-5",
+                    model="gpt-5-mini",
                     messages=[
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": user_prompt}

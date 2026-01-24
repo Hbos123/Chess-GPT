@@ -57,7 +57,7 @@ Respond with:
             stage=stage,
             system_prompt=system_prompt,
             user_text=prompt,
-            model="gpt-5",
+            model="gpt-5-mini",
             temperature=0.2,
         )
         notes.append(f"iter_{i}: {len(answer or '')} chars")

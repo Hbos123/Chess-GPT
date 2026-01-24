@@ -1421,7 +1421,7 @@ Return ONLY valid JSON in this exact format:
 
             def call_openai():
                 return self.openai_client.chat.completions.create(
-                    model="gpt-5",
+                    model="gpt-5-mini",
                     messages=[
                         {"role": "system", "content": "Return only valid JSON. No markdown. Follow constraints strictly."},
                         {"role": "user", "content": prompt},
@@ -1436,7 +1436,7 @@ Return ONLY valid JSON in this exact format:
                     system_prompt="Return only valid JSON. No markdown. Follow constraints strictly.",
                     user_text=prompt,
                     temperature=0.4,
-                    model="gpt-5",
+                    model="gpt-5-mini",
                 )
                 content = json.dumps(parsed, ensure_ascii=False)
             else:
@@ -2164,7 +2164,7 @@ Write your response now based on the game data provided."""
                     system_prompt=system_prompt,
                     user_text=context,
                     temperature=0.7,
-                    model="gpt-5",
+                    model="gpt-5-mini",
                 ).strip()
             
             loop = asyncio.get_event_loop()
@@ -2172,7 +2172,7 @@ Write your response now based on the game data provided."""
                 response = await loop.run_in_executor(
                     executor,
                     lambda: self.openai_client.chat.completions.create(
-                        model="gpt-5",
+                        model="gpt-5-mini",
                         messages=[
                             {"role": "system", "content": system_prompt},
                             {"role": "user", "content": context}
