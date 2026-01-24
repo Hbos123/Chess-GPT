@@ -278,10 +278,7 @@ async def initialize_engine():
             transport, engine = await chess.engine.popen_uci(STOCKFISH_PATH)
             await engine.configure({
                 "Threads": 1,
-                "Hash": 32,
-                "MultiPV": 2,
-                "Ponder": False
-            })
+                "Hash": 32})
             
             # Initialize queue system
             engine_queue = StockfishQueue(engine)

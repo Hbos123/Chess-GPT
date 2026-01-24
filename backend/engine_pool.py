@@ -103,9 +103,7 @@ class EnginePool:
                     # Ponder=False: Explicitly disable (already default)
                     await engine.configure({
                         "Threads": 1,
-                        "Hash": 32,
-                                                "Ponder": False
-                    })
+                        "Hash": 32})
                     self.engines.append(engine)
                     await self.available.put((i, engine))
                     self.engine_status[i] = EngineStatus(
@@ -1007,9 +1005,7 @@ class EnginePool:
                 # Apply same optimized configuration
                 await new_engine.configure({
                     "Threads": 1,
-                    "Hash": 32,
-                                        "Ponder": False
-                })
+                    "Hash": 32})
                 if engine_id < len(self.engines):
                     self.engines[engine_id] = new_engine
                 else:
