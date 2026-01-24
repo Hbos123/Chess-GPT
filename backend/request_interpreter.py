@@ -323,17 +323,8 @@ class RequestInterpreter:
                 timestamp=time.time()
             )
         
-        # Only use pattern matching for trivially obvious cases to save API calls
-        trivial_plan = self._trivial_detect(message, context)
-        if trivial_plan:
-            print(f"   ⚡ Trivial detection: {trivial_plan.mode.value} mode")
-            if status_callback:
-                status_callback(
-                    phase="interpreting",
-                    message=f"Detected: {trivial_plan.user_intent_summary or trivial_plan.mode.value}",
-                    timestamp=time.time()
-                )
-            return trivial_plan
+        # ✅ All requests go through prompt-based LLM interpretation
+        # No phrase/pattern detection - everything handled by prompts
         
         # Use multi-pass interpreter loop if enabled, otherwise single-pass LLM interpretation
         if self.enable_multi_pass and self._interpreter_loop:
