@@ -6030,3 +6030,51 @@ html, body {
   }
 }
 
+
+
+/* ========================================
+   STRIPE PRICING TABLE STYLING
+   ======================================== */
+
+.stripe-pricing-table-container {
+  margin-top: 24px;
+  width: 100%;
+  min-height: 400px;
+}
+
+/* Override Stripe's default styles to match dark theme */
+stripe-pricing-table {
+  display: block;
+  width: 100%;
+}
+
+/* Use CSS custom properties to theme the pricing table */
+stripe-pricing-table::part(card) {
+  background: var(--bg-secondary) !important;
+  border: 1px solid var(--border-color) !important;
+  color: var(--text-primary) !important;
+}
+
+stripe-pricing-table::part(button) {
+  background: var(--accent-primary) !important;
+  color: var(--bg-primary) !important;
+  border: none !important;
+  border-radius: var(--radius-md) !important;
+}
+
+stripe-pricing-table::part(button):hover {
+  background: var(--accent-hover) !important;
+}
+
+/* Global styles for Stripe pricing table elements */
+stripe-pricing-table * {
+  color: var(--text-primary) !important;
+}
+
+/* Mobile responsive */
+@media (max-width: 768px) {
+  .stripe-pricing-table-container {
+    margin-top: 16px;
+    min-height: 300px;
+  }
+}

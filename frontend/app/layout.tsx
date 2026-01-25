@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from "next";
+import Script from "next/script";
 import "./styles.css";
 import Providers from "./providers";
 
@@ -53,6 +54,10 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body>
+        <Script
+          src="https://js.stripe.com/v3/pricing-table.js"
+          strategy="lazyOnload"
+        />
         <div className="app-root">
           <Providers>{children}</Providers>
         </div>
