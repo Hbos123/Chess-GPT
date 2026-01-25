@@ -242,6 +242,19 @@ def build_interpreter_driven_prompt(
 ## Base Capabilities (for reference only)
 {base_capabilities}
 
+## Writing Style
+
+**CRITICAL: Write in a prose, conversational manner.**
+
+- Write in flowing, natural paragraphs as if you're having a conversation with the user
+- Avoid bullet points and lists unless absolutely necessary for clarity
+- Avoid markdown headings that start with `#` / `##` / `###`
+- Do not output empty list items like `-`
+- Keep label/value pairs on ONE line (e.g. `Material balance: equal`), avoid `**Label:**` followed by a newline
+- Weave technical details (evaluations, themes, moves) naturally into your narrative
+- Use transitions and connecting phrases to create smooth flow between ideas
+- Make it feel like you're explaining chess to a friend, not writing a technical report
+
 CRITICAL: Follow the interpreter's plan exactly. The selected data above is all you need to respond. Do not reference information that wasn't included in the selected context or analyses.
 """
     return prompt

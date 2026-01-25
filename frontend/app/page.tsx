@@ -4812,13 +4812,35 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
         // Check if we have direct arrows/highlights
         if (backendAnnotations.arrows?.length || backendAnnotations.highlights?.length) {
           console.log('📍 Using backend annotations (direct):', backendAnnotations);
+
+          // Normalize backend shapes to what Board expects
+          // - highlights: backend may use { square }, Board expects { sq }
+          // - arrows: backend may use { from_square/to_square }, Board expects { from/to }
+          const normalizedHighlights = (backendAnnotations.highlights || [])
+            .map((h: any) => ({
+              sq: h?.sq || h?.square,
+              color: h?.color,
+              type: h?.type,
+            }))
+            .filter((h: any) => Boolean(h.sq));
+
+          const normalizedArrows = (backendAnnotations.arrows || [])
+            .map((a: any) => ({
+              from: a?.from || a?.from_square,
+              to: a?.to || a?.to_square,
+              color: a?.color,
+              type: a?.type,
+            }))
+            .filter((a: any) => Boolean(a.from && a.to));
+
           setAnnotations(prev => ({
             ...prev,
-            arrows: backendAnnotations.arrows || [],
-            highlights: backendAnnotations.highlights || []
+            arrows: normalizedArrows,
+            highlights: normalizedHighlights,
           }));
-          if (backendAnnotations.arrows?.length || backendAnnotations.highlights?.length) {
-            addSystemMessage(`📍 Visual annotations applied: ${backendAnnotations.arrows?.length || 0} arrows, ${backendAnnotations.highlights?.length || 0} highlights`);
+
+          if (normalizedArrows.length || normalizedHighlights.length) {
+            addSystemMessage(`📍 Visual annotations applied: ${normalizedArrows.length} arrows, ${normalizedHighlights.length} highlights`);
           }
           return;
         }

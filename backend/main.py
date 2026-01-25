@@ -4797,10 +4797,10 @@ async def llm_chat_stream(request: LLMRequest):
                     
                     # Generate annotations (will use extracted_tags if available)
                     annotations = parse_response_for_annotations(
-                        cleaned_content, 
-                        fen, 
-                        cached_analysis,
-                        explicit_tags=extracted_tags if extracted_tags else None
+                        llm_response=cleaned_content,
+                        cached_analysis=cached_analysis,
+                        fen=fen,
+                        explicit_tags=extracted_tags if extracted_tags else None,
                     )
                     print(f"🔍 [DOWNSTREAM_FLOW] Annotations generated")
                     print(f"   annotations (full): {json.dumps(annotations, default=str, indent=2)}")
