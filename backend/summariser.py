@@ -257,7 +257,7 @@ class Summariser:
         # Model is configurable so we can dial cost/quality.
         # Default to cheaper model; `summarise()` includes a retry + fallback guard for reliability.
         self.model = os.getenv("SUMMARISER_MODEL", "gpt-5-mini")
-        self.fallback_model = os.getenv("SUMMARISER_FALLBACK_MODEL", "gpt-5")
+        self.fallback_model = os.getenv("SUMMARISER_FALLBACK_MODEL", "gpt-5-mini")
         try:
             self.max_retries = int(os.getenv("SUMMARISER_MAX_RETRIES", "1"))
         except Exception:

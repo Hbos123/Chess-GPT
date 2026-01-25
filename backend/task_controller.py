@@ -210,7 +210,7 @@ class TaskController:
         llm_calls = 0
         context = request.context or {}
         task_id = request.task_id or request.session_id or "default"
-        model = getattr(request, "model", "gpt-5")
+        model = getattr(request, "model", "gpt-5-mini")
         temperature = getattr(request, "temperature", 0.7)
 
         user_messages = [m for m in (request.messages or []) if m.get("role") == "user"]
