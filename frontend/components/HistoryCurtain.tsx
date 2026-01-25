@@ -159,6 +159,7 @@ export default function HistoryCurtain({
   const [loading, setLoading] = useState(false);
   const [gameSearch, setGameSearch] = useState('');
   const [expandedTab, setExpandedTab] = useState<'personal' | 'settings' | null>(null);
+  const [showSettings, setShowSettings] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const refreshInProgressRef = useRef(false);
 
@@ -1290,7 +1291,7 @@ export default function HistoryCurtain({
             </div>
           </button>
 
-          <button className="summary-card summary-button" onClick={() => setExpandedTab('settings')}>
+          <button className="summary-card summary-button" onClick={() => setShowSettings(true)}>
             <div className="summary-card-head">
               <h3>Settings</h3>
             </div>
@@ -1299,50 +1300,6 @@ export default function HistoryCurtain({
               <p className="summary-line">Engine: Adaptive</p>
             </div>
           </button>
-
-          <div className="summary-card">
-            <div className="summary-card-head">
-              <h3>Chats</h3>
-            </div>
-            <div className="summary-card-body">
-              <div className="curtain-search inline">
-                <input
-                  type="text"
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  placeholder="Search conversations..."
-                  className="search-input compact"
-                />
-              </div>
-              {loading ? (
-                <div className="loading">Loading...</div>
-              ) : filteredThreads.length === 0 ? (
-                <div className="empty-state small">
-                  {user ? 'No conversations yet' : 'Sign in to save chat history'}
-                </div>
-              ) : (
-                <div className="thread-summary-table">
-                  <div className="thread-table-head">
-                    <span>Title</span>
-                    <span>Updated</span>
-                  </div>
-                  {filteredThreads.slice(0, 10).map(thread => (
-                    <button
-                      key={thread.id}
-                      className="thread-table-row"
-                      onClick={() => {
-                        onSelectThread(thread.id);
-                        onClose();
-                      }}
-                    >
-                      <span>{thread.title}</span>
-                      <span>{new Date(thread.updated_at).toLocaleDateString()}</span>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
         </div>
       </div>
 
@@ -1360,6 +1317,28 @@ export default function HistoryCurtain({
           </div>
         </div>
       )}
+
+
+      {showSettings && (
+        <div
+          className="settings-fullscreen-overlay"
+          onClick={() => setShowSettings(false)}
+          role="dialog"
+          aria-modal="true"
+          aria-label="Settings"
+        >
+          <div className="settings-fullscreen-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="settings-fullscreen-header">
+              <h2>Settings</h2>
+              <button className="close-button" onClick={() => setShowSettings(false)}>
+                ×
+              </button>
+            </div>
+            <div className="settings-fullscreen-body">{renderSettingsDetail()}</div>
+          </div>
+        </div>
+      )}
+
     </>
   );
 }
