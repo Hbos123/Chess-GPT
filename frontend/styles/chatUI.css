@@ -79,19 +79,29 @@
    APP SHELL (Viewport Container)
    ======================================== */
 
+/* Ensure html and body fill viewport and match background */
+html, body {
+  height: 100%;
+  min-height: 100dvh;
+  background: var(--bg-primary);
+  overflow: hidden;
+  margin: 0;
+  padding: 0;
+}
+
 .app-shell {
-  /* Dynamic height that accounts for safe-area padding to prevent overflow */
-  /* Subtract top padding from height so total (height + padding) = 100dvh */
-  height: calc(100dvh - max(env(safe-area-inset-top, 0px), 12px));
+  /* Full viewport height - padding will push content down */
+  height: 100dvh;
   min-height: 0; /* Allow flex children to shrink */
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  /* Safe area support - padding is accounted for in height calc above */
+  /* Safe area support - padding pushes content down from top */
   padding-top: max(env(safe-area-inset-top, 0px), 12px); /* fallback for iOS when env() returns 0 */
   padding-bottom: 0; /* Let bottom-composer handle bottom safe area */
   /* Ensure box-sizing includes padding in height calculation */
   box-sizing: border-box;
+  background: var(--bg-primary); /* Match background so no gaps are visible */
 }
 
 /* ========================================
