@@ -6068,7 +6068,8 @@ If they ask about the game, refer to this data.
       console.log('🔍 [Personal Review Check] result.tool_calls:', result.tool_calls);
       const personalReviewTool = result.tool_calls?.find((tc: any) => tc.tool === 'fetch_and_review_games');
       const hasSelectGamesTool = Array.isArray(result.tool_calls) && result.tool_calls.some((tc: any) => tc?.tool === "select_games");
-      const isGameReviewIntent = result.detected_intent === "game_review";
+      // Backend sends detected_intent as a human summary; use orchestration.mode for machine intent
+      const isGameReviewIntent = result.orchestration?.mode === "review";
       console.log('🔍 [Personal Review Check] personalReviewTool:', personalReviewTool);
       if (personalReviewTool) {
         console.log('🔍 [Personal Review Check] result object:', personalReviewTool.result);
