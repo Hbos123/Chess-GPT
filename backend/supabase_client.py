@@ -365,6 +365,212 @@ class SupabaseClient:
         except Exception as e:
             print(f"[daily_usage] Error incrementing usage: {e}")
             traceback.print_exc()
+
+    def check_message_limit(
+        self,
+        user_id: Optional[str],
+        ip_address: Optional[str],
+        tier_info: Dict[str, Any]
+    ) -> Tuple[bool, str, Dict[str, Any]]:
+        """
+        Check if user can send a message today.
+        
+        Returns:
+            (allowed: bool, message: str, usage_info: dict)
+        """
+        # Unsigned users: 1 message/day
+        if not user_id:
+            if not ip_address:
+                return False, "IP address required for anonymous users", {}
+            
+            today = datetime.now().date()
+            usage = self._get_daily_usage(None, ip_address, today)
+            messages_count = usage.get("messages_count", 0) if usage else 0
+            
+            if messages_count >= 1:
+                return False, "Daily message limit exceeded. Sign in to get 2 messages/day, or upgrade for more.", {
+                    "used": messages_count,
+                    "limit": 1,
+                    "next_step": "sign_in"
+                }
+            
+            # Increment and allow
+            self._increment_message_count(None, ip_address)
+            return True, "", {"used": messages_count + 1, "limit": 1}
+        
+        # Signed-in users: check tier limits
+        tier = tier_info.get("tier", {})
+        max_messages = tier.get("daily_messages", 2)  # Default to 2 for unpaid
+        
+        today = datetime.now().date()
+        usage = self._get_daily_usage(user_id, None, today)
+        messages_count = usage.get("messages_count", 0) if usage else 0
+        
+        if messages_count >= max_messages:
+            tier_id = tier_info.get("tier_id", "unpaid")
+            if tier_id == "unpaid":
+                next_step = "upgrade_lite"
+                message = f"Daily message limit exceeded ({messages_count}/{max_messages}). Upgrade to Lite for 15 messages/day."
+            else:
+                next_step = "upgrade"
+                message = f"Daily message limit exceeded ({messages_count}/{max_messages}). Upgrade your plan for more messages."
+            
+            return False, message, {
+                "used": messages_count,
+                "limit": max_messages,
+                "next_step": next_step,
+                "tier_id": tier_id
+            }
+        
+        # Increment and allow
+        self._increment_message_count(user_id, None)
+        return True, "", {"used": messages_count + 1, "limit": max_messages}
+
+    def check_token_limit(
+        self,
+        user_id: Optional[str],
+        ip_address: Optional[str],
+        tier_info: Dict[str, Any],
+        estimated_tokens: int = 0
+    ) -> Tuple[bool, str, Dict[str, Any]]:
+        """
+        Check if user has enough tokens remaining for this request.
+        
+        Returns:
+            (allowed: bool, message: str, usage_info: dict, available_tools: dict)
+        """
+        tier = tier_info.get("tier", {})
+        max_tokens = tier.get("daily_tokens", 15000)  # Default to 15k for unpaid
+        
+        today = datetime.now().date()
+        usage = self._get_daily_usage(user_id, ip_address, today)
+        tokens_used = usage.get("tokens_used", 0) if usage else 0
+        
+        # Check available tools (game reviews/lessons)
+        available_tools = {}
+        tier_id = tier_info.get("tier_id", "unpaid")
+        
+        # Check game reviews
+        max_reviews = tier.get("max_game_reviews_per_day", 0)
+        if max_reviews is None:
+            available_tools["game_reviews"] = {"available": True, "limit": "unlimited"}
+        elif max_reviews > 0:
+            reviews_used = usage.get("game_reviews_count", 0) if usage else 0
+            available_tools["game_reviews"] = {
+                "available": reviews_used < max_reviews,
+                "used": reviews_used,
+                "limit": max_reviews
+            }
+        else:
+            available_tools["game_reviews"] = {"available": False, "limit": 0}
+        
+        # Check lessons
+        max_lessons = tier.get("max_lessons_per_day", 0)
+        if max_lessons is None:
+            available_tools["lessons"] = {"available": True, "limit": "unlimited"}
+        elif max_lessons > 0:
+            lessons_used = usage.get("lessons_count", 0) if usage else 0
+            available_tools["lessons"] = {
+                "available": lessons_used < max_lessons,
+                "used": lessons_used,
+                "limit": max_lessons
+            }
+        else:
+            available_tools["lessons"] = {"available": False, "limit": 0}
+        
+        if tokens_used + estimated_tokens > max_tokens:
+            if tier_id == "unpaid":
+                if not user_id:
+                    next_step = "sign_in"
+                    message = f"Token limit exceeded ({tokens_used}/{max_tokens}). Sign in to get 15k tokens/day, or upgrade for more."
+                else:
+                    next_step = "upgrade_lite"
+                    message = f"Token limit exceeded ({tokens_used}/{max_tokens}). Upgrade to Lite for 43k tokens/day."
+            else:
+                next_step = "upgrade"
+                message = f"Token limit exceeded ({tokens_used}/{max_tokens}). Upgrade your plan for more tokens."
+            
+            return False, message, {
+                "used": tokens_used,
+                "limit": max_tokens,
+                "next_step": next_step,
+                "tier_id": tier_id,
+                "available_tools": available_tools
+            }
+        
+        return True, "", {
+            "used": tokens_used,
+            "limit": max_tokens,
+            "available_tools": available_tools
+        }
+
+    def _increment_message_count(self, user_id: Optional[str], ip_address: Optional[str]):
+        """Increment daily message count"""
+        try:
+            today = datetime.now().date()
+            
+            query = self.client.table("daily_usage")
+            if user_id:
+                query = query.eq("user_id", user_id)
+            else:
+                query = query.eq("ip_address", ip_address)
+            query = query.eq("usage_date", today.isoformat())
+            
+            result = query.select("*").execute()
+            
+            if result.data:
+                # Update existing
+                current = result.data[0].get("messages_count", 0)
+                query.update({"messages_count": current + 1}).execute()
+            else:
+                # Create new record
+                data = {
+                    "usage_date": today.isoformat(),
+                    "messages_count": 1
+                }
+                if user_id:
+                    data["user_id"] = user_id
+                else:
+                    data["ip_address"] = ip_address
+                
+                self.client.table("daily_usage").insert(data).execute()
+        except Exception as e:
+            print(f"[daily_usage] Error incrementing message count: {e}")
+            traceback.print_exc()
+
+    def increment_token_usage(self, user_id: Optional[str], ip_address: Optional[str], tokens: int):
+        """Increment daily token usage"""
+        try:
+            today = datetime.now().date()
+            
+            query = self.client.table("daily_usage")
+            if user_id:
+                query = query.eq("user_id", user_id)
+            else:
+                query = query.eq("ip_address", ip_address)
+            query = query.eq("usage_date", today.isoformat())
+            
+            result = query.select("*").execute()
+            
+            if result.data:
+                # Update existing
+                current = result.data[0].get("tokens_used", 0)
+                query.update({"tokens_used": current + tokens}).execute()
+            else:
+                # Create new record
+                data = {
+                    "usage_date": today.isoformat(),
+                    "tokens_used": tokens
+                }
+                if user_id:
+                    data["user_id"] = user_id
+                else:
+                    data["ip_address"] = ip_address
+                
+                self.client.table("daily_usage").insert(data).execute()
+        except Exception as e:
+            print(f"[daily_usage] Error incrementing token usage: {e}")
+            traceback.print_exc()
     
     # ============================================================================
     # GAMES

@@ -180,6 +180,14 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
   const [aiGameElo, setAiGameElo] = useState<number>(1500);
   const [aiGameUserSide, setAiGameUserSide] = useState<"white" | "black" | null>(null);
   const [pendingConfirmation, setPendingConfirmation] = useState<{action: string, intent: string} | null>(null); // Track pending confirmations
+  const [limitExceededInfo, setLimitExceededInfo] = useState<{
+    type: string;
+    message: string;
+    usage: any;
+    next_step: string;
+    available_tools: any;
+  } | null>(null);
+  const [openSettingsNonce, setOpenSettingsNonce] = useState(0);
 
   // Stable per-tab session id for backend-side LLM prefix caching.
   // Use sessionStorage (tab-scoped) to avoid collisions across tabs.
@@ -1395,7 +1403,6 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
   // NEW: ChatGPT-style UI state
   const [isFirstMessage, setIsFirstMessage] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
-  const [openSettingsNonce, setOpenSettingsNonce] = useState(0);
   const [showLoadGame, setShowLoadGame] = useState(false);
   const [boardDockOpen, setBoardDockOpen] = useState(false);
   const [showRequestOptions, setShowRequestOptions] = useState(false);
@@ -1992,9 +1999,7 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
   const theme = "night" as const;
   const [currentThreadId, setCurrentThreadId] = useState<string | null>(null);
   type LayoutSizes = { board: number; load: number; chat: number };
-  // Default layout tuned so when the board is open, board/chat splits ~75%/25%
-  // (boardFraction = board / (board + chat) = 0.6 / 0.8 = 0.75)
-  const defaultLayoutSizes: LayoutSizes = { board: 0.6, load: 0.2, chat: 0.2 };
+  const defaultLayoutSizes: LayoutSizes = { board: 0.275, load: 0.2, chat: 0.525 };
   const [layoutSizes, setLayoutSizes] = useState<LayoutSizes>(defaultLayoutSizes);
   
   // Load layout sizes from localStorage on client only to avoid hydration mismatch
@@ -2009,15 +2014,7 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
           typeof parsed?.load === "number" &&
           typeof parsed?.chat === "number"
         ) {
-          // If an older saved layout makes the board too narrow, migrate to the new 75/25 default.
-          // (boardFraction = board / (board + chat))
-          const denom = (parsed.board + parsed.chat) || 0;
-          const boardFraction = denom > 0 ? (parsed.board / denom) : 0;
-          if (boardFraction > 0 && boardFraction < 0.6) {
-            setLayoutSizes(defaultLayoutSizes);
-          } else {
-            setLayoutSizes(parsed);
-          }
+          setLayoutSizes(parsed);
         }
       }
     } catch (err) {
@@ -2245,8 +2242,7 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
 
   useEffect(() => {
     if (!dragState) return;
-    // Keep chat panel from shrinking too far; when board is open we want >=25% chat
-    const MIN = { board: 0.18, load: 0.12, chat: 0.2 };
+    const MIN = { board: 0.18, load: 0.12, chat: 0.22 };
     const handleMove = (event: PointerEvent | MouseEvent) => {
       if (!layoutRef.current) return;
       const axis = dragState.axis;
@@ -3911,6 +3907,17 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
                     graphData: finalGraphData  // Include graph data if any graph tools were called
                   });
                   return true; // Signal completion
+                } else if (eventType === "limit_exceeded") {
+                  // Handle limit exceeded - show popup but continue conversation
+                  vLog("⚠️ SSE limit_exceeded received", data);
+                  setLimitExceededInfo({
+                    type: data.type || "token_limit",
+                    message: data.message || "Limit exceeded",
+                    usage: data.usage || {},
+                    next_step: data.next_step || "upgrade",
+                    available_tools: data.available_tools || {}
+                  });
+                  // Don't block - conversation continues
                 } else if (eventType === "error") {
                   setAnalysisInProgress(false);
                   reject(new Error(data.message));
@@ -12789,10 +12796,6 @@ Provide 2-3 sentences of natural language commentary explaining why this deviati
     <div data-theme={theme} className="app-shell">
       <TopBar
         onToggleHistory={() => setShowHistory(!showHistory)}
-        onOpenSettings={() => {
-          setShowHistory(true);
-          setOpenSettingsNonce((n) => n + 1);
-        }}
         onSignIn={handleSignInClick}
         onSignOut={handleAuthSignOut}
         onSwitchAccount={handleSwitchAccount}
@@ -12803,6 +12806,221 @@ Provide 2-3 sentences of natural language commentary explaining why this deviati
 
       {showAuthModal && !user && (
         <AuthModal onClose={() => setShowAuthModal(false)} />
+      )}
+      
+      {/* Limit Exceeded Popup */}
+      {limitExceededInfo && (
+        <div 
+          className="limit-exceeded-overlay"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) {
+              setLimitExceededInfo(null);
+            }
+          }}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0, 0, 0, 0.6)',
+            zIndex: 1000,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '20px'
+          }}
+        >
+          <div 
+            className="limit-exceeded-modal"
+            style={{
+              background: 'var(--bg-primary)',
+              border: '1px solid var(--border-color)',
+              borderRadius: '12px',
+              padding: '24px',
+              maxWidth: '500px',
+              width: '100%',
+              boxShadow: '0 10px 40px rgba(0, 0, 0, 0.3)'
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+              <h2 style={{ margin: 0, fontSize: '20px', fontWeight: '600' }}>Limit Exceeded</h2>
+              <button
+                type="button"
+                onClick={() => setLimitExceededInfo(null)}
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  fontSize: '24px',
+                  cursor: 'pointer',
+                  color: 'var(--text-secondary)',
+                  padding: '0',
+                  width: '32px',
+                  height: '32px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}
+              >
+                ×
+              </button>
+            </div>
+            
+            <p style={{ margin: '0 0 20px 0', color: 'var(--text-primary)', lineHeight: '1.6' }}>
+              {limitExceededInfo.message}
+            </p>
+            
+            <p style={{ margin: '0 0 20px 0', color: 'var(--text-secondary)', fontSize: '14px', lineHeight: '1.6' }}>
+              Your conversation can continue, but AI responses are limited. You can still use available tools below.
+            </p>
+            
+            {/* Available Tools */}
+            {limitExceededInfo.available_tools && (
+              <div style={{ marginBottom: '20px' }}>
+                <h3 style={{ margin: '0 0 12px 0', fontSize: '16px', fontWeight: '600' }}>Available Tools</h3>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  {limitExceededInfo.available_tools.game_reviews?.available && (
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        // Call game review tool directly
+                        setLimitExceededInfo(null);
+                        // TODO: Implement direct tool call
+                        alert('Game review tool will be called directly');
+                      }}
+                      style={{
+                        padding: '10px 16px',
+                        background: 'var(--accent-primary)',
+                        color: 'var(--bg-primary)',
+                        border: 'none',
+                        borderRadius: '6px',
+                        cursor: 'pointer',
+                        fontSize: '14px',
+                        fontWeight: '500'
+                      }}
+                    >
+                      Review Game ({limitExceededInfo.available_tools.game_reviews.used || 0}/{limitExceededInfo.available_tools.game_reviews.limit === 'unlimited' ? '∞' : limitExceededInfo.available_tools.game_reviews.limit} remaining)
+                    </button>
+                  )}
+                  {limitExceededInfo.available_tools.lessons?.available && (
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        // Call lesson tool directly
+                        setLimitExceededInfo(null);
+                        // TODO: Implement direct tool call
+                        alert('Lesson tool will be called directly');
+                      }}
+                      style={{
+                        padding: '10px 16px',
+                        background: 'var(--accent-primary)',
+                        color: 'var(--bg-primary)',
+                        border: 'none',
+                        borderRadius: '6px',
+                        cursor: 'pointer',
+                        fontSize: '14px',
+                        fontWeight: '500'
+                      }}
+                    >
+                      Generate Lesson ({limitExceededInfo.available_tools.lessons.used || 0}/{limitExceededInfo.available_tools.lessons.limit === 'unlimited' ? '∞' : limitExceededInfo.available_tools.lessons.limit} remaining)
+                    </button>
+                  )}
+                  {(!limitExceededInfo.available_tools.game_reviews?.available && !limitExceededInfo.available_tools.lessons?.available) && (
+                    <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: '14px' }}>
+                      No tools available. Upgrade your plan to access more features.
+                    </p>
+                  )}
+                </div>
+              </div>
+            )}
+            
+            {/* Next Step Actions */}
+            <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+              {limitExceededInfo.next_step === 'sign_in' && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setLimitExceededInfo(null);
+                    setShowAuthModal(true);
+                  }}
+                  style={{
+                    flex: 1,
+                    padding: '12px',
+                    background: 'var(--accent-primary)',
+                    color: 'var(--bg-primary)',
+                    border: 'none',
+                    borderRadius: '6px',
+                    cursor: 'pointer',
+                    fontSize: '14px',
+                    fontWeight: '600'
+                  }}
+                >
+                  Sign In / Sign Up
+                </button>
+              )}
+              {limitExceededInfo.next_step === 'upgrade_lite' && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setLimitExceededInfo(null);
+                    setShowHistory(true);
+                    setOpenSettingsNonce((n) => n + 1);
+                  }}
+                  style={{
+                    flex: 1,
+                    padding: '12px',
+                    background: 'var(--accent-primary)',
+                    color: 'var(--bg-primary)',
+                    border: 'none',
+                    borderRadius: '6px',
+                    cursor: 'pointer',
+                    fontSize: '14px',
+                    fontWeight: '600'
+                  }}
+                >
+                  Upgrade to Lite
+                </button>
+              )}
+              {limitExceededInfo.next_step === 'upgrade' && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setLimitExceededInfo(null);
+                    setShowHistory(true);
+                    setOpenSettingsNonce((n) => n + 1);
+                  }}
+                  style={{
+                    flex: 1,
+                    padding: '12px',
+                    background: 'var(--accent-primary)',
+                    color: 'var(--bg-primary)',
+                    border: 'none',
+                    borderRadius: '6px',
+                    cursor: 'pointer',
+                    fontSize: '14px',
+                    fontWeight: '600'
+                  }}
+                >
+                  View Plans
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => setLimitExceededInfo(null)}
+                style={{
+                  flex: 1,
+                  padding: '12px',
+                  background: 'transparent',
+                  color: 'var(--text-primary)',
+                  border: '1px solid var(--border-color)',
+                  borderRadius: '6px',
+                  cursor: 'pointer',
+                  fontSize: '14px',
+                  fontWeight: '500'
+                }}
+              >
+                Continue Conversation
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {showDevTools && (
@@ -13252,7 +13470,6 @@ Provide 2-3 sentences of natural language commentary explaining why this deviati
 
       <HistoryCurtain
         open={showHistory}
-        openSettingsNonce={openSettingsNonce}
         onClose={() => setShowHistory(false)}
         onSelectThread={(threadId) => {
           setCurrentThreadId(threadId);

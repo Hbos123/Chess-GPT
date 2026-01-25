@@ -3974,7 +3974,7 @@ async def llm_chat(request: LLMRequest):
 # ============================================================================
 
 @app.post("/llm_chat_stream")
-async def llm_chat_stream(request: LLMRequest):
+async def llm_chat_stream(request: LLMRequest, http_request: Request):
     """
     SSE streaming version of /llm_chat.
     Sends status updates in real-time as the system processes the request.
@@ -3990,6 +3990,10 @@ async def llm_chat_stream(request: LLMRequest):
             
             user_messages = [m for m in request.messages if m.get('role') == 'user']
             last_user_message = user_messages[-1].get('content', '') if user_messages else ""
+            
+            # Get user info for rate limiting
+            user_id = context.get("user_id") or context.get("profile", {}).get("user_id")
+            ip_address = http_request.client.host if http_request else None
             
             # Helper to send SSE event
             def send_event(event_type: str, data: dict):
@@ -4031,6 +4035,65 @@ async def llm_chat_stream(request: LLMRequest):
             
             # Collect all status messages for final response
             all_status_messages = []
+            
+            # Check message and token limits
+            limit_exceeded = False
+            limit_info = {}
+            available_tools = {}
+            
+            if supabase_client:
+                try:
+                    # Get subscription info
+                    if user_id:
+                        tier_info = supabase_client.get_subscription_overview(user_id)
+                    else:
+                        # Anonymous user - default to unpaid (1 message/day)
+                        tier_info = {"tier_id": "unpaid", "tier": {"daily_messages": 1, "daily_tokens": 15000, "max_game_reviews_per_day": 0, "max_lessons_per_day": 0}}
+                    
+                    # Check message limit
+                    msg_allowed, msg_error, msg_info = supabase_client.check_message_limit(user_id, ip_address, tier_info)
+                    if not msg_allowed:
+                        limit_exceeded = True
+                        limit_info = {
+                            "type": "message_limit",
+                            "message": msg_error,
+                            "usage": msg_info,
+                            "next_step": msg_info.get("next_step", "upgrade")
+                        }
+                    
+                    # Check token limit (estimate ~5k tokens for a typical request)
+                    if not limit_exceeded:
+                        token_allowed, token_error, token_info = supabase_client.check_token_limit(
+                            user_id, ip_address, tier_info, estimated_tokens=5000
+                        )
+                        if not token_allowed:
+                            limit_exceeded = True
+                            available_tools = token_info.get("available_tools", {})
+                            limit_info = {
+                                "type": "token_limit",
+                                "message": token_error,
+                                "usage": token_info,
+                                "next_step": token_info.get("next_step", "upgrade"),
+                                "available_tools": available_tools
+                            }
+                except Exception as e:
+                    print(f"   ⚠️ Rate limit check failed: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    # Continue anyway - don't block on rate limit errors
+            
+            # Send limit exceeded event if needed (but continue conversation)
+            if limit_exceeded:
+                async for event in send_status_event_flushed("limit_exceeded", {
+                    "type": limit_info.get("type"),
+                    "message": limit_info.get("message"),
+                    "usage": limit_info.get("usage"),
+                    "next_step": limit_info.get("next_step"),
+                    "available_tools": available_tools,
+                    "timestamp": _time.time()
+                }):
+                    yield event
+                # Continue with conversation - don't block, just notify
             
             # ============================================================
             # PHASE 1: INTERPRETATION

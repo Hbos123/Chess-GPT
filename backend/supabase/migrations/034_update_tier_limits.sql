@@ -33,4 +33,12 @@ SET
   max_game_reviews_per_day = NULL  -- unlimited
 WHERE id = 'full';
 
--- Unpaid tier stays the same (3 messages, 15k tokens, no storage/lessons/reviews)
+-- Update Unpaid tier: 2 messages/day for signed-in users
+UPDATE public.subscription_tiers 
+SET 
+  daily_messages = 2,
+  daily_tokens = 15000,
+  max_games_storage = 0,
+  max_lessons_per_day = 0,
+  max_game_reviews_per_day = 0
+WHERE id = 'unpaid';
