@@ -6330,6 +6330,110 @@ async def billing_portal(payload: BillingPortalPayload):
         raise HTTPException(status_code=500, detail=f"Failed to create billing portal session: {str(e)}")
 
 
+@app.post("/stripe/create-checkout")
+async def create_checkout(payload: CheckoutPayload):
+    """
+    Create a Stripe Checkout session for subscription.
+    Uses product_id to find the default price.
+    """
+    if not supabase_client:
+        raise HTTPException(status_code=503, detail="Supabase client not initialized")
+
+    stripe_secret = os.getenv("STRIPE_SECRET_KEY")
+    if not stripe_secret:
+        raise HTTPException(status_code=500, detail="STRIPE_SECRET_KEY not set on backend")
+
+    try:
+        import stripe  # type: ignore
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Stripe library not available: {str(e)}")
+
+    stripe.api_key = stripe_secret
+
+    # Get the default price for this product
+    try:
+        product = stripe.Product.retrieve(payload.product_id)
+        # Get prices for this product
+        prices = stripe.Price.list(product=payload.product_id, limit=1, active=True)
+        if not prices.data:
+            raise HTTPException(status_code=400, detail=f"No active price found for product {payload.product_id}")
+        price_id = prices.data[0].id
+        print(f"[CHECKOUT] Using price {price_id} for product {payload.product_id}")
+    except stripe.error.StripeError as e:
+        raise HTTPException(status_code=400, detail=f"Invalid product ID: {str(e)}")
+
+    # Get or create Stripe customer
+    stripe_customer_id = await asyncio.to_thread(supabase_client.get_stripe_customer_id, payload.user_id)
+    
+    # If no customer, create one
+    if not stripe_customer_id:
+        user_email = payload.user_email
+        if not user_email:
+            # Try to get from API
+            try:
+                import requests
+                supabase_url = os.getenv("SUPABASE_URL")
+                service_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+                
+                if supabase_url and service_key:
+                    headers = {
+                        "apikey": service_key,
+                        "Authorization": f"Bearer {service_key}",
+                    }
+                    user_response = requests.get(
+                        f"{supabase_url}/auth/v1/admin/users/{payload.user_id}",
+                        headers=headers,
+                        timeout=10,
+                    )
+                    if user_response.status_code == 200:
+                        user_data = user_response.json()
+                        user_email = user_data.get("email")
+            except Exception as e:
+                print(f"[CHECKOUT] Error getting user email: {e}")
+        
+        if user_email:
+            try:
+                customer = stripe.Customer.create(
+                    email=user_email,
+                    metadata={"user_id": payload.user_id},
+                )
+                stripe_customer_id = customer.id
+                await asyncio.to_thread(
+                    supabase_client.upsert_user_subscription,
+                    user_id=payload.user_id,
+                    stripe_customer_id=stripe_customer_id,
+                )
+                print(f"[CHECKOUT] Created Stripe customer {stripe_customer_id}")
+            except Exception as e:
+                raise HTTPException(status_code=500, detail=f"Failed to create customer: {str(e)}")
+        else:
+            raise HTTPException(status_code=400, detail="Email required to create checkout session")
+
+    return_url = (
+        payload.return_url
+        or os.getenv("FRONTEND_URL")
+        or os.getenv("NEXT_PUBLIC_FRONTEND_URL")
+        or "https://chesster.ai"
+    )
+
+    try:
+        session = stripe.checkout.Session.create(
+            customer=stripe_customer_id,
+            line_items=[{"price": price_id, "quantity": 1}],
+            mode="subscription",
+            success_url=f"{return_url}/settings?success=true",
+            cancel_url=f"{return_url}/settings?canceled=true",
+            metadata={"user_id": payload.user_id},
+        )
+        print(f"[CHECKOUT] Created checkout session for customer {stripe_customer_id}")
+        return {"url": session.url}
+    except Exception as e:
+        print(f"[CHECKOUT] Error creating checkout session: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Failed to create checkout session: {str(e)}")
+
+
 @app.get("/debug/stripe-customer")
 async def debug_stripe_customer(user_id: str):
     """

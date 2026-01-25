@@ -1475,43 +1475,114 @@ export default function HistoryCurtain({
             </div>
           )}
 
-          {/* Stripe Subscription - Uses backend billing portal */}
+          {/* Subscription Tiers */}
           <div className="stripe-pricing-table-container">
-            <button
-              type="button"
-              onClick={handleSubscribe}
-              disabled={!userId}
-              style={{
-                width: '100%',
-                padding: '16px',
-                background: userId ? 'var(--accent-primary)' : 'var(--bg-secondary)',
-                color: userId ? 'var(--bg-primary)' : 'var(--text-secondary)',
-                border: 'none',
-                borderRadius: 'var(--radius-md)',
-                cursor: userId ? 'pointer' : 'not-allowed',
-                fontSize: '16px',
-                fontWeight: '600',
-                transition: 'background 0.2s',
-                opacity: userId ? 1 : 0.6,
-              }}
-              onMouseEnter={(e) => {
-                if (userId) {
-                  e.currentTarget.style.background = 'var(--accent-hover)';
-                }
-              }}
-              onMouseLeave={(e) => {
-                if (userId) {
-                  e.currentTarget.style.background = 'var(--accent-primary)';
-                }
-              }}
-            >
-              {userId ? 'View Pricing & Subscribe' : 'Sign in to Subscribe'}
-            </button>
-            <p className="settings-note" style={{ marginTop: 12, textAlign: 'center' }}>
-              {userId 
-                ? 'Opens billing portal where you can subscribe or manage your subscription'
-                : 'Please sign in first to view pricing and subscribe'}
-            </p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              <div style={{ padding: '20px', border: '1px solid var(--border-color)', borderRadius: '8px', background: 'var(--bg-secondary)' }}>
+                <h3 style={{ margin: '0 0 8px 0', fontSize: '18px', fontWeight: '600' }}>Lite</h3>
+                <p style={{ margin: '0 0 16px 0', color: 'var(--text-secondary)', fontSize: '14px' }}>Perfect for casual players</p>
+                <button
+                  type="button"
+                  onClick={() => handleSubscribe('prod_TqH4CqNKemJjTi')}
+                  disabled={!userId}
+                  style={{
+                    width: '100%',
+                    padding: '12px',
+                    background: userId ? 'var(--accent-primary)' : 'var(--bg-secondary)',
+                    color: userId ? 'var(--bg-primary)' : 'var(--text-secondary)',
+                    border: 'none',
+                    borderRadius: '6px',
+                    cursor: userId ? 'pointer' : 'not-allowed',
+                    fontSize: '14px',
+                    fontWeight: '600',
+                    transition: 'background 0.2s',
+                    opacity: userId ? 1 : 0.6,
+                  }}
+                  onMouseEnter={(e) => {
+                    if (userId) {
+                      e.currentTarget.style.background = 'var(--accent-hover)';
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    if (userId) {
+                      e.currentTarget.style.background = 'var(--accent-primary)';
+                    }
+                  }}
+                >
+                  {userId ? 'Subscribe to Lite' : 'Sign in to Subscribe'}
+                </button>
+              </div>
+              
+              <div style={{ padding: '20px', border: '1px solid var(--border-color)', borderRadius: '8px', background: 'var(--bg-secondary)' }}>
+                <h3 style={{ margin: '0 0 8px 0', fontSize: '18px', fontWeight: '600' }}>Starter</h3>
+                <p style={{ margin: '0 0 16px 0', color: 'var(--text-secondary)', fontSize: '14px' }}>For serious players</p>
+                <button
+                  type="button"
+                  onClick={() => handleSubscribe('prod_TqH4m9kERqeESC')}
+                  disabled={!userId}
+                  style={{
+                    width: '100%',
+                    padding: '12px',
+                    background: userId ? 'var(--accent-primary)' : 'var(--bg-secondary)',
+                    color: userId ? 'var(--bg-primary)' : 'var(--text-secondary)',
+                    border: 'none',
+                    borderRadius: '6px',
+                    cursor: userId ? 'pointer' : 'not-allowed',
+                    fontSize: '14px',
+                    fontWeight: '600',
+                    transition: 'background 0.2s',
+                    opacity: userId ? 1 : 0.6,
+                  }}
+                  onMouseEnter={(e) => {
+                    if (userId) {
+                      e.currentTarget.style.background = 'var(--accent-hover)';
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    if (userId) {
+                      e.currentTarget.style.background = 'var(--accent-primary)';
+                    }
+                  }}
+                >
+                  {userId ? 'Subscribe to Starter' : 'Sign in to Subscribe'}
+                </button>
+              </div>
+              
+              <div style={{ padding: '20px', border: '1px solid var(--border-color)', borderRadius: '8px', background: 'var(--bg-secondary)' }}>
+                <h3 style={{ margin: '0 0 8px 0', fontSize: '18px', fontWeight: '600' }}>Full</h3>
+                <p style={{ margin: '0 0 16px 0', color: 'var(--text-secondary)', fontSize: '14px' }}>Unlimited access</p>
+                <button
+                  type="button"
+                  onClick={() => handleSubscribe('prod_TqH5itxYTmQls0')}
+                  disabled={!userId}
+                  style={{
+                    width: '100%',
+                    padding: '12px',
+                    background: userId ? 'var(--accent-primary)' : 'var(--bg-secondary)',
+                    color: userId ? 'var(--bg-primary)' : 'var(--text-secondary)',
+                    border: 'none',
+                    borderRadius: '6px',
+                    cursor: userId ? 'pointer' : 'not-allowed',
+                    fontSize: '14px',
+                    fontWeight: '600',
+                    transition: 'background 0.2s',
+                    opacity: userId ? 1 : 0.6,
+                  }}
+                  onMouseEnter={(e) => {
+                    if (userId) {
+                      e.currentTarget.style.background = 'var(--accent-hover)';
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    if (userId) {
+                      e.currentTarget.style.background = 'var(--accent-primary)';
+                    }
+                  }}
+                >
+                  {userId ? 'Subscribe to Full' : 'Sign in to Subscribe'}
+                </button>
+              </div>
+            </div>
           </div>
         </fieldset>
       </form>
