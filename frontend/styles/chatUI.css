@@ -1208,6 +1208,8 @@
   -webkit-overflow-scrolling: touch;
   scroll-behavior: auto; /* No smooth scroll - avoids jank */
   padding: 16px; /* Consistent internal padding */
+  /* Leave space for overlay composer so the last message never goes under it */
+  padding-bottom: calc(16px + var(--bottom-composer-overlay-reserve) + env(safe-area-inset-bottom));
   box-sizing: border-box;
 }
 
