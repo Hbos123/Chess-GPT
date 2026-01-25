@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, type MouseEvent } from 'react';
-import { signInWithGoogle, signInWithApple, signInWithMagicLink, signInWithPassword, signUpWithPassword } from '@/lib/supabase';
+import { signInWithGoogle, signInWithApple, signInWithPassword, signUpWithPassword } from '@/lib/supabase';
 
 interface AuthModalProps {
   onClose?: () => void;
@@ -9,7 +9,7 @@ interface AuthModalProps {
 
 export default function AuthModal({ onClose }: AuthModalProps) {
   const [mode, setMode] = useState<'signin' | 'signup'>('signin');
-  const [method, setMethod] = useState<'password' | 'magic' | 'oauth'>('password');
+  const [method, setMethod] = useState<'password' | 'oauth'>('password');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [username, setUsername] = useState('');
@@ -55,26 +55,6 @@ export default function AuthModal({ onClose }: AuthModalProps) {
     } finally {
       setLoading(false);
     }
-  };
-
-  const handleMagicLink = async () => {
-    if (!email) {
-      setError('Please enter your email');
-      return;
-    }
-
-    setLoading(true);
-    setError('');
-    
-    const { error } = await signInWithMagicLink(email);
-    
-    if (error) {
-      setError(friendlyAuthError(error.message));
-    } else {
-      setSuccess('Check your email for the magic link!');
-    }
-    
-    setLoading(false);
   };
 
   const handlePasswordAuth = async () => {
@@ -155,12 +135,6 @@ export default function AuthModal({ onClose }: AuthModalProps) {
               Email + password
             </button>
             <button
-              className={`method-btn ${method === 'magic' ? 'active' : ''}`}
-              onClick={() => setMethod('magic')}
-            >
-              Magic link
-            </button>
-            <button
               className={`method-btn ${method === 'oauth' ? 'active' : ''}`}
               onClick={() => setMethod('oauth')}
             >
@@ -203,27 +177,6 @@ export default function AuthModal({ onClose }: AuthModalProps) {
                 disabled={loading}
               >
                 {loading ? 'Please wait...' : mode === 'signin' ? 'Sign In' : 'Create Account'}
-              </button>
-            </div>
-          )}
-
-          {/* Magic Link */}
-          {method === 'magic' && (
-            <div className="auth-section">
-              <input
-                type="email"
-                placeholder="your@email.com"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="auth-input"
-              />
-              
-              <button
-                className="auth-submit-btn"
-                onClick={handleMagicLink}
-                disabled={loading}
-              >
-                {loading ? 'Sending...' : 'Send Magic Link'}
               </button>
             </div>
           )}
