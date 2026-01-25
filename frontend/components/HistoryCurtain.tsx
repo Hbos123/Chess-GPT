@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, ReactNode } from 'react';
 import type { ProfilePreferences } from './ProfileSetupModal';
 import HabitsDashboard from './HabitsDashboard';
 import { getBackendBase } from "@/lib/backendBase";
+import { createClient } from "@/lib/supabase";
 
 interface Thread {
   id: string;
@@ -273,6 +274,17 @@ export default function HistoryCurtain({
       alert("Sign in to manage your subscription.");
       return;
     }
+    
+    // Get user email from Supabase client
+    let userEmail: string | undefined;
+    try {
+      const supabase = createClient();
+      const { data: { user } } = await supabase.auth.getUser();
+      userEmail = user?.email || undefined;
+    } catch (e) {
+      console.warn("Could not get user email:", e);
+    }
+    
     try {
       const url = `${backendBase.replace(/\/$/, "")}/billing/portal`;
       const res = await fetch(url, {
@@ -280,6 +292,7 @@ export default function HistoryCurtain({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           user_id: userId,
+          user_email: userEmail, // Pass email from frontend
           return_url: typeof window !== "undefined" ? window.location.href : undefined,
         }),
       });
@@ -305,6 +318,7 @@ export default function HistoryCurtain({
 
   const handleSubscribe = async () => {
     // Same as manage subscription - billing portal handles both subscribing and managing
+    // handleManageSubscription already gets email and passes it, so just call it
     await handleManageSubscription();
   };
 

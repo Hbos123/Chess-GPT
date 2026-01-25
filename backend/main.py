@@ -6175,6 +6175,7 @@ async def profile_subscription(user_id: str):
 
 class BillingPortalPayload(BaseModel):
     user_id: str
+    user_email: Optional[str] = None  # Email from frontend (fallback if backend can't get it)
     return_url: Optional[str] = None
 
 
@@ -6205,39 +6206,43 @@ async def billing_portal(payload: BillingPortalPayload):
     
     # If no customer ID, try to find by email or create new customer
     if not stripe_customer_id:
-        # Get user email from Supabase
-        user_email = None
-        try:
-            # Query auth.users via admin API to get email
-            import requests
-            supabase_url = os.getenv("SUPABASE_URL")
-            service_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
-            
-            if not supabase_url or not service_key:
-                print(f"[BILLING_PORTAL] Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY")
-            else:
-                headers = {
-                    "apikey": service_key,
-                    "Authorization": f"Bearer {service_key}",
-                }
-                user_response = requests.get(
-                    f"{supabase_url}/auth/v1/admin/users/{payload.user_id}",
-                    headers=headers,
-                    timeout=10,
-                )
+        # Get user email - prefer passed email from frontend, fallback to API lookup
+        user_email = payload.user_email
+        print(f"[BILLING_PORTAL] Email from frontend: {user_email}")
+        
+        if not user_email:
+            # Try to get from Supabase API (fallback)
+            try:
+                # Query auth.users via admin API to get email
+                import requests
+                supabase_url = os.getenv("SUPABASE_URL")
+                service_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
                 
-                print(f"[BILLING_PORTAL] User lookup response status: {user_response.status_code}")
-                
-                if user_response.status_code == 200:
-                    user_data = user_response.json()
-                    user_email = user_data.get("email")
-                    print(f"[BILLING_PORTAL] Found user email: {user_email}")
+                if not supabase_url or not service_key:
+                    print(f"[BILLING_PORTAL] Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY")
                 else:
-                    print(f"[BILLING_PORTAL] Failed to get user: {user_response.status_code} - {user_response.text}")
-        except Exception as e:
-            print(f"[BILLING_PORTAL] Error getting user email: {e}")
-            import traceback
-            traceback.print_exc()
+                    headers = {
+                        "apikey": service_key,
+                        "Authorization": f"Bearer {service_key}",
+                    }
+                    user_response = requests.get(
+                        f"{supabase_url}/auth/v1/admin/users/{payload.user_id}",
+                        headers=headers,
+                        timeout=10,
+                    )
+                    
+                    print(f"[BILLING_PORTAL] User lookup response status: {user_response.status_code}")
+                    
+                    if user_response.status_code == 200:
+                        user_data = user_response.json()
+                        user_email = user_data.get("email")
+                        print(f"[BILLING_PORTAL] Found user email from API: {user_email}")
+                    else:
+                        print(f"[BILLING_PORTAL] Failed to get user: {user_response.status_code} - {user_response.text}")
+            except Exception as e:
+                print(f"[BILLING_PORTAL] Error getting user email from API: {e}")
+                import traceback
+                traceback.print_exc()
         
         if user_email:
             try:
