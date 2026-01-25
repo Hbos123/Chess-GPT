@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, ReactNode } from 'react';
 import type { ProfilePreferences } from './ProfileSetupModal';
 import HabitsDashboard from './HabitsDashboard';
+import { getBackendBase } from "@/lib/backendBase";
 
 interface Thread {
   id: string;
@@ -154,14 +155,130 @@ export default function HistoryCurtain({
   userId,
 }: HistoryCurtainProps) {
   const user = null; // Auth optional for now
+  const backendBase = getBackendBase();
   const [threads, setThreads] = useState<Thread[]>([]);
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(false);
   const [gameSearch, setGameSearch] = useState('');
   const [expandedTab, setExpandedTab] = useState<'personal' | 'settings' | null>(null);
   const [showSettings, setShowSettings] = useState(false);
+  const [maskUsernamesInUI, setMaskUsernamesInUI] = useState(true);
+  const [interpreterModel, setInterpreterModel] = useState<string>("");
+  const [subscriptionInfo, setSubscriptionInfo] = useState<any>(null);
+  const [subscriptionLoading, setSubscriptionLoading] = useState(false);
+  const [subscriptionError, setSubscriptionError] = useState<string>("");
   const [isRefreshing, setIsRefreshing] = useState(false);
   const refreshInProgressRef = useRef(false);
+
+  const maskUsername = (u?: string | null) => {
+    const s = (u ?? "").trim();
+    if (!s) return "Not set";
+    if (s.length <= 2) return "*".repeat(s.length);
+    const head = s.slice(0, 2);
+    const tail = s.length >= 5 ? s.slice(-2) : "";
+    const stars = "*".repeat(Math.max(2, s.length - head.length - tail.length));
+    return `${head}${stars}${tail}`;
+  };
+
+  const formatDate = (iso?: string | null) => {
+    if (!iso) return "—";
+    try {
+      const d = new Date(iso);
+      if (Number.isNaN(d.getTime())) return "—";
+      return d.toLocaleDateString();
+    } catch {
+      return "—";
+    }
+  };
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const raw = window.localStorage.getItem("cg_mask_usernames");
+      setMaskUsernamesInUI(raw === null ? true : raw === "true");
+    } catch {
+      setMaskUsernamesInUI(true);
+    }
+    try {
+      setInterpreterModel(window.localStorage.getItem("cg_interpreter_model") ?? "");
+    } catch {
+      setInterpreterModel("");
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!showSettings) return;
+    if (!userId) {
+      setSubscriptionInfo(null);
+      setSubscriptionError("Sign in to view subscription details.");
+      return;
+    }
+
+    let cancelled = false;
+    (async () => {
+      setSubscriptionLoading(true);
+      setSubscriptionError("");
+      try {
+        const url = `${backendBase.replace(/\/$/, "")}/profile/subscription?user_id=${encodeURIComponent(userId)}`;
+        const res = await fetch(url);
+        if (!res.ok) throw new Error(await res.text());
+        const data = await res.json();
+        if (!cancelled) setSubscriptionInfo(data);
+      } catch (e: any) {
+        if (!cancelled) setSubscriptionError(e?.message || "Failed to load subscription.");
+      } finally {
+        if (!cancelled) setSubscriptionLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [showSettings, userId, backendBase]);
+
+  const handleSavePrivacyMask = (next: boolean) => {
+    setMaskUsernamesInUI(next);
+    try {
+      window.localStorage.setItem("cg_mask_usernames", next ? "true" : "false");
+    } catch {
+      // ignore
+    }
+  };
+
+  const handleInterpreterModelChange = (next: string) => {
+    setInterpreterModel(next);
+    try {
+      const trimmed = next.trim();
+      if (!trimmed) window.localStorage.removeItem("cg_interpreter_model");
+      else window.localStorage.setItem("cg_interpreter_model", trimmed);
+    } catch {
+      // ignore
+    }
+  };
+
+  const handleManageSubscription = async () => {
+    if (!userId) {
+      alert("Sign in to manage your subscription.");
+      return;
+    }
+    try {
+      const url = `${backendBase.replace(/\/$/, "")}/billing/portal`;
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          user_id: userId,
+          return_url: typeof window !== "undefined" ? window.location.href : undefined,
+        }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      const data = await res.json();
+      if (data?.url) window.open(data.url, "_blank", "noopener,noreferrer");
+      else throw new Error("No portal URL returned.");
+    } catch (e: any) {
+      alert(e?.message || "Failed to open billing portal.");
+    }
+  };
 
   const linkedAccounts = (profilePreferences?.accounts ?? []).map((account, index) => ({
     id: `${account.platform}-${account.username || index}`,
@@ -261,12 +378,19 @@ export default function HistoryCurtain({
     if (!profilePreferences?.accounts?.length) {
       return "Link Chess.com or Lichess usernames to personalise analysis.";
     }
-    return profilePreferences.accounts
-      .map(
-        (acc) =>
-          `${acc.platform === "chesscom" ? "Chess.com" : "Lichess"} · ${acc.username}`
-      )
-      .join(", ");
+    const accounts = profilePreferences.accounts;
+    const counts = accounts.reduce<Record<string, number>>((acc, item) => {
+      const platformRaw = String((item as any).platform || "");
+      const platformLabel =
+        platformRaw === "chesscom" || platformRaw === "chess.com"
+          ? "Chess.com"
+          : "Lichess";
+      acc[platformLabel] = (acc[platformLabel] || 0) + 1;
+      return acc;
+    }, {});
+    return Object.entries(counts)
+      .map(([label, n]) => `${label}: ${n} linked`)
+      .join(" · ");
   };
 
   const formatControls = () => {
@@ -1167,42 +1291,59 @@ export default function HistoryCurtain({
 
   const renderSettingsDetail = (): ReactNode => (
     <div className="curtain-content">
-      <form className="settings-form">
+      <form className="settings-form" onSubmit={(e) => e.preventDefault()}>
         <fieldset className="settings-group">
-          <legend>Profile</legend>
-          <label>
-            Display name
-            <input type="text" placeholder="Hugo Bosnic" disabled title="Coming soon" />
-          </label>
-          <label>
-            Contact email
-            <input type="email" placeholder="hugo@example.com" disabled title="Coming soon" />
-          </label>
+          <legend>Privacy</legend>
           <label className="toggle-row">
-            <input type="checkbox" defaultChecked disabled title="Coming soon" />
-            <span>Show welcome tips</span>
+            <input
+              type="checkbox"
+              checked={maskUsernamesInUI}
+              onChange={(e) => handleSavePrivacyMask(e.target.checked)}
+            />
+            <span>Mask usernames in UI (recommended)</span>
           </label>
-          <label className="toggle-row">
-            <input type="checkbox" defaultChecked disabled title="Coming soon" />
-            <span>Auto-flip board to my color</span>
+          <p className="settings-note">
+            Helps keep screenshots share-safe by masking your linked usernames throughout the app.
+          </p>
+        </fieldset>
+
+        <fieldset className="settings-group">
+          <legend>AI</legend>
+          <label>
+            Interpreter model override
+            <input
+              type="text"
+              value={interpreterModel}
+              onChange={(e) => handleInterpreterModelChange(e.target.value)}
+              placeholder='e.g. gpt-5-nano (leave blank for default)'
+            />
           </label>
+          <p className="settings-note">
+            Leave blank to use the backend default. This setting affects how requests are interpreted before tools run.
+          </p>
         </fieldset>
 
         <fieldset className="settings-group">
           <legend>Chess accounts</legend>
           <p className="settings-note">
-            To link your chess accounts, use the "Personal" tab above and click "Edit profile setup".
+            To link your chess accounts, use the “Personal” area and click “Edit profile setup”.
           </p>
           {profilePreferences?.accounts && profilePreferences.accounts.length > 0 ? (
             <div className="linked-accounts-list">
-              {profilePreferences.accounts.map((acc, idx) => (
-                <div key={idx} className="linked-account-item">
-                  <span className="account-platform">
-                    {acc.platform === "chesscom" ? "Chess.com" : "Lichess"}
-                  </span>
-                  <span className="account-username">{acc.username || "Not set"}</span>
-                </div>
-              ))}
+              {profilePreferences.accounts.map((acc, idx) => {
+                const platformRaw = String((acc as any).platform || "");
+                const platformLabel =
+                  platformRaw === "chesscom" || platformRaw === "chess.com"
+                    ? "Chess.com"
+                    : "Lichess";
+                const usernameLabel = maskUsernamesInUI ? maskUsername(acc.username) : (acc.username || "Not set");
+                return (
+                  <div key={idx} className="linked-account-item">
+                    <span className="account-platform">{platformLabel}</span>
+                    <span className="account-username">{usernameLabel}</span>
+                  </div>
+                );
+              })}
             </div>
           ) : (
             <p className="settings-empty">No accounts linked yet.</p>
@@ -1210,27 +1351,44 @@ export default function HistoryCurtain({
         </fieldset>
 
         <fieldset className="settings-group">
-          <legend>Defaults</legend>
-          <label>
-            Default mode
-            <select disabled title="Coming soon">
-              <option>Discuss</option>
-              <option>Analyze</option>
-              <option>Play</option>
-            </select>
-          </label>
-          <label>
-            Engine strength
-            <select disabled title="Coming soon">
-              <option>Adaptive</option>
-              <option>Club (1800)</option>
-              <option>Expert (2200)</option>
-            </select>
-          </label>
-          <label className="toggle-row">
-            <input type="checkbox" disabled title="Coming soon" />
-            <span>Confirm moves before sending</span>
-          </label>
+          <legend>Subscription</legend>
+
+          {!userId && <p className="settings-empty">Sign in to view your subscription.</p>}
+          {userId && subscriptionLoading && <p className="settings-empty">Loading subscription…</p>}
+          {userId && !subscriptionLoading && subscriptionError && (
+            <p className="settings-empty">{subscriptionError}</p>
+          )}
+
+          {userId && !subscriptionLoading && !subscriptionError && subscriptionInfo && (
+            <>
+              <div className="linked-accounts-list">
+                <div className="linked-account-item">
+                  <span className="account-platform">Plan</span>
+                  <span className="account-username">
+                    {subscriptionInfo?.tier?.name ?? subscriptionInfo?.tier_id ?? "Unpaid"}
+                  </span>
+                </div>
+                <div className="linked-account-item">
+                  <span className="account-platform">Status</span>
+                  <span className="account-username">{subscriptionInfo?.status ?? "unknown"}</span>
+                </div>
+                <div className="linked-account-item">
+                  <span className="account-platform">Renews</span>
+                  <span className="account-username">{formatDate(subscriptionInfo?.current_period_end)}</span>
+                </div>
+              </div>
+
+              <div className="account-button-row" style={{ marginTop: 12 }}>
+                <button type="button" onClick={handleManageSubscription}>
+                  Manage subscription
+                </button>
+              </div>
+
+              <p className="settings-note">
+                Billing, invoices, and cancellations are handled in the Stripe customer portal.
+              </p>
+            </>
+          )}
         </fieldset>
       </form>
     </div>

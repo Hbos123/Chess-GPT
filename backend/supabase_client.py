@@ -70,6 +70,85 @@ class SupabaseClient:
         except Exception as e:
             print(f"Error updating profile: {e}")
             return False
+
+    # ============================================================================
+    # SUBSCRIPTIONS
+    # ============================================================================
+
+    def get_subscription_overview(self, user_id: str) -> Dict[str, Any]:
+        """
+        Fetch a user's subscription + tier details.
+
+        Returns a JSON-serializable dict like:
+          {
+            "tier_id": "starter",
+            "status": "active",
+            "current_period_end": "2026-01-01T00:00:00Z",
+            "stripe_customer_id": "cus_...",
+            "tier": { ...subscription_tiers... }
+          }
+        """
+        try:
+            # PostgREST embedded relationship (FK: user_subscriptions.tier_id -> subscription_tiers.id)
+            result = (
+                self.client.table("user_subscriptions")
+                .select(
+                    "tier_id,status,current_period_start,current_period_end,stripe_customer_id,stripe_subscription_id,"
+                    "subscription_tiers(id,name,daily_messages,daily_tokens,max_games_storage,max_lessons_per_day,max_game_reviews_per_day)"
+                )
+                .eq("user_id", user_id)
+                .limit(1)
+                .execute()
+            )
+
+            row = (result.data[0] if result.data else None) or None
+            if not row:
+                return {
+                    "tier_id": "unpaid",
+                    "status": "inactive",
+                    "current_period_start": None,
+                    "current_period_end": None,
+                    "stripe_customer_id": None,
+                    "stripe_subscription_id": None,
+                    "tier": {"id": "unpaid", "name": "Unpaid"},
+                }
+
+            return {
+                "tier_id": row.get("tier_id"),
+                "status": row.get("status"),
+                "current_period_start": row.get("current_period_start"),
+                "current_period_end": row.get("current_period_end"),
+                "stripe_customer_id": row.get("stripe_customer_id"),
+                "stripe_subscription_id": row.get("stripe_subscription_id"),
+                "tier": row.get("subscription_tiers"),
+            }
+        except Exception as e:
+            print(f"[subscriptions] get_subscription_overview error: {e}")
+            return {
+                "tier_id": "unpaid",
+                "status": "error",
+                "current_period_start": None,
+                "current_period_end": None,
+                "stripe_customer_id": None,
+                "stripe_subscription_id": None,
+                "tier": {"id": "unpaid", "name": "Unpaid"},
+            }
+
+    def get_stripe_customer_id(self, user_id: str) -> Optional[str]:
+        try:
+            result = (
+                self.client.table("user_subscriptions")
+                .select("stripe_customer_id")
+                .eq("user_id", user_id)
+                .limit(1)
+                .execute()
+            )
+            if not result.data:
+                return None
+            return (result.data[0] or {}).get("stripe_customer_id")
+        except Exception as e:
+            print(f"[subscriptions] get_stripe_customer_id error: {e}")
+            return None
     
     # ============================================================================
     # GAMES

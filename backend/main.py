@@ -4797,10 +4797,10 @@ async def llm_chat_stream(request: LLMRequest):
                     
                     # Generate annotations (will use extracted_tags if available)
                     annotations = parse_response_for_annotations(
-                        llm_response=cleaned_content,
-                        cached_analysis=cached_analysis,
-                        fen=fen,
-                        explicit_tags=extracted_tags if extracted_tags else None,
+                        cleaned_content, 
+                        fen, 
+                        cached_analysis,
+                        explicit_tags=extracted_tags if extracted_tags else None
                     )
                     print(f"🔍 [DOWNSTREAM_FLOW] Annotations generated")
                     print(f"   annotations (full): {json.dumps(annotations, default=str, indent=2)}")
@@ -6143,6 +6143,62 @@ async def get_profile_preferences(user_id: str):
         raise HTTPException(status_code=503, detail="Profile indexer not initialized")
     prefs = profile_indexer.load_preferences(user_id) or {}
     return {"preferences": prefs}
+
+
+@app.get("/profile/subscription")
+async def profile_subscription(user_id: str):
+    """
+    Lightweight subscription overview for Settings UI.
+    """
+    if not supabase_client:
+        raise HTTPException(status_code=503, detail="Supabase client not initialized")
+    try:
+        data = await asyncio.to_thread(supabase_client.get_subscription_overview, user_id)
+        return data
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch subscription: {str(e)}")
+
+
+class BillingPortalPayload(BaseModel):
+    user_id: str
+    return_url: Optional[str] = None
+
+
+@app.post("/billing/portal")
+async def billing_portal(payload: BillingPortalPayload):
+    """
+    Create a Stripe Billing Portal session for the current user.
+    """
+    if not supabase_client:
+        raise HTTPException(status_code=503, detail="Supabase client not initialized")
+
+    stripe_customer_id = await asyncio.to_thread(supabase_client.get_stripe_customer_id, payload.user_id)
+    if not stripe_customer_id:
+        raise HTTPException(status_code=400, detail="No Stripe customer on file for this user")
+
+    stripe_secret = os.getenv("STRIPE_SECRET_KEY")
+    if not stripe_secret:
+        raise HTTPException(status_code=500, detail="STRIPE_SECRET_KEY not set on backend")
+
+    try:
+        import stripe  # type: ignore
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Stripe library not available: {str(e)}")
+
+    stripe.api_key = stripe_secret
+
+    return_url = (
+        payload.return_url
+        or os.getenv("FRONTEND_URL")
+        or os.getenv("NEXT_PUBLIC_FRONTEND_URL")
+        or "https://chesster.ai"
+    )
+
+    try:
+        session = stripe.billing_portal.Session.create(customer=stripe_customer_id, return_url=return_url)
+        return {"url": session.url}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to create billing portal session: {str(e)}")
 
 
 @app.get("/profile/validate-account")
