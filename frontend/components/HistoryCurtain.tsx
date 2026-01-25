@@ -1402,17 +1402,40 @@ export default function HistoryCurtain({
             </div>
           )}
 
-          {/* Stripe Pricing Table */}
+          {/* Stripe Pricing - Redirect to hosted page */}
           <div className="stripe-pricing-table-container">
-            <iframe
-              src="https://js.stripe.com/v3/pricing-table.html?prctbl_id=prctbl_1StXvW53DYkdTnhRxIV9KyH4&pk=pk_test_51SsUz753DYkdTnhRl7qkQiaJxoEzW6RYiLTnMemeBsBAxTuhKUX8uALcnOcFSFhwXpQict8qnmyusSVIyZ3JcLXR00SitDX3dq"
+            <button
+              type="button"
+              onClick={() => {
+                // Replace with your Stripe hosted pricing page URL
+                // You can create this in Stripe Dashboard → Products → Pricing → Create pricing page
+                const pricingPageUrl = 'https://buy.stripe.com/YOUR_PRICING_PAGE_LINK';
+                window.open(pricingPageUrl, '_blank');
+              }}
               style={{
                 width: '100%',
+                padding: '16px',
+                background: 'var(--accent-primary)',
+                color: 'var(--bg-primary)',
                 border: 'none',
-                minHeight: '400px',
+                borderRadius: 'var(--radius-md)',
+                cursor: 'pointer',
+                fontSize: '16px',
+                fontWeight: '600',
+                transition: 'background 0.2s',
               }}
-              title="Stripe Pricing Table"
-            />
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = 'var(--accent-hover)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = 'var(--accent-primary)';
+              }}
+            >
+              View Pricing & Subscribe
+            </button>
+            <p className="settings-note" style={{ marginTop: 12, textAlign: 'center' }}>
+              Opens Stripe's secure checkout in a new window
+            </p>
           </div>
         </fieldset>
       </form>
