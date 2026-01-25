@@ -80,13 +80,18 @@
    ======================================== */
 
 .app-shell {
-  height: 100dvh;
+  /* Dynamic height that accounts for safe-area padding to prevent overflow */
+  /* Subtract top padding from height so total (height + padding) = 100dvh */
+  height: calc(100dvh - max(env(safe-area-inset-top, 0px), 12px));
+  min-height: 0; /* Allow flex children to shrink */
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  /* Safe area support */
-  padding-top: max(env(safe-area-inset-top), 12px); /* fallback for iOS when env() returns 0 */
+  /* Safe area support - padding is accounted for in height calc above */
+  padding-top: max(env(safe-area-inset-top, 0px), 12px); /* fallback for iOS when env() returns 0 */
   padding-bottom: 0; /* Let bottom-composer handle bottom safe area */
+  /* Ensure box-sizing includes padding in height calculation */
+  box-sizing: border-box;
 }
 
 /* ========================================
