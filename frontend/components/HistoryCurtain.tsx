@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, ReactNode } from 'react';
 import type { ProfilePreferences } from './ProfileSetupModal';
 import HabitsDashboard from './HabitsDashboard';
 import { getBackendBase } from "@/lib/backendBase";
-import { createClient } from "@/lib/supabase";
+import { supabase } from "@/lib/supabase";
 
 interface Thread {
   id: string;
@@ -278,7 +278,6 @@ export default function HistoryCurtain({
     // Get user email from Supabase client
     let userEmail: string | undefined;
     try {
-      const supabase = createClient();
       const { data: { user } } = await supabase.auth.getUser();
       userEmail = user?.email || undefined;
     } catch (e) {
