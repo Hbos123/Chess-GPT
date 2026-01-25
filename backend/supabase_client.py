@@ -3,7 +3,7 @@ Supabase Client for Chess GPT
 Handles all database operations with Supabase
 """
 
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 from supabase import create_client, Client
 import os
 from datetime import datetime
@@ -252,6 +252,119 @@ class SupabaseClient:
             print(f"[subscriptions] upsert_user_subscription error: {e}")
             traceback.print_exc()
             return False
+
+    def check_and_increment_usage(
+        self, 
+        user_id: Optional[str], 
+        ip_address: Optional[str],
+        resource_type: str,  # 'game_review' or 'lesson'
+        tier_info: Dict[str, Any]
+    ) -> Tuple[bool, str, Dict[str, Any]]:
+        """
+        Check if user can use a resource and increment counter if allowed.
+        
+        Args:
+            user_id: User ID (optional, for authenticated users)
+            ip_address: IP address (optional, for anonymous users)
+            resource_type: 'game_review' or 'lesson'
+            tier_info: Subscription tier info from get_subscription_overview()
+        
+        Returns:
+            (allowed: bool, message: str, usage_info: dict)
+        """
+        if not user_id and not ip_address:
+            return False, "Authentication required", {}
+        
+        # Get tier limits
+        tier = tier_info.get("tier", {})
+        max_per_day = None
+        if resource_type == "game_review":
+            max_per_day = tier.get("max_game_reviews_per_day")
+        elif resource_type == "lesson":
+            max_per_day = tier.get("max_lessons_per_day")
+        
+        # Check if feature is available for unpaid users
+        tier_id = tier_info.get("tier_id", "unpaid")
+        if tier_id == "unpaid" and max_per_day == 0:
+            return False, "This feature is not available for unpaid users. Please upgrade to a paid plan.", {}
+        
+        # Unlimited for Full tier (max_per_day is None)
+        if max_per_day is None:
+            # Increment counter but allow
+            self._increment_daily_usage(user_id, ip_address, resource_type)
+            return True, "", {"used": 0, "limit": "unlimited"}
+        
+        # Get current usage
+        today = datetime.now().date()
+        usage = self._get_daily_usage(user_id, ip_address, today)
+        
+        count_field = "game_reviews_count" if resource_type == "game_review" else "lessons_count"
+        current_count = usage.get(count_field, 0) if usage else 0
+        
+        if current_count >= max_per_day:
+            return False, f"Daily limit exceeded. You've used {current_count}/{max_per_day} {resource_type}s today. Limit resets at midnight.", {
+                "used": current_count,
+                "limit": max_per_day
+            }
+        
+        # Increment and allow
+        self._increment_daily_usage(user_id, ip_address, resource_type)
+        return True, "", {
+            "used": current_count + 1,
+            "limit": max_per_day
+        }
+
+    def _get_daily_usage(self, user_id: Optional[str], ip_address: Optional[str], date) -> Optional[Dict]:
+        """Get today's usage record"""
+        try:
+            query = self.client.table("daily_usage")
+            if user_id:
+                query = query.eq("user_id", user_id)
+            else:
+                query = query.eq("ip_address", ip_address)
+            query = query.eq("usage_date", date.isoformat())
+            
+            result = query.execute()
+            return result.data[0] if result.data else None
+        except Exception as e:
+            print(f"[daily_usage] Error getting usage: {e}")
+            return None
+
+    def _increment_daily_usage(self, user_id: Optional[str], ip_address: Optional[str], resource_type: str):
+        """Increment daily usage counter"""
+        try:
+            today = datetime.now().date()
+            count_field = "game_reviews_count" if resource_type == "game_review" else "lessons_count"
+            
+            # Try to get existing record
+            query = self.client.table("daily_usage")
+            if user_id:
+                query = query.eq("user_id", user_id)
+            else:
+                query = query.eq("ip_address", ip_address)
+            query = query.eq("usage_date", today.isoformat())
+            
+            result = query.select("*").execute()
+            
+            if result.data:
+                # Update existing
+                current = result.data[0].get(count_field, 0)
+                query.update({count_field: current + 1}).execute()
+            else:
+                # Create new record
+                data = {
+                    "usage_date": today.isoformat(),
+                    count_field: 1
+                }
+                if user_id:
+                    data["user_id"] = user_id
+                else:
+                    data["ip_address"] = ip_address
+                
+                self.client.table("daily_usage").insert(data).execute()
+        except Exception as e:
+            print(f"[daily_usage] Error incrementing usage: {e}")
+            traceback.print_exc()
     
     # ============================================================================
     # GAMES

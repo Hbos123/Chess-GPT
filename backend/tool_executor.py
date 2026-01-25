@@ -235,7 +235,7 @@ class ToolExecutor:
             elif tool_name == "analyze_move":
                 return await self._analyze_move(arguments, context)
             elif tool_name == "review_full_game":
-                return await self._review_full_game(arguments, status_callback)
+                return await self._review_full_game(arguments, status_callback, context)
             elif tool_name == "fetch_and_review_games":
                 return await self._fetch_and_review_games(arguments, status_callback, context)
             elif tool_name == "select_games":
@@ -572,11 +572,44 @@ class ToolExecutor:
         except Exception as e:
             return {"error": f"tree_search error: {str(e)}"}
     
-    async def _review_full_game(self, args: Dict, status_callback = None) -> Dict:
-        """Review complete game"""
+    async def _review_full_game(self, args: Dict, status_callback = None, context: Dict = None) -> Dict:
+        """Review complete game with rate limiting"""
         pgn = args.get("pgn")
         if not pgn:
             return {"error": "No PGN provided"}
+        
+        # Get user_id from context
+        user_id = None
+        if context:
+            user_id = context.get("user_id") or context.get("profile", {}).get("user_id")
+        
+        # Get IP address for anonymous users
+        ip_address = context.get("ip_address") if context else None
+        
+        # Check subscription and rate limits
+        if self.supabase_client and (user_id or ip_address):
+            try:
+                if user_id:
+                    tier_info = self.supabase_client.get_subscription_overview(user_id)
+                else:
+                    # Anonymous user - default to unpaid
+                    tier_info = {"tier_id": "unpaid", "tier": {"max_game_reviews_per_day": 0}}
+                
+                allowed, message, usage_info = self.supabase_client.check_and_increment_usage(
+                    user_id, ip_address, "game_review", tier_info
+                )
+                
+                if not allowed:
+                    return {
+                        "error": message,
+                        "rate_limit_info": usage_info,
+                        "suggestion": "Upgrade your plan to increase your daily limit."
+                    }
+            except Exception as e:
+                print(f"   ⚠️ Rate limit check failed: {e}")
+                import traceback
+                traceback.print_exc()
+                # Continue anyway - don't block on rate limit errors
         
         side_focus = args.get("side_focus", "both")
         depth = args.get("depth", 14)  # Fast for overview - deep analysis on-demand
@@ -1554,12 +1587,32 @@ Return ONLY valid JSON in this exact format:
             return {"error": f"Failed to generate lesson: {str(e)}"}
 
     async def _generate_opening_lesson(self, args: Dict, context: Optional[Dict]) -> Dict:
-        """Route to backend personalized opening lesson builder."""
+        """Route to backend personalized opening lesson builder with rate limiting."""
         user_id = args.get("user_id")
         if not user_id and context:
             user_id = context.get("user_id") or context.get("profile", {}).get("user_id")
         if not user_id:
             return {"error": "User authentication required for opening lessons."}
+
+        # Check subscription and rate limits
+        if self.supabase_client:
+            try:
+                tier_info = self.supabase_client.get_subscription_overview(user_id)
+                allowed, message, usage_info = self.supabase_client.check_and_increment_usage(
+                    user_id, None, "lesson", tier_info
+                )
+                
+                if not allowed:
+                    return {
+                        "error": message,
+                        "rate_limit_info": usage_info,
+                        "suggestion": "Upgrade your plan to increase your daily limit."
+                    }
+            except Exception as e:
+                print(f"   ⚠️ Rate limit check failed: {e}")
+                import traceback
+                traceback.print_exc()
+                # Continue anyway - don't block on rate limit errors
 
         payload = {
             "user_id": user_id,

@@ -1543,7 +1543,15 @@ export default function HistoryCurtain({
                   </div>
                 )}
                 <h3 style={{ margin: '0 0 8px 0', fontSize: '18px', fontWeight: '600' }}>Lite</h3>
-                <p style={{ margin: '0 0 16px 0', color: 'var(--text-secondary)', fontSize: '14px' }}>Perfect for casual players</p>
+                <p style={{ margin: '0 0 12px 0', color: 'var(--text-secondary)', fontSize: '14px' }}>Perfect for casual players</p>
+                <div style={{ marginBottom: '16px', fontSize: '12px', color: 'var(--text-secondary)', lineHeight: '1.6' }}>
+                  <div>1.29M tokens/month (~$1 USD)</div>
+                  <div>15 messages/day</div>
+                  <div>Game reviews: 1 per day</div>
+                  <div>Lessons: 1 per day</div>
+                  <div>Storage: 5 games</div>
+                  <div style={{ marginTop: '4px', fontWeight: '600', color: 'var(--text-primary)' }}>$1.99 USD/month</div>
+                </div>
                 <button
                   type="button"
                   onClick={() => handleSubscribe('prod_TqH4CqNKemJjTi')}
@@ -1602,7 +1610,15 @@ export default function HistoryCurtain({
                   </div>
                 )}
                 <h3 style={{ margin: '0 0 8px 0', fontSize: '18px', fontWeight: '600' }}>Starter</h3>
-                <p style={{ margin: '0 0 16px 0', color: 'var(--text-secondary)', fontSize: '14px' }}>For serious players</p>
+                <p style={{ margin: '0 0 12px 0', color: 'var(--text-secondary)', fontSize: '14px' }}>For serious players</p>
+                <div style={{ marginBottom: '16px', fontSize: '12px', color: 'var(--text-secondary)', lineHeight: '1.6' }}>
+                  <div>5.8M tokens/month (~$4.50 USD)</div>
+                  <div>65 messages/day</div>
+                  <div>Game reviews: 5 per day</div>
+                  <div>Lessons: 5 per day</div>
+                  <div>Storage: 40 games</div>
+                  <div style={{ marginTop: '4px', fontWeight: '600', color: 'var(--text-primary)' }}>$5.99 USD/month</div>
+                </div>
                 <button
                   type="button"
                   onClick={() => handleSubscribe('prod_TqH4m9kERqeESC')}
@@ -1661,7 +1677,15 @@ export default function HistoryCurtain({
                   </div>
                 )}
                 <h3 style={{ margin: '0 0 8px 0', fontSize: '18px', fontWeight: '600' }}>Full</h3>
-                <p style={{ margin: '0 0 16px 0', color: 'var(--text-secondary)', fontSize: '14px' }}>Unlimited access</p>
+                <p style={{ margin: '0 0 12px 0', color: 'var(--text-secondary)', fontSize: '14px' }}>Unlimited access</p>
+                <div style={{ marginBottom: '16px', fontSize: '12px', color: 'var(--text-secondary)', lineHeight: '1.6' }}>
+                  <div>11.6M tokens/month (~$9 USD)</div>
+                  <div>130 messages/day</div>
+                  <div>Game reviews: Unlimited</div>
+                  <div>Lessons: Unlimited</div>
+                  <div>Storage: 400 games</div>
+                  <div style={{ marginTop: '4px', fontWeight: '600', color: 'var(--text-primary)' }}>$11.99 USD/month</div>
+                </div>
                 <button
                   type="button"
                   onClick={() => handleSubscribe('prod_TqH5itxYTmQls0')}
