@@ -6325,13 +6325,18 @@ async def debug_stripe_customer(user_id: str):
     # Get customer ID from Supabase
     customer_id = await asyncio.to_thread(supabase_client.get_stripe_customer_id, user_id)
     
-    # Get user email
+    # Get user email with better error handling
     import requests
     supabase_url = os.getenv("SUPABASE_URL")
     service_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
     user_email = None
+    email_lookup_error = None
     
-    if supabase_url and service_key:
+    if not supabase_url:
+        email_lookup_error = "SUPABASE_URL not set"
+    elif not service_key:
+        email_lookup_error = "SUPABASE_SERVICE_ROLE_KEY not set"
+    else:
         headers = {
             "apikey": service_key,
             "Authorization": f"Bearer {service_key}",
@@ -6343,9 +6348,12 @@ async def debug_stripe_customer(user_id: str):
                 timeout=10,
             )
             if user_response.status_code == 200:
-                user_email = user_response.json().get("email")
+                user_data = user_response.json()
+                user_email = user_data.get("email")
+            else:
+                email_lookup_error = f"HTTP {user_response.status_code}: {user_response.text[:200]}"
         except Exception as e:
-            return {"error": f"Failed to get user email: {str(e)}"}
+            email_lookup_error = f"Request failed: {str(e)}"
     
     # Search Stripe for customers with this email
     stripe_customers_by_email = []
@@ -6374,9 +6382,15 @@ async def debug_stripe_customer(user_id: str):
     return {
         "user_id": user_id,
         "user_email": user_email,
+        "email_lookup_error": email_lookup_error,
         "supabase_customer_id": customer_id,
         "stripe_customers_by_email": stripe_customers_by_email,
         "subscription_info": subscription_info,
+        "env_check": {
+            "has_supabase_url": bool(supabase_url),
+            "has_service_key": bool(service_key),
+            "has_stripe_key": bool(stripe_secret),
+        },
     }
 
 

@@ -1404,9 +1404,14 @@ export default function HistoryCurtain({
 
           {/* Stripe Pricing Table */}
           <div className="stripe-pricing-table-container">
-            <stripe-pricing-table
-              pricing-table-id="prctbl_1StXvW53DYkdTnhRxIV9KyH4"
-              publishable-key="pk_test_51SsUz753DYkdTnhRl7qkQiaJxoEzW6RYiLTnMemeBsBAxTuhKUX8uALcnOcFSFhwXpQict8qnmyusSVIyZ3JcLXR00SitDX3dq"
+            <iframe
+              src="https://js.stripe.com/v3/pricing-table.html?prctbl_id=prctbl_1StXvW53DYkdTnhRxIV9KyH4&pk=pk_test_51SsUz753DYkdTnhRl7qkQiaJxoEzW6RYiLTnMemeBsBAxTuhKUX8uALcnOcFSFhwXpQict8qnmyusSVIyZ3JcLXR00SitDX3dq"
+              style={{
+                width: '100%',
+                border: 'none',
+                minHeight: '400px',
+              }}
+              title="Stripe Pricing Table"
             />
           </div>
         </fieldset>
