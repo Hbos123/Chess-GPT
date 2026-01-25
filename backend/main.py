@@ -6201,17 +6201,21 @@ async def billing_portal(payload: BillingPortalPayload):
 
     # Get existing Stripe customer ID
     stripe_customer_id = await asyncio.to_thread(supabase_client.get_stripe_customer_id, payload.user_id)
+    print(f"[BILLING_PORTAL] User {payload.user_id} - Existing customer ID: {stripe_customer_id}")
     
     # If no customer ID, try to find by email or create new customer
     if not stripe_customer_id:
         # Get user email from Supabase
+        user_email = None
         try:
             # Query auth.users via admin API to get email
             import requests
             supabase_url = os.getenv("SUPABASE_URL")
             service_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
             
-            if supabase_url and service_key:
+            if not supabase_url or not service_key:
+                print(f"[BILLING_PORTAL] Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY")
+            else:
                 headers = {
                     "apikey": service_key,
                     "Authorization": f"Bearer {service_key}",
@@ -6219,48 +6223,66 @@ async def billing_portal(payload: BillingPortalPayload):
                 user_response = requests.get(
                     f"{supabase_url}/auth/v1/admin/users/{payload.user_id}",
                     headers=headers,
+                    timeout=10,
                 )
+                
+                print(f"[BILLING_PORTAL] User lookup response status: {user_response.status_code}")
                 
                 if user_response.status_code == 200:
                     user_data = user_response.json()
                     user_email = user_data.get("email")
-                    
-                    if user_email:
-                        # Try to find existing Stripe customer by email
-                        customers = stripe.Customer.list(email=user_email, limit=1)
-                        if customers.data and len(customers.data) > 0:
-                            stripe_customer_id = customers.data[0].id
-                            # Link it to the user
-                            await asyncio.to_thread(
-                                supabase_client.upsert_user_subscription,
-                                user_id=payload.user_id,
-                                stripe_customer_id=stripe_customer_id,
-                            )
-                            print(f"[BILLING_PORTAL] Linked existing Stripe customer {stripe_customer_id} to user {payload.user_id}")
-                        else:
-                            # Create new Stripe customer
-                            customer = stripe.Customer.create(
-                                email=user_email,
-                                metadata={"user_id": payload.user_id},
-                            )
-                            stripe_customer_id = customer.id
-                            # Link it to the user
-                            await asyncio.to_thread(
-                                supabase_client.upsert_user_subscription,
-                                user_id=payload.user_id,
-                                stripe_customer_id=stripe_customer_id,
-                            )
-                            print(f"[BILLING_PORTAL] Created new Stripe customer {stripe_customer_id} for user {payload.user_id}")
+                    print(f"[BILLING_PORTAL] Found user email: {user_email}")
+                else:
+                    print(f"[BILLING_PORTAL] Failed to get user: {user_response.status_code} - {user_response.text}")
         except Exception as e:
-            print(f"[BILLING_PORTAL] Error finding/creating Stripe customer: {e}")
+            print(f"[BILLING_PORTAL] Error getting user email: {e}")
             import traceback
             traceback.print_exc()
+        
+        if user_email:
+            try:
+                # Try to find existing Stripe customer by email
+                print(f"[BILLING_PORTAL] Searching for Stripe customer with email: {user_email}")
+                customers = stripe.Customer.list(email=user_email, limit=10)  # Get more to see all matches
+                print(f"[BILLING_PORTAL] Found {len(customers.data)} Stripe customer(s) with email {user_email}")
+                
+                if customers.data and len(customers.data) > 0:
+                    # Use the first one (most recent)
+                    stripe_customer_id = customers.data[0].id
+                    print(f"[BILLING_PORTAL] Using customer: {stripe_customer_id}")
+                    
+                    # Check if this customer has any subscriptions
+                    subscriptions = stripe.Subscription.list(customer=stripe_customer_id, limit=10)
+                    print(f"[BILLING_PORTAL] Customer has {len(subscriptions.data)} subscription(s)")
+                    
+                    # Link it to the user
+                    await asyncio.to_thread(
+                        supabase_client.upsert_user_subscription,
+                        user_id=payload.user_id,
+                        stripe_customer_id=stripe_customer_id,
+                    )
+                    print(f"[BILLING_PORTAL] ✅ Linked existing Stripe customer {stripe_customer_id} to user {payload.user_id}")
+                else:
+                    # No customer found - check if user has any subscriptions at all (maybe different email)
+                    print(f"[BILLING_PORTAL] No Stripe customer found with email {user_email}")
+                    # Don't create a new customer here - they need to subscribe first
+            except Exception as e:
+                print(f"[BILLING_PORTAL] Error searching/creating Stripe customer: {e}")
+                import traceback
+                traceback.print_exc()
+        else:
+            print(f"[BILLING_PORTAL] Could not get user email for {payload.user_id}")
     
     if not stripe_customer_id:
-        raise HTTPException(
-            status_code=400,
-            detail="No Stripe customer on file for this user. Please subscribe first via the pricing table."
+        # Provide more helpful error message
+        error_detail = (
+            "No Stripe customer found for this user. "
+            "This usually means:\n"
+            "1. You haven't subscribed yet - please use the pricing table to subscribe first\n"
+            "2. The webhook hasn't synced your subscription yet - wait a few moments and try again\n"
+            "3. Your Stripe email doesn't match your account email - contact support"
         )
+        raise HTTPException(status_code=400, detail=error_detail)
 
     return_url = (
         payload.return_url
@@ -6271,8 +6293,12 @@ async def billing_portal(payload: BillingPortalPayload):
 
     try:
         session = stripe.billing_portal.Session.create(customer=stripe_customer_id, return_url=return_url)
+        print(f"[BILLING_PORTAL] ✅ Created billing portal session for customer {stripe_customer_id}")
         return {"url": session.url}
     except Exception as e:
+        print(f"[BILLING_PORTAL] ❌ Failed to create billing portal session: {e}")
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Failed to create billing portal session: {str(e)}")
 
 
