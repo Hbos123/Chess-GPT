@@ -6182,13 +6182,11 @@ class BillingPortalPayload(BaseModel):
 async def billing_portal(payload: BillingPortalPayload):
     """
     Create a Stripe Billing Portal session for the current user.
+    
+    If no Stripe customer is linked, attempts to find one by email or create a new customer.
     """
     if not supabase_client:
         raise HTTPException(status_code=503, detail="Supabase client not initialized")
-
-    stripe_customer_id = await asyncio.to_thread(supabase_client.get_stripe_customer_id, payload.user_id)
-    if not stripe_customer_id:
-        raise HTTPException(status_code=400, detail="No Stripe customer on file for this user")
 
     stripe_secret = os.getenv("STRIPE_SECRET_KEY")
     if not stripe_secret:
@@ -6200,6 +6198,69 @@ async def billing_portal(payload: BillingPortalPayload):
         raise HTTPException(status_code=500, detail=f"Stripe library not available: {str(e)}")
 
     stripe.api_key = stripe_secret
+
+    # Get existing Stripe customer ID
+    stripe_customer_id = await asyncio.to_thread(supabase_client.get_stripe_customer_id, payload.user_id)
+    
+    # If no customer ID, try to find by email or create new customer
+    if not stripe_customer_id:
+        # Get user email from Supabase
+        try:
+            # Query auth.users via admin API to get email
+            import requests
+            supabase_url = os.getenv("SUPABASE_URL")
+            service_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+            
+            if supabase_url and service_key:
+                headers = {
+                    "apikey": service_key,
+                    "Authorization": f"Bearer {service_key}",
+                }
+                user_response = requests.get(
+                    f"{supabase_url}/auth/v1/admin/users/{payload.user_id}",
+                    headers=headers,
+                )
+                
+                if user_response.status_code == 200:
+                    user_data = user_response.json()
+                    user_email = user_data.get("email")
+                    
+                    if user_email:
+                        # Try to find existing Stripe customer by email
+                        customers = stripe.Customer.list(email=user_email, limit=1)
+                        if customers.data and len(customers.data) > 0:
+                            stripe_customer_id = customers.data[0].id
+                            # Link it to the user
+                            await asyncio.to_thread(
+                                supabase_client.upsert_user_subscription,
+                                user_id=payload.user_id,
+                                stripe_customer_id=stripe_customer_id,
+                            )
+                            print(f"[BILLING_PORTAL] Linked existing Stripe customer {stripe_customer_id} to user {payload.user_id}")
+                        else:
+                            # Create new Stripe customer
+                            customer = stripe.Customer.create(
+                                email=user_email,
+                                metadata={"user_id": payload.user_id},
+                            )
+                            stripe_customer_id = customer.id
+                            # Link it to the user
+                            await asyncio.to_thread(
+                                supabase_client.upsert_user_subscription,
+                                user_id=payload.user_id,
+                                stripe_customer_id=stripe_customer_id,
+                            )
+                            print(f"[BILLING_PORTAL] Created new Stripe customer {stripe_customer_id} for user {payload.user_id}")
+        except Exception as e:
+            print(f"[BILLING_PORTAL] Error finding/creating Stripe customer: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    if not stripe_customer_id:
+        raise HTTPException(
+            status_code=400,
+            detail="No Stripe customer on file for this user. Please subscribe first via the pricing table."
+        )
 
     return_url = (
         payload.return_url
@@ -6213,6 +6274,278 @@ async def billing_portal(payload: BillingPortalPayload):
         return {"url": session.url}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to create billing portal session: {str(e)}")
+
+
+@app.post("/webhooks/stripe")
+async def stripe_webhook(request: Request):
+    """
+    Handle Stripe webhook events to sync subscription data to Supabase.
+    
+    Events handled:
+    - checkout.session.completed: When a user completes checkout
+    - customer.subscription.created: When a subscription is created
+    - customer.subscription.updated: When a subscription changes
+    - customer.subscription.deleted: When a subscription is canceled
+    """
+    if not supabase_client:
+        raise HTTPException(status_code=503, detail="Supabase client not initialized")
+
+    stripe_secret = os.getenv("STRIPE_SECRET_KEY")
+    if not stripe_secret:
+        raise HTTPException(status_code=500, detail="STRIPE_SECRET_KEY not set on backend")
+
+    try:
+        import stripe  # type: ignore
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Stripe library not available: {str(e)}")
+
+    stripe.api_key = stripe_secret
+    webhook_secret = os.getenv("STRIPE_WEBHOOK_SECRET")
+    
+    # Get the raw body and signature
+    body = await request.body()
+    sig_header = request.headers.get("stripe-signature")
+    
+    if not sig_header:
+        raise HTTPException(status_code=400, detail="Missing stripe-signature header")
+    
+    try:
+        if webhook_secret:
+            event = stripe.Webhook.construct_event(body, sig_header, webhook_secret)
+        else:
+            # If no webhook secret, parse without verification (not recommended for production)
+            import json
+            event = json.loads(body)
+            print("⚠️  WARNING: Processing Stripe webhook without signature verification")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=f"Invalid payload: {str(e)}")
+    except stripe.error.SignatureVerificationError as e:
+        raise HTTPException(status_code=400, detail=f"Invalid signature: {str(e)}")
+
+    event_type = event.get("type")
+    event_data = event.get("data", {}).get("object", {})
+    
+    print(f"[STRIPE_WEBHOOK] Received event: {event_type}")
+    
+    try:
+        if event_type == "checkout.session.completed":
+            # User completed checkout - create subscription record
+            customer_id = event_data.get("customer")
+            subscription_id = event_data.get("subscription")
+            customer_email = event_data.get("customer_email") or event_data.get("customer_details", {}).get("email")
+            
+            if not customer_id:
+                print(f"[STRIPE_WEBHOOK] No customer_id in checkout.session.completed")
+                return {"status": "ok", "message": "No customer_id"}
+            
+            # Get customer details from Stripe
+            customer = stripe.Customer.retrieve(customer_id)
+            customer_email = customer_email or customer.get("email")
+            
+            if not customer_email:
+                print(f"[STRIPE_WEBHOOK] No email found for customer {customer_id}")
+                return {"status": "ok", "message": "No email found"}
+            
+            # Find user by email - try to get from auth.users via admin API
+            # Since we can't directly query auth.users, we'll use the customer email
+            # and store it in metadata or query via a function
+            # For now, we'll try to find user via profiles or use customer metadata
+            user_id = None
+            
+            # Check if customer has metadata with user_id
+            if customer.get("metadata", {}).get("user_id"):
+                user_id = customer.metadata.get("user_id")
+            else:
+                # Try to find user by email using Supabase admin API
+                print(f"[STRIPE_WEBHOOK] No user_id in metadata, looking up user by email: {customer_email}")
+                user_id = await asyncio.to_thread(supabase_client.get_user_by_email, customer_email)
+                
+                if not user_id:
+                    print(f"[STRIPE_WEBHOOK] Could not find user with email {customer_email}")
+                    # Store customer_id temporarily - we'll link it when user signs in
+                    # For now, return success but log the issue
+                    return {"status": "ok", "message": f"No user found for email {customer_email}, customer {customer_id} needs manual linking"}
+            
+            # Get subscription details if available
+            subscription_data = {}
+            if subscription_id:
+                subscription = stripe.Subscription.retrieve(subscription_id)
+                price_id = subscription.get("items", {}).get("data", [{}])[0].get("price", {}).get("id")
+                
+                # Map Stripe price_id to tier_id
+                # You'll need to configure this mapping based on your Stripe price IDs
+                tier_id = "unpaid"  # Default
+                if price_id:
+                    # Query subscription_tiers to find matching stripe_price_id
+                    try:
+                        tier_result = (
+                            supabase_client.client.table("subscription_tiers")
+                            .select("id")
+                            .eq("stripe_price_id", price_id)
+                            .limit(1)
+                            .execute()
+                        )
+                        if tier_result.data and len(tier_result.data) > 0:
+                            tier_id = tier_result.data[0].get("id")
+                    except Exception as e:
+                        print(f"[STRIPE_WEBHOOK] Error mapping price_id to tier: {e}")
+                
+                subscription_data = {
+                    "stripe_subscription_id": subscription_id,
+                    "tier_id": tier_id,
+                    "status": subscription.get("status", "active"),
+                    "current_period_start": datetime.fromtimestamp(subscription.get("current_period_start", 0)).isoformat() if subscription.get("current_period_start") else None,
+                    "current_period_end": datetime.fromtimestamp(subscription.get("current_period_end", 0)).isoformat() if subscription.get("current_period_end") else None,
+                }
+            
+            # Upsert subscription record
+            await asyncio.to_thread(
+                supabase_client.upsert_user_subscription,
+                user_id=user_id,
+                stripe_customer_id=customer_id,
+                **subscription_data,
+            )
+            
+            print(f"[STRIPE_WEBHOOK] Created subscription for user {user_id}, customer {customer_id}")
+            
+        elif event_type == "customer.subscription.created":
+            # Subscription was created
+            subscription = event_data
+            customer_id = subscription.get("customer")
+            subscription_id = subscription.get("id")
+            price_id = subscription.get("items", {}).get("data", [{}])[0].get("price", {}).get("id")
+            
+            # Get customer to find user_id
+            customer = stripe.Customer.retrieve(customer_id)
+            user_id = customer.get("metadata", {}).get("user_id")
+            
+            if not user_id:
+                # Try to find user by email
+                customer_email = customer.get("email")
+                if customer_email:
+                    print(f"[STRIPE_WEBHOOK] No user_id in metadata, looking up user by email: {customer_email}")
+                    user_id = await asyncio.to_thread(supabase_client.get_user_by_email, customer_email)
+            
+            if not user_id:
+                print(f"[STRIPE_WEBHOOK] No user_id found for subscription {subscription_id}, customer {customer_id}")
+                return {"status": "ok", "message": "No user_id found"}
+            
+            # Map price_id to tier_id
+            tier_id = "unpaid"
+            if price_id:
+                try:
+                    tier_result = (
+                        supabase_client.client.table("subscription_tiers")
+                        .select("id")
+                        .eq("stripe_price_id", price_id)
+                        .limit(1)
+                        .execute()
+                    )
+                    if tier_result.data and len(tier_result.data) > 0:
+                        tier_id = tier_result.data[0].get("id")
+                except Exception as e:
+                    print(f"[STRIPE_WEBHOOK] Error mapping price_id to tier: {e}")
+            
+            await asyncio.to_thread(
+                supabase_client.upsert_user_subscription,
+                user_id=user_id,
+                stripe_customer_id=customer_id,
+                stripe_subscription_id=subscription_id,
+                tier_id=tier_id,
+                status=subscription.get("status", "active"),
+                current_period_start=datetime.fromtimestamp(subscription.get("current_period_start", 0)).isoformat() if subscription.get("current_period_start") else None,
+                current_period_end=datetime.fromtimestamp(subscription.get("current_period_end", 0)).isoformat() if subscription.get("current_period_end") else None,
+            )
+            
+            print(f"[STRIPE_WEBHOOK] Created subscription record for user {user_id}")
+            
+        elif event_type == "customer.subscription.updated":
+            # Subscription was updated (e.g., plan change, status change)
+            subscription = event_data
+            customer_id = subscription.get("customer")
+            subscription_id = subscription.get("id")
+            
+            customer = stripe.Customer.retrieve(customer_id)
+            user_id = customer.get("metadata", {}).get("user_id")
+            
+            if not user_id:
+                # Try to find user by email
+                customer_email = customer.get("email")
+                if customer_email:
+                    print(f"[STRIPE_WEBHOOK] No user_id in metadata, looking up user by email: {customer_email}")
+                    user_id = await asyncio.to_thread(supabase_client.get_user_by_email, customer_email)
+            
+            if not user_id:
+                print(f"[STRIPE_WEBHOOK] No user_id found for subscription {subscription_id}, customer {customer_id}")
+                return {"status": "ok", "message": "No user_id found"}
+            
+            price_id = subscription.get("items", {}).get("data", [{}])[0].get("price", {}).get("id")
+            tier_id = None
+            if price_id:
+                try:
+                    tier_result = (
+                        supabase_client.client.table("subscription_tiers")
+                        .select("id")
+                        .eq("stripe_price_id", price_id)
+                        .limit(1)
+                        .execute()
+                    )
+                    if tier_result.data and len(tier_result.data) > 0:
+                        tier_id = tier_result.data[0].get("id")
+                except Exception as e:
+                    print(f"[STRIPE_WEBHOOK] Error mapping price_id to tier: {e}")
+            
+            await asyncio.to_thread(
+                supabase_client.upsert_user_subscription,
+                user_id=user_id,
+                stripe_customer_id=customer_id,
+                stripe_subscription_id=subscription_id,
+                tier_id=tier_id,
+                status=subscription.get("status"),
+                current_period_start=datetime.fromtimestamp(subscription.get("current_period_start", 0)).isoformat() if subscription.get("current_period_start") else None,
+                current_period_end=datetime.fromtimestamp(subscription.get("current_period_end", 0)).isoformat() if subscription.get("current_period_end") else None,
+            )
+            
+            print(f"[STRIPE_WEBHOOK] Updated subscription for user {user_id}")
+            
+        elif event_type == "customer.subscription.deleted":
+            # Subscription was canceled
+            subscription = event_data
+            customer_id = subscription.get("customer")
+            subscription_id = subscription.get("id")
+            
+            customer = stripe.Customer.retrieve(customer_id)
+            user_id = customer.get("metadata", {}).get("user_id")
+            
+            if not user_id:
+                # Try to find user by email
+                customer_email = customer.get("email")
+                if customer_email:
+                    print(f"[STRIPE_WEBHOOK] No user_id in metadata, looking up user by email: {customer_email}")
+                    user_id = await asyncio.to_thread(supabase_client.get_user_by_email, customer_email)
+            
+            if not user_id:
+                print(f"[STRIPE_WEBHOOK] No user_id found for subscription {subscription_id}, customer {customer_id}")
+                return {"status": "ok", "message": "No user_id found"}
+            
+            await asyncio.to_thread(
+                supabase_client.upsert_user_subscription,
+                user_id=user_id,
+                stripe_customer_id=customer_id,
+                stripe_subscription_id=subscription_id,
+                status="canceled",
+                current_period_end=datetime.fromtimestamp(subscription.get("current_period_end", 0)).isoformat() if subscription.get("current_period_end") else None,
+            )
+            
+            print(f"[STRIPE_WEBHOOK] Marked subscription as canceled for user {user_id}")
+        
+        return {"status": "ok"}
+        
+    except Exception as e:
+        print(f"[STRIPE_WEBHOOK] Error processing webhook: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Webhook processing error: {str(e)}")
 
 
 @app.get("/profile/validate-account")

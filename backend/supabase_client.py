@@ -149,6 +149,109 @@ class SupabaseClient:
         except Exception as e:
             print(f"[subscriptions] get_stripe_customer_id error: {e}")
             return None
+
+    def get_user_by_email(self, email: str) -> Optional[str]:
+        """
+        Get Supabase user ID by email address.
+        Uses Supabase Admin API to query auth.users.
+        """
+        try:
+            # Use Supabase Admin API to query auth.users
+            # The service role key allows us to access auth.users
+            import requests
+            
+            supabase_url = os.getenv("SUPABASE_URL") or self.client.supabase_url
+            service_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+            
+            if not service_key:
+                print("[subscriptions] SUPABASE_SERVICE_ROLE_KEY not set, cannot query auth.users")
+                return None
+            
+            # Query auth.users via Admin API
+            headers = {
+                "apikey": service_key,
+                "Authorization": f"Bearer {service_key}",
+                "Content-Type": "application/json",
+            }
+            
+            # List users and filter by email
+            response = requests.get(
+                f"{supabase_url}/auth/v1/admin/users",
+                headers=headers,
+                params={"email": email},
+            )
+            
+            if response.status_code == 200:
+                users = response.json().get("users", [])
+                if users and len(users) > 0:
+                    return users[0].get("id")
+            
+            return None
+        except Exception as e:
+            print(f"[subscriptions] get_user_by_email error: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
+
+    def upsert_user_subscription(
+        self,
+        user_id: str,
+        stripe_customer_id: str,
+        stripe_subscription_id: Optional[str] = None,
+        tier_id: Optional[str] = None,
+        status: Optional[str] = None,
+        current_period_start: Optional[str] = None,
+        current_period_end: Optional[str] = None,
+    ) -> bool:
+        """
+        Create or update user subscription record with Stripe data.
+        
+        Args:
+            user_id: Supabase user ID
+            stripe_customer_id: Stripe customer ID
+            stripe_subscription_id: Stripe subscription ID (optional)
+            tier_id: Subscription tier ID (optional, will try to infer from Stripe if not provided)
+            status: Subscription status (optional)
+            current_period_start: Period start timestamp (optional)
+            current_period_end: Period end timestamp (optional)
+        """
+        try:
+            # Build update data
+            update_data: Dict[str, Any] = {
+                "stripe_customer_id": stripe_customer_id,
+                "updated_at": datetime.utcnow().isoformat(),
+            }
+            
+            if stripe_subscription_id:
+                update_data["stripe_subscription_id"] = stripe_subscription_id
+            if tier_id:
+                update_data["tier_id"] = tier_id
+            if status:
+                update_data["status"] = status
+            if current_period_start:
+                update_data["current_period_start"] = current_period_start
+            if current_period_end:
+                update_data["current_period_end"] = current_period_end
+
+            # Upsert (insert or update)
+            result = (
+                self.client.table("user_subscriptions")
+                .upsert(
+                    {
+                        "user_id": user_id,
+                        **update_data,
+                    },
+                    on_conflict="user_id",
+                )
+                .execute()
+            )
+            
+            print(f"[subscriptions] Upserted subscription for user {user_id}: {update_data}")
+            return True
+        except Exception as e:
+            print(f"[subscriptions] upsert_user_subscription error: {e}")
+            traceback.print_exc()
+            return False
     
     # ============================================================================
     # GAMES
