@@ -1991,7 +1991,9 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
   const theme = "night" as const;
   const [currentThreadId, setCurrentThreadId] = useState<string | null>(null);
   type LayoutSizes = { board: number; load: number; chat: number };
-  const defaultLayoutSizes: LayoutSizes = { board: 0.275, load: 0.2, chat: 0.525 };
+  // Default layout tuned so when the board is open, board/chat splits ~75%/25%
+  // (boardFraction = board / (board + chat) = 0.6 / 0.8 = 0.75)
+  const defaultLayoutSizes: LayoutSizes = { board: 0.6, load: 0.2, chat: 0.2 };
   const [layoutSizes, setLayoutSizes] = useState<LayoutSizes>(defaultLayoutSizes);
   
   // Load layout sizes from localStorage on client only to avoid hydration mismatch
@@ -2006,7 +2008,15 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
           typeof parsed?.load === "number" &&
           typeof parsed?.chat === "number"
         ) {
-          setLayoutSizes(parsed);
+          // If an older saved layout makes the board too narrow, migrate to the new 75/25 default.
+          // (boardFraction = board / (board + chat))
+          const denom = (parsed.board + parsed.chat) || 0;
+          const boardFraction = denom > 0 ? (parsed.board / denom) : 0;
+          if (boardFraction > 0 && boardFraction < 0.6) {
+            setLayoutSizes(defaultLayoutSizes);
+          } else {
+            setLayoutSizes(parsed);
+          }
         }
       }
     } catch (err) {
@@ -2234,7 +2244,8 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
 
   useEffect(() => {
     if (!dragState) return;
-    const MIN = { board: 0.18, load: 0.12, chat: 0.22 };
+    // Keep chat panel from shrinking too far; when board is open we want >=25% chat
+    const MIN = { board: 0.18, load: 0.12, chat: 0.2 };
     const handleMove = (event: PointerEvent | MouseEvent) => {
       if (!layoutRef.current) return;
       const axis = dragState.axis;
@@ -4812,35 +4823,13 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
         // Check if we have direct arrows/highlights
         if (backendAnnotations.arrows?.length || backendAnnotations.highlights?.length) {
           console.log('📍 Using backend annotations (direct):', backendAnnotations);
-
-          // Normalize backend shapes to what Board expects
-          // - highlights: backend may use { square }, Board expects { sq }
-          // - arrows: backend may use { from_square/to_square }, Board expects { from/to }
-          const normalizedHighlights = (backendAnnotations.highlights || [])
-            .map((h: any) => ({
-              sq: h?.sq || h?.square,
-              color: h?.color,
-              type: h?.type,
-            }))
-            .filter((h: any) => Boolean(h.sq));
-
-          const normalizedArrows = (backendAnnotations.arrows || [])
-            .map((a: any) => ({
-              from: a?.from || a?.from_square,
-              to: a?.to || a?.to_square,
-              color: a?.color,
-              type: a?.type,
-            }))
-            .filter((a: any) => Boolean(a.from && a.to));
-
           setAnnotations(prev => ({
             ...prev,
-            arrows: normalizedArrows,
-            highlights: normalizedHighlights,
+            arrows: backendAnnotations.arrows || [],
+            highlights: backendAnnotations.highlights || []
           }));
-
-          if (normalizedArrows.length || normalizedHighlights.length) {
-            addSystemMessage(`📍 Visual annotations applied: ${normalizedArrows.length} arrows, ${normalizedHighlights.length} highlights`);
+          if (backendAnnotations.arrows?.length || backendAnnotations.highlights?.length) {
+            addSystemMessage(`📍 Visual annotations applied: ${backendAnnotations.arrows?.length || 0} arrows, ${backendAnnotations.highlights?.length || 0} highlights`);
           }
           return;
         }
@@ -6068,8 +6057,7 @@ If they ask about the game, refer to this data.
       console.log('🔍 [Personal Review Check] result.tool_calls:', result.tool_calls);
       const personalReviewTool = result.tool_calls?.find((tc: any) => tc.tool === 'fetch_and_review_games');
       const hasSelectGamesTool = Array.isArray(result.tool_calls) && result.tool_calls.some((tc: any) => tc?.tool === "select_games");
-      // Backend sends detected_intent as a human summary; use orchestration.mode for machine intent
-      const isGameReviewIntent = result.orchestration?.mode === "review";
+      const isGameReviewIntent = result.detected_intent === "game_review";
       console.log('🔍 [Personal Review Check] personalReviewTool:', personalReviewTool);
       if (personalReviewTool) {
         console.log('🔍 [Personal Review Check] result object:', personalReviewTool.result);
