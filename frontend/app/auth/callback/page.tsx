@@ -32,6 +32,30 @@ function AuthCallbackInner() {
       return;
     }
 
+    // Clear any old localStorage data from previous projects
+    // This ensures we don't have stale data from project resets
+    try {
+      const currentRef = SUPABASE_URL.split("//")[1]?.split(".")[0];
+      if (currentRef) {
+        console.log(`[AuthCallback] Cleaning up old localStorage keys (keeping only ${currentRef})...`);
+        const keys = Object.keys(window.localStorage);
+        let clearedCount = 0;
+        keys.forEach(key => {
+          // Clear any Supabase keys that don't match current project
+          if (key.startsWith('sb-') && !key.startsWith(`sb-${currentRef}-`)) {
+            console.log(`[AuthCallback] Clearing old project key: ${key}`);
+            window.localStorage.removeItem(key);
+            clearedCount++;
+          }
+        });
+        if (clearedCount > 0) {
+          console.log(`[AuthCallback] Cleared ${clearedCount} old localStorage key(s) from previous projects`);
+        }
+      }
+    } catch (e) {
+      console.warn("[AuthCallback] Error clearing old localStorage:", e);
+    }
+
     console.log("[AuthCallback] Checking URL parameters...");
     const errorDescription = searchParams.get("error_description");
     if (errorDescription) {
@@ -225,9 +249,57 @@ function AuthCallbackInner() {
             throw new Error(typeof json === "object" && json ? JSON.stringify(json) : String(text));
           }
 
+          // The token endpoint returns { access_token, refresh_token, expires_in, ... }
+          // But we need to ensure it includes user data for proper session format
+          let sessionData = json;
+          
+          // If the response doesn't have a user field, we need to get it
+          if (!sessionData.user && sessionData.access_token) {
+            console.log("[AuthCallback] Token response missing user, fetching user...");
+            try {
+              const userRes = await fetch(`${supabaseUrl}/auth/v1/user`, {
+                headers: {
+                  apikey: anonKey,
+                  Authorization: `Bearer ${sessionData.access_token}`,
+                },
+              });
+              if (userRes.ok) {
+                const userData = await userRes.json();
+                sessionData = {
+                  ...sessionData,
+                  user: userData,
+                };
+                console.log("[AuthCallback] User data fetched and added to session");
+              } else {
+                console.warn("[AuthCallback] Failed to fetch user, status:", userRes.status);
+              }
+            } catch (userErr) {
+              console.warn("[AuthCallback] Failed to fetch user, continuing with token only:", userErr);
+            }
+          }
+
           // Persist session in the format supabase-js expects in localStorage.
           const supabaseStorageKey = `sb-${supabaseHost}-auth-token`;
-          window.localStorage.setItem(supabaseStorageKey, JSON.stringify(json));
+          
+          // Ensure we have the correct session structure
+          const sessionToStore = {
+            access_token: sessionData.access_token,
+            refresh_token: sessionData.refresh_token,
+            expires_in: sessionData.expires_in,
+            expires_at: sessionData.expires_at || (sessionData.expires_in ? Math.floor(Date.now() / 1000) + sessionData.expires_in : null),
+            token_type: sessionData.token_type || 'bearer',
+            user: sessionData.user,
+          };
+          
+          console.log("[AuthCallback] Storing session to localStorage:", {
+            key: supabaseStorageKey,
+            hasUser: !!sessionToStore.user,
+            hasAccessToken: !!sessionToStore.access_token,
+            hasRefreshToken: !!sessionToStore.refresh_token,
+            expiresAt: sessionToStore.expires_at,
+          });
+          
+          window.localStorage.setItem(supabaseStorageKey, JSON.stringify(sessionToStore));
           // Clean up verifier (optional but reduces future confusion)
           window.localStorage.removeItem(codeVerifierKey);
 
