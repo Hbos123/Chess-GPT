@@ -144,7 +144,7 @@ function AuthCallbackInner() {
           setTimeout(() => {
             console.log("[AuthCallback] Executing redirect");
             window.location.replace("/");
-          }, 200);
+          }, 500); // Increased from 200ms to 500ms to ensure session is fully established
         } else if (event === 'SIGNED_OUT') {
           console.warn("[AuthCallback] SIGNED_OUT event received");
           clearTimeout(timeoutId);
@@ -235,7 +235,7 @@ function AuthCallbackInner() {
           // This MUST be time-bounded because auth-js has been observed to hang in this environment.
           try {
             if (json?.access_token && json?.refresh_token) {
-              const setSessionTimeoutMs = 2000;
+              const setSessionTimeoutMs = 3000; // Increased from 2000ms to allow more time
               console.log("[AuthCallback] Attempting supabase.auth.setSession (best-effort, time-bounded)...");
               await Promise.race([
                 supabase.auth.setSession({
@@ -252,13 +252,16 @@ function AuthCallbackInner() {
             console.warn("[AuthCallback] supabase.auth.setSession failed/timed out (continuing):", e);
           }
 
+          // Force a small delay to ensure localStorage is flushed and session is ready
+          await new Promise(resolve => setTimeout(resolve, 300));
+
           if (!isMounted) return;
           clearTimeout(timeoutId);
           setStatus("success");
           setMessage("Signed in! Redirecting…");
           setTimeout(() => {
             window.location.replace("/");
-          }, 200);
+          }, 500); // Increased from 200ms to 500ms to ensure session is fully established
         } catch (err: any) {
           console.error("[AuthCallback] Direct token exchange failed:", err);
           if (!isMounted) return;
