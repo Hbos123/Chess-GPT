@@ -365,6 +365,20 @@ export default function HistoryCurtain({
     }
   };
 
+  const handleCancelSubscription = async () => {
+    if (!userId) {
+      alert("Sign in to cancel your subscription.");
+      return;
+    }
+    
+    if (!confirm("Are you sure you want to cancel your subscription? You'll continue to have access until the end of your billing period.")) {
+      return;
+    }
+    
+    // Open billing portal where they can cancel
+    await handleManageSubscription();
+  };
+
   const linkedAccounts = (profilePreferences?.accounts ?? []).map((account, index) => ({
     id: `${account.platform}-${account.username || index}`,
     platform: account.platform === 'chesscom' ? 'Chess.com' : 'Lichess',
@@ -1374,220 +1388,345 @@ export default function HistoryCurtain({
     </>
   );
 
-  const renderSettingsDetail = (): ReactNode => (
-    <div className="curtain-content">
-      <form className="settings-form" onSubmit={(e) => e.preventDefault()}>
-        <fieldset className="settings-group">
-          <legend>Privacy</legend>
-          <label className="toggle-row">
-            <input
-              type="checkbox"
-              checked={maskUsernamesInUI}
-              onChange={(e) => handleSavePrivacyMask(e.target.checked)}
-            />
-            <span>Mask usernames in UI (recommended)</span>
-          </label>
-          <p className="settings-note">
-            Helps keep screenshots share-safe by masking your linked usernames throughout the app.
-          </p>
-        </fieldset>
+  const renderSettingsDetail = (): ReactNode => {
+    // Determine current tier
+    const currentTierId = subscriptionInfo?.tier_id || 'unpaid';
+    const isActive = subscriptionInfo?.status === 'active' || subscriptionInfo?.status === 'trialing';
 
-        <fieldset className="settings-group">
-          <legend>AI</legend>
-          <label>
-            Interpreter model override
-            <input
-              type="text"
-              value={interpreterModel}
-              onChange={(e) => handleInterpreterModelChange(e.target.value)}
-              placeholder='e.g. gpt-5-nano (leave blank for default)'
-            />
-          </label>
-          <p className="settings-note">
-            Leave blank to use the backend default. This setting affects how requests are interpreted before tools run.
-          </p>
-        </fieldset>
+    return (
+      <div className="curtain-content">
+        <form className="settings-form" onSubmit={(e) => e.preventDefault()}>
+          {/* Subscription Section - Moved to top */}
+          <fieldset className="settings-group">
+            <legend>Subscription</legend>
 
-        <fieldset className="settings-group">
-          <legend>Chess accounts</legend>
-          <p className="settings-note">
-            To link your chess accounts, use the “Personal” area and click “Edit profile setup”.
-          </p>
-          {profilePreferences?.accounts && profilePreferences.accounts.length > 0 ? (
-            <div className="linked-accounts-list">
-              {profilePreferences.accounts.map((acc, idx) => {
-                const platformRaw = String((acc as any).platform || "");
-                const platformLabel =
-                  platformRaw === "chesscom" || platformRaw === "chess.com"
-                    ? "Chess.com"
-                    : "Lichess";
-                const usernameLabel = maskUsernamesInUI ? maskUsername(acc.username) : (acc.username || "Not set");
-                return (
-                  <div key={idx} className="linked-account-item">
-                    <span className="account-platform">{platformLabel}</span>
-                    <span className="account-username">{usernameLabel}</span>
+            {!userId && <p className="settings-empty">Sign in to view your subscription.</p>}
+            {userId && subscriptionLoading && <p className="settings-empty">Loading subscription…</p>}
+            {userId && !subscriptionLoading && subscriptionError && (
+              <p className="settings-empty">{subscriptionError}</p>
+            )}
+
+            {userId && !subscriptionLoading && !subscriptionError && subscriptionInfo && (
+              <div style={{ marginBottom: 24 }}>
+                {/* Current Subscription Info */}
+                <div style={{ 
+                  padding: '16px', 
+                  background: 'var(--bg-secondary)', 
+                  borderRadius: '8px',
+                  border: '1px solid var(--border-color)',
+                  marginBottom: '20px'
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                    <div>
+                      <div style={{ fontSize: '14px', color: 'var(--text-secondary)', marginBottom: '4px' }}>Current Plan</div>
+                      <div style={{ fontSize: '18px', fontWeight: '600' }}>
+                        {subscriptionInfo?.tier?.name ?? subscriptionInfo?.tier_id ?? "Unpaid"}
+                      </div>
+                    </div>
+                    {isActive && (
+                      <span style={{
+                        padding: '4px 12px',
+                        background: 'var(--accent-primary)',
+                        color: 'var(--bg-primary)',
+                        borderRadius: '12px',
+                        fontSize: '12px',
+                        fontWeight: '600'
+                      }}>
+                        Active
+                      </span>
+                    )}
                   </div>
-                );
-              })}
-            </div>
-          ) : (
-            <p className="settings-empty">No accounts linked yet.</p>
-          )}
-        </fieldset>
-
-        <fieldset className="settings-group">
-          <legend>Subscription</legend>
-
-          {!userId && <p className="settings-empty">Sign in to view your subscription.</p>}
-          {userId && subscriptionLoading && <p className="settings-empty">Loading subscription…</p>}
-          {userId && !subscriptionLoading && subscriptionError && (
-            <p className="settings-empty">{subscriptionError}</p>
-          )}
-
-          {userId && !subscriptionLoading && !subscriptionError && subscriptionInfo && (
-            <div style={{ marginBottom: 24 }}>
-              <div className="linked-accounts-list" style={{ marginBottom: 16 }}>
-                <div className="linked-account-item">
-                  <span className="account-platform">Current Plan</span>
-                  <span className="account-username">
-                    {subscriptionInfo?.tier?.name ?? subscriptionInfo?.tier_id ?? "Unpaid"}
-                  </span>
-                </div>
-                <div className="linked-account-item">
-                  <span className="account-platform">Status</span>
-                  <span className="account-username">{subscriptionInfo?.status ?? "unknown"}</span>
-                </div>
-                <div className="linked-account-item">
-                  <span className="account-platform">Renews</span>
-                  <span className="account-username">{formatDate(subscriptionInfo?.current_period_end)}</span>
+                  <div style={{ display: 'flex', gap: '24px', fontSize: '14px', color: 'var(--text-secondary)' }}>
+                    <div>
+                      <span style={{ display: 'block', marginBottom: '2px' }}>Status</span>
+                      <span style={{ color: 'var(--text-primary)', fontWeight: '500' }}>
+                        {subscriptionInfo?.status ?? "unknown"}
+                      </span>
+                    </div>
+                    {subscriptionInfo?.current_period_end && (
+                      <div>
+                        <span style={{ display: 'block', marginBottom: '2px' }}>Renews</span>
+                        <span style={{ color: 'var(--text-primary)', fontWeight: '500' }}>
+                          {formatDate(subscriptionInfo.current_period_end)}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                  {isActive && (
+                    <div style={{ marginTop: '12px', display: 'flex', gap: '8px' }}>
+                      <button 
+                        type="button" 
+                        onClick={handleManageSubscription}
+                        style={{
+                          padding: '8px 16px',
+                          background: 'transparent',
+                          color: 'var(--text-primary)',
+                          border: '1px solid var(--border-color)',
+                          borderRadius: '6px',
+                          cursor: 'pointer',
+                          fontSize: '14px',
+                          fontWeight: '500',
+                          transition: 'all 0.2s',
+                        }}
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.background = 'var(--bg-primary)';
+                          e.currentTarget.style.borderColor = 'var(--accent-primary)';
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.background = 'transparent';
+                          e.currentTarget.style.borderColor = 'var(--border-color)';
+                        }}
+                      >
+                        Manage subscription
+                      </button>
+                      <button 
+                        type="button" 
+                        onClick={handleCancelSubscription}
+                        style={{
+                          padding: '8px 16px',
+                          background: 'transparent',
+                          color: '#ef4444',
+                          border: '1px solid var(--border-color)',
+                          borderRadius: '6px',
+                          cursor: 'pointer',
+                          fontSize: '14px',
+                          fontWeight: '500',
+                          transition: 'all 0.2s',
+                        }}
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.background = 'rgba(239, 68, 68, 0.1)';
+                          e.currentTarget.style.borderColor = '#ef4444';
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.background = 'transparent';
+                          e.currentTarget.style.borderColor = 'var(--border-color)';
+                        }}
+                      >
+                        Cancel subscription
+                      </button>
+                    </div>
+                  )}
                 </div>
               </div>
+            )}
 
-              <div className="account-button-row">
-                <button type="button" onClick={handleManageSubscription}>
-                  Manage subscription
-                </button>
-              </div>
-
-              <p className="settings-note" style={{ marginTop: 12 }}>
-                Billing, invoices, and cancellations are handled in the Stripe customer portal.
-              </p>
-            </div>
-          )}
-
-          {/* Subscription Tiers */}
-          <div className="stripe-pricing-table-container">
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-              <div style={{ padding: '20px', border: '1px solid var(--border-color)', borderRadius: '8px', background: 'var(--bg-secondary)' }}>
+            {/* Subscription Tiers - Inline Grid */}
+            <div style={{ 
+              display: 'grid', 
+              gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', 
+              gap: '16px',
+              marginTop: subscriptionInfo ? '0' : '16px'
+            }}>
+              {/* Lite Tier */}
+              <div style={{ 
+                padding: '20px', 
+                border: '1px solid var(--border-color)', 
+                borderRadius: '8px', 
+                background: currentTierId === 'lite' && isActive ? 'var(--bg-primary)' : 'var(--bg-secondary)',
+                borderColor: currentTierId === 'lite' && isActive ? 'var(--accent-primary)' : 'var(--border-color)',
+                position: 'relative',
+                transition: 'all 0.2s',
+              }}>
+                {currentTierId === 'lite' && isActive && (
+                  <div style={{
+                    position: 'absolute',
+                    top: '12px',
+                    right: '12px',
+                    padding: '4px 8px',
+                    background: 'var(--accent-primary)',
+                    color: 'var(--bg-primary)',
+                    borderRadius: '4px',
+                    fontSize: '11px',
+                    fontWeight: '600'
+                  }}>
+                    Current
+                  </div>
+                )}
                 <h3 style={{ margin: '0 0 8px 0', fontSize: '18px', fontWeight: '600' }}>Lite</h3>
                 <p style={{ margin: '0 0 16px 0', color: 'var(--text-secondary)', fontSize: '14px' }}>Perfect for casual players</p>
                 <button
                   type="button"
                   onClick={() => handleSubscribe('prod_TqH4CqNKemJjTi')}
-                  disabled={!userId}
+                  disabled={!userId || (currentTierId === 'lite' && isActive)}
                   style={{
                     width: '100%',
                     padding: '12px',
-                    background: userId ? 'var(--accent-primary)' : 'var(--bg-secondary)',
-                    color: userId ? 'var(--bg-primary)' : 'var(--text-secondary)',
+                    background: (!userId || (currentTierId === 'lite' && isActive)) ? 'var(--bg-secondary)' : 'var(--accent-primary)',
+                    color: (!userId || (currentTierId === 'lite' && isActive)) ? 'var(--text-secondary)' : 'var(--bg-primary)',
                     border: 'none',
                     borderRadius: '6px',
-                    cursor: userId ? 'pointer' : 'not-allowed',
+                    cursor: (!userId || (currentTierId === 'lite' && isActive)) ? 'not-allowed' : 'pointer',
                     fontSize: '14px',
                     fontWeight: '600',
                     transition: 'background 0.2s',
-                    opacity: userId ? 1 : 0.6,
+                    opacity: (!userId || (currentTierId === 'lite' && isActive)) ? 0.6 : 1,
                   }}
                   onMouseEnter={(e) => {
-                    if (userId) {
+                    if (userId && !(currentTierId === 'lite' && isActive)) {
                       e.currentTarget.style.background = 'var(--accent-hover)';
                     }
                   }}
                   onMouseLeave={(e) => {
-                    if (userId) {
+                    if (userId && !(currentTierId === 'lite' && isActive)) {
                       e.currentTarget.style.background = 'var(--accent-primary)';
                     }
                   }}
                 >
-                  {userId ? 'Subscribe to Lite' : 'Sign in to Subscribe'}
+                  {!userId ? 'Sign in to Subscribe' : (currentTierId === 'lite' && isActive ? 'Current Plan' : 'Subscribe to Lite')}
                 </button>
               </div>
               
-              <div style={{ padding: '20px', border: '1px solid var(--border-color)', borderRadius: '8px', background: 'var(--bg-secondary)' }}>
+              {/* Starter Tier */}
+              <div style={{ 
+                padding: '20px', 
+                border: '1px solid var(--border-color)', 
+                borderRadius: '8px', 
+                background: currentTierId === 'starter' && isActive ? 'var(--bg-primary)' : 'var(--bg-secondary)',
+                borderColor: currentTierId === 'starter' && isActive ? 'var(--accent-primary)' : 'var(--border-color)',
+                position: 'relative',
+                transition: 'all 0.2s',
+              }}>
+                {currentTierId === 'starter' && isActive && (
+                  <div style={{
+                    position: 'absolute',
+                    top: '12px',
+                    right: '12px',
+                    padding: '4px 8px',
+                    background: 'var(--accent-primary)',
+                    color: 'var(--bg-primary)',
+                    borderRadius: '4px',
+                    fontSize: '11px',
+                    fontWeight: '600'
+                  }}>
+                    Current
+                  </div>
+                )}
                 <h3 style={{ margin: '0 0 8px 0', fontSize: '18px', fontWeight: '600' }}>Starter</h3>
                 <p style={{ margin: '0 0 16px 0', color: 'var(--text-secondary)', fontSize: '14px' }}>For serious players</p>
                 <button
                   type="button"
                   onClick={() => handleSubscribe('prod_TqH4m9kERqeESC')}
-                  disabled={!userId}
+                  disabled={!userId || (currentTierId === 'starter' && isActive)}
                   style={{
                     width: '100%',
                     padding: '12px',
-                    background: userId ? 'var(--accent-primary)' : 'var(--bg-secondary)',
-                    color: userId ? 'var(--bg-primary)' : 'var(--text-secondary)',
+                    background: (!userId || (currentTierId === 'starter' && isActive)) ? 'var(--bg-secondary)' : 'var(--accent-primary)',
+                    color: (!userId || (currentTierId === 'starter' && isActive)) ? 'var(--text-secondary)' : 'var(--bg-primary)',
                     border: 'none',
                     borderRadius: '6px',
-                    cursor: userId ? 'pointer' : 'not-allowed',
+                    cursor: (!userId || (currentTierId === 'starter' && isActive)) ? 'not-allowed' : 'pointer',
                     fontSize: '14px',
                     fontWeight: '600',
                     transition: 'background 0.2s',
-                    opacity: userId ? 1 : 0.6,
+                    opacity: (!userId || (currentTierId === 'starter' && isActive)) ? 0.6 : 1,
                   }}
                   onMouseEnter={(e) => {
-                    if (userId) {
+                    if (userId && !(currentTierId === 'starter' && isActive)) {
                       e.currentTarget.style.background = 'var(--accent-hover)';
                     }
                   }}
                   onMouseLeave={(e) => {
-                    if (userId) {
+                    if (userId && !(currentTierId === 'starter' && isActive)) {
                       e.currentTarget.style.background = 'var(--accent-primary)';
                     }
                   }}
                 >
-                  {userId ? 'Subscribe to Starter' : 'Sign in to Subscribe'}
+                  {!userId ? 'Sign in to Subscribe' : (currentTierId === 'starter' && isActive ? 'Current Plan' : 'Subscribe to Starter')}
                 </button>
               </div>
               
-              <div style={{ padding: '20px', border: '1px solid var(--border-color)', borderRadius: '8px', background: 'var(--bg-secondary)' }}>
+              {/* Full Tier */}
+              <div style={{ 
+                padding: '20px', 
+                border: '1px solid var(--border-color)', 
+                borderRadius: '8px', 
+                background: currentTierId === 'full' && isActive ? 'var(--bg-primary)' : 'var(--bg-secondary)',
+                borderColor: currentTierId === 'full' && isActive ? 'var(--accent-primary)' : 'var(--border-color)',
+                position: 'relative',
+                transition: 'all 0.2s',
+              }}>
+                {currentTierId === 'full' && isActive && (
+                  <div style={{
+                    position: 'absolute',
+                    top: '12px',
+                    right: '12px',
+                    padding: '4px 8px',
+                    background: 'var(--accent-primary)',
+                    color: 'var(--bg-primary)',
+                    borderRadius: '4px',
+                    fontSize: '11px',
+                    fontWeight: '600'
+                  }}>
+                    Current
+                  </div>
+                )}
                 <h3 style={{ margin: '0 0 8px 0', fontSize: '18px', fontWeight: '600' }}>Full</h3>
                 <p style={{ margin: '0 0 16px 0', color: 'var(--text-secondary)', fontSize: '14px' }}>Unlimited access</p>
                 <button
                   type="button"
                   onClick={() => handleSubscribe('prod_TqH5itxYTmQls0')}
-                  disabled={!userId}
+                  disabled={!userId || (currentTierId === 'full' && isActive)}
                   style={{
                     width: '100%',
                     padding: '12px',
-                    background: userId ? 'var(--accent-primary)' : 'var(--bg-secondary)',
-                    color: userId ? 'var(--bg-primary)' : 'var(--text-secondary)',
+                    background: (!userId || (currentTierId === 'full' && isActive)) ? 'var(--bg-secondary)' : 'var(--accent-primary)',
+                    color: (!userId || (currentTierId === 'full' && isActive)) ? 'var(--text-secondary)' : 'var(--bg-primary)',
                     border: 'none',
                     borderRadius: '6px',
-                    cursor: userId ? 'pointer' : 'not-allowed',
+                    cursor: (!userId || (currentTierId === 'full' && isActive)) ? 'not-allowed' : 'pointer',
                     fontSize: '14px',
                     fontWeight: '600',
                     transition: 'background 0.2s',
-                    opacity: userId ? 1 : 0.6,
+                    opacity: (!userId || (currentTierId === 'full' && isActive)) ? 0.6 : 1,
                   }}
                   onMouseEnter={(e) => {
-                    if (userId) {
+                    if (userId && !(currentTierId === 'full' && isActive)) {
                       e.currentTarget.style.background = 'var(--accent-hover)';
                     }
                   }}
                   onMouseLeave={(e) => {
-                    if (userId) {
+                    if (userId && !(currentTierId === 'full' && isActive)) {
                       e.currentTarget.style.background = 'var(--accent-primary)';
                     }
                   }}
                 >
-                  {userId ? 'Subscribe to Full' : 'Sign in to Subscribe'}
+                  {!userId ? 'Sign in to Subscribe' : (currentTierId === 'full' && isActive ? 'Current Plan' : 'Subscribe to Full')}
                 </button>
               </div>
             </div>
-          </div>
-        </fieldset>
-      </form>
-    </div>
-  );
+          </fieldset>
+
+          {/* Chess accounts section */}
+          <fieldset className="settings-group">
+            <legend>Chess accounts</legend>
+            <p className="settings-note">
+              To link your chess accounts, use the "Personal" area and click "Edit profile setup".
+            </p>
+            {profilePreferences?.accounts && profilePreferences.accounts.length > 0 ? (
+              <div className="linked-accounts-list">
+                {profilePreferences.accounts.map((acc, idx) => {
+                  const platformRaw = String((acc as any).platform || "");
+                  const platformLabel =
+                    platformRaw === "chesscom" || platformRaw === "chess.com"
+                      ? "Chess.com"
+                      : "Lichess";
+                  const usernameLabel = maskUsernamesInUI ? maskUsername(acc.username) : (acc.username || "Not set");
+                  return (
+                    <div key={idx} className="linked-account-item">
+                      <span className="account-platform">{platformLabel}</span>
+                      <span className="account-username">{usernameLabel}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <p className="settings-empty">No accounts linked yet.</p>
+            )}
+          </fieldset>
+        </form>
+      </div>
+    );
+  };
 
   if (!open) return null;
 
