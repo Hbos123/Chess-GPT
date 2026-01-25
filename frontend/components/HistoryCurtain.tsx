@@ -283,13 +283,29 @@ export default function HistoryCurtain({
           return_url: typeof window !== "undefined" ? window.location.href : undefined,
         }),
       });
-      if (!res.ok) throw new Error(await res.text());
+      if (!res.ok) {
+        const errorText = await res.text();
+        throw new Error(errorText);
+      }
       const data = await res.json();
       if (data?.url) window.open(data.url, "_blank", "noopener,noreferrer");
       else throw new Error("No portal URL returned.");
     } catch (e: any) {
-      alert(e?.message || "Failed to open billing portal.");
+      // Try to parse error message
+      let errorMsg = e?.message || "Failed to open billing portal.";
+      try {
+        const errorJson = JSON.parse(errorMsg);
+        errorMsg = errorJson.detail || errorMsg;
+      } catch {
+        // Not JSON, use as-is
+      }
+      alert(errorMsg);
     }
+  };
+
+  const handleSubscribe = async () => {
+    // Same as manage subscription - billing portal handles both subscribing and managing
+    await handleManageSubscription();
   };
 
   const linkedAccounts = (profilePreferences?.accounts ?? []).map((account, index) => ({
@@ -1402,36 +1418,42 @@ export default function HistoryCurtain({
             </div>
           )}
 
-          {/* Stripe Billing Portal */}
+          {/* Stripe Subscription - Uses backend billing portal */}
           <div className="stripe-pricing-table-container">
             <button
               type="button"
-              onClick={() => {
-                window.open('https://billing.stripe.com/p/login/test_8x23cobi92vodx218rdfG00', '_blank');
-              }}
+              onClick={handleSubscribe}
+              disabled={!userId}
               style={{
                 width: '100%',
                 padding: '16px',
-                background: 'var(--accent-primary)',
-                color: 'var(--bg-primary)',
+                background: userId ? 'var(--accent-primary)' : 'var(--bg-secondary)',
+                color: userId ? 'var(--bg-primary)' : 'var(--text-secondary)',
                 border: 'none',
                 borderRadius: 'var(--radius-md)',
-                cursor: 'pointer',
+                cursor: userId ? 'pointer' : 'not-allowed',
                 fontSize: '16px',
                 fontWeight: '600',
                 transition: 'background 0.2s',
+                opacity: userId ? 1 : 0.6,
               }}
               onMouseEnter={(e) => {
-                e.currentTarget.style.background = 'var(--accent-hover)';
+                if (userId) {
+                  e.currentTarget.style.background = 'var(--accent-hover)';
+                }
               }}
               onMouseLeave={(e) => {
-                e.currentTarget.style.background = 'var(--accent-primary)';
+                if (userId) {
+                  e.currentTarget.style.background = 'var(--accent-primary)';
+                }
               }}
             >
-              View Pricing & Subscribe
+              {userId ? 'View Pricing & Subscribe' : 'Sign in to Subscribe'}
             </button>
             <p className="settings-note" style={{ marginTop: 12, textAlign: 'center' }}>
-              Opens Stripe's billing portal in a new window
+              {userId 
+                ? 'Opens billing portal where you can subscribe or manage your subscription'
+                : 'Please sign in first to view pricing and subscribe'}
             </p>
           </div>
         </fieldset>
