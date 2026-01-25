@@ -1402,15 +1402,12 @@ export default function HistoryCurtain({
             </div>
           )}
 
-          {/* Stripe Pricing - Redirect to hosted page */}
+          {/* Stripe Billing Portal */}
           <div className="stripe-pricing-table-container">
             <button
               type="button"
               onClick={() => {
-                // Replace with your Stripe hosted pricing page URL
-                // You can create this in Stripe Dashboard → Products → Pricing → Create pricing page
-                const pricingPageUrl = 'https://buy.stripe.com/YOUR_PRICING_PAGE_LINK';
-                window.open(pricingPageUrl, '_blank');
+                window.open('https://billing.stripe.com/p/login/test_8x23cobi92vodx218rdfG00', '_blank');
               }}
               style={{
                 width: '100%',
@@ -1434,7 +1431,7 @@ export default function HistoryCurtain({
               View Pricing & Subscribe
             </button>
             <p className="settings-note" style={{ marginTop: 12, textAlign: 'center' }}>
-              Opens Stripe's secure checkout in a new window
+              Opens Stripe's billing portal in a new window
             </p>
           </div>
         </fieldset>
