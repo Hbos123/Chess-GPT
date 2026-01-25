@@ -6042,33 +6042,17 @@ html, body {
   min-height: 400px;
 }
 
-/* Override Stripe's default styles to match dark theme */
+/* Stripe pricing table uses Shadow DOM, so we style via CSS custom properties */
 stripe-pricing-table {
   display: block;
   width: 100%;
-}
-
-/* Use CSS custom properties to theme the pricing table */
-stripe-pricing-table::part(card) {
-  background: var(--bg-secondary) !important;
-  border: 1px solid var(--border-color) !important;
-  color: var(--text-primary) !important;
-}
-
-stripe-pricing-table::part(button) {
-  background: var(--accent-primary) !important;
-  color: var(--bg-primary) !important;
-  border: none !important;
-  border-radius: var(--radius-md) !important;
-}
-
-stripe-pricing-table::part(button):hover {
-  background: var(--accent-hover) !important;
-}
-
-/* Global styles for Stripe pricing table elements */
-stripe-pricing-table * {
-  color: var(--text-primary) !important;
+  /* These CSS variables are passed to Stripe's Shadow DOM */
+  --pricing-table-background: var(--bg-primary);
+  --pricing-table-text: var(--text-primary);
+  --pricing-table-border: var(--border-color);
+  --pricing-table-button-background: var(--accent-primary);
+  --pricing-table-button-text: var(--bg-primary);
+  --pricing-table-button-hover: var(--accent-hover);
 }
 
 /* Mobile responsive */
