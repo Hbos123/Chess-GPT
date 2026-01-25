@@ -17,41 +17,147 @@ export default function AuthModal({ onClose }: AuthModalProps) {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
 
-  const friendlyAuthError = (raw: string | undefined | null) => {
-    if (!raw) return 'Something went wrong. Please try again.';
-    if (/provider is not enabled/i.test(raw)) {
-      return 'That sign-in provider is disabled. Enable it in Supabase Auth → Providers or use email/password.';
+  const friendlyAuthError = (error: any): string => {
+    // Handle different error formats
+    let errorMessage = '';
+    
+    // Check if it's a string
+    if (typeof error === 'string') {
+      errorMessage = error;
     }
-    if (/refresh_token_hmac_key/i.test(raw)) {
+    // Check if it's an error object with message
+    else if (error?.message) {
+      errorMessage = error.message;
+    }
+    // Check if it's a JSON response with msg field
+    else if (error?.msg) {
+      errorMessage = error.msg;
+    }
+    // Check if it's a JSON response with error field
+    else if (error?.error) {
+      errorMessage = typeof error.error === 'string' ? error.error : error.error.message || JSON.stringify(error.error);
+    }
+    // Try to parse as JSON string
+    else if (typeof error === 'object') {
+      try {
+        const jsonStr = JSON.stringify(error);
+        const parsed = JSON.parse(jsonStr);
+        errorMessage = parsed.msg || parsed.message || parsed.error || jsonStr;
+      } catch {
+        errorMessage = 'Something went wrong. Please try again.';
+      }
+    }
+    
+    if (!errorMessage) {
+      return 'Something went wrong. Please try again.';
+    }
+    
+    // Normalize error message
+    const normalized = errorMessage.toLowerCase();
+    
+    // Provider not enabled errors
+    if (normalized.includes('provider is not enabled') || 
+        normalized.includes('unsupported provider') ||
+        normalized.includes('validation_failed')) {
+      return 'This sign-in provider is not enabled. To enable it:\n\n1. Go to your Supabase Dashboard\n2. Navigate to Authentication → Providers\n3. Enable Google and/or Apple\n4. Configure OAuth credentials\n5. Add redirect URL: ' + window.location.origin + '/auth/callback\n\nOr use email/password sign-in instead.';
+    }
+    
+    // Refresh token errors
+    if (normalized.includes('refresh_token_hmac_key')) {
       return 'Supabase project is missing the Refresh Token HMAC key. In Supabase → Auth → Settings → URL Configuration add REFRESH_TOKEN_HMAC_KEY, then refresh this page.';
     }
-    return raw;
+    
+    // Email verification errors
+    if (normalized.includes('email not confirmed') || normalized.includes('email_not_confirmed')) {
+      return 'Please verify your email address. Check your inbox for a verification link.';
+    }
+    
+    // Invalid credentials
+    if (normalized.includes('invalid') && normalized.includes('credential')) {
+      return 'Invalid email or password. Please try again.';
+    }
+    
+    // User already exists
+    if (normalized.includes('user already registered') || normalized.includes('already registered')) {
+      return 'An account with this email already exists. Try signing in instead.';
+    }
+    
+    return errorMessage;
   };
 
   const handleGoogleSignIn = async () => {
     setLoading(true);
     setError('');
+    setSuccess('');
     
     try {
-      const { error } = await signInWithGoogle();
-      if (error) {
-        setError(friendlyAuthError(error.message));
+      const result = await signInWithGoogle();
+      if (result.error) {
+        // Handle different error formats
+        const errorObj = result.error;
+        let errorMsg = '';
+        
+        // Check if error has a message property
+        if (errorObj?.message) {
+          errorMsg = friendlyAuthError(errorObj);
+        }
+        // Check if error is a JSON response
+        else if (typeof errorObj === 'object') {
+          errorMsg = friendlyAuthError(errorObj);
+        }
+        // Try to parse as string
+        else {
+          errorMsg = friendlyAuthError(String(errorObj));
+        }
+        
+        setError(errorMsg);
       }
+      // If no error and no URL, that's also an error
+      else if (!result.data?.url) {
+        setError('Failed to start Google sign-in. Please try again or use email/password.');
+      }
+      // Otherwise, redirect will happen automatically
+    } catch (err: any) {
+      setError(friendlyAuthError(err));
     } finally {
       setLoading(false);
     }
-    // Redirect will happen automatically
   };
 
   const handleAppleSignIn = async () => {
     setLoading(true);
     setError('');
+    setSuccess('');
     
     try {
-      const { error } = await signInWithApple();
-      if (error) {
-        setError(friendlyAuthError(error.message));
+      const result = await signInWithApple();
+      if (result.error) {
+        // Handle different error formats
+        const errorObj = result.error;
+        let errorMsg = '';
+        
+        // Check if error has a message property
+        if (errorObj?.message) {
+          errorMsg = friendlyAuthError(errorObj);
+        }
+        // Check if error is a JSON response
+        else if (typeof errorObj === 'object') {
+          errorMsg = friendlyAuthError(errorObj);
+        }
+        // Try to parse as string
+        else {
+          errorMsg = friendlyAuthError(String(errorObj));
+        }
+        
+        setError(errorMsg);
       }
+      // If no error and no URL, that's also an error
+      else if (!result.data?.url) {
+        setError('Failed to start Apple sign-in. Please try again or use email/password.');
+      }
+      // Otherwise, redirect will happen automatically
+    } catch (err: any) {
+      setError(friendlyAuthError(err));
     } finally {
       setLoading(false);
     }
@@ -215,7 +321,7 @@ export default function AuthModal({ onClose }: AuthModalProps) {
 
           {/* Error/Success messages */}
           {error && (
-            <div className="auth-error">
+            <div className="auth-error" style={{ whiteSpace: 'pre-line' }}>
               ⚠️ {error}
             </div>
           )}

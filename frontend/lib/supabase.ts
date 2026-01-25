@@ -156,16 +156,56 @@ export const signInWithGoogle = async () => {
   console.log("[signInWithGoogle] Starting OAuth flow...");
   console.log("[signInWithGoogle] Redirect URL:", oauthRedirect());
   
-  const { data, error } = await supabase.auth.signInWithOAuth({
-    provider: 'google',
-    options: {
-      redirectTo: oauthRedirect(),
-    },
-  });
+  let data, error;
+  try {
+    const result = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: {
+        redirectTo: oauthRedirect(),
+      },
+    });
+    data = result.data;
+    error = result.error;
+  } catch (err: any) {
+    // Handle JSON error responses
+    let errorMessage = 'Failed to start Google sign-in';
+    if (err?.message) {
+      errorMessage = err.message;
+    } else if (typeof err === 'string') {
+      try {
+        const parsed = JSON.parse(err);
+        errorMessage = parsed.msg || parsed.message || parsed.error || errorMessage;
+      } catch {
+        errorMessage = err;
+      }
+    } else if (err?.msg) {
+      errorMessage = err.msg;
+    }
+    console.error("[signInWithGoogle] signInWithOAuth error:", err);
+    return { data: null, error: { message: errorMessage, original: err } as any };
+  }
   
   if (error) {
     console.error("[signInWithGoogle] signInWithOAuth error:", error);
-    return { data: null, error };
+    // Try to extract better error message from error object
+    let errorMessage = error.message || 'Failed to start Google sign-in';
+    if (typeof error === 'object' && !error.message) {
+      // Check for JSON error response format
+      if ((error as any).msg) {
+        errorMessage = (error as any).msg;
+      } else if ((error as any).error) {
+        errorMessage = (error as any).error;
+      } else {
+        try {
+          const jsonStr = JSON.stringify(error);
+          const parsed = JSON.parse(jsonStr);
+          errorMessage = parsed.msg || parsed.message || parsed.error || errorMessage;
+        } catch {
+          errorMessage = 'Failed to start Google sign-in';
+        }
+      }
+    }
+    return { data: null, error: { ...error, message: errorMessage } };
   }
   
   if (data?.url) {
@@ -187,19 +227,59 @@ export const signInWithApple = async () => {
   console.log("[signInWithApple] Starting OAuth flow...");
   console.log("[signInWithApple] Redirect URL:", oauthRedirect());
   
-  const { data, error } = await supabase.auth.signInWithOAuth({
-    provider: 'apple',
-    options: {
-      redirectTo: oauthRedirect(),
-      queryParams: {
-        response_mode: 'form_post',
+  let data, error;
+  try {
+    const result = await supabase.auth.signInWithOAuth({
+      provider: 'apple',
+      options: {
+        redirectTo: oauthRedirect(),
+        queryParams: {
+          response_mode: 'form_post',
+        },
       },
-    },
-  });
+    });
+    data = result.data;
+    error = result.error;
+  } catch (err: any) {
+    // Handle JSON error responses
+    let errorMessage = 'Failed to start Apple sign-in';
+    if (err?.message) {
+      errorMessage = err.message;
+    } else if (typeof err === 'string') {
+      try {
+        const parsed = JSON.parse(err);
+        errorMessage = parsed.msg || parsed.message || parsed.error || errorMessage;
+      } catch {
+        errorMessage = err;
+      }
+    } else if (err?.msg) {
+      errorMessage = err.msg;
+    }
+    console.error("[signInWithApple] signInWithOAuth error:", err);
+    return { data: null, error: { message: errorMessage, original: err } as any };
+  }
   
   if (error) {
     console.error("[signInWithApple] signInWithOAuth error:", error);
-    return { data: null, error };
+    // Try to extract better error message from error object
+    let errorMessage = error.message || 'Failed to start Apple sign-in';
+    if (typeof error === 'object' && !error.message) {
+      // Check for JSON error response format
+      if ((error as any).msg) {
+        errorMessage = (error as any).msg;
+      } else if ((error as any).error) {
+        errorMessage = (error as any).error;
+      } else {
+        try {
+          const jsonStr = JSON.stringify(error);
+          const parsed = JSON.parse(jsonStr);
+          errorMessage = parsed.msg || parsed.message || parsed.error || errorMessage;
+        } catch {
+          errorMessage = 'Failed to start Apple sign-in';
+        }
+      }
+    }
+    return { data: null, error: { ...error, message: errorMessage } };
   }
   
   if (data?.url) {
