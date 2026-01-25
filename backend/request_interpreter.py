@@ -332,7 +332,8 @@ class RequestInterpreter:
         message: str,
         context: Dict[str, Any],
         conversation_history: Optional[List[Dict[str, str]]] = None,
-        status_callback: Optional[callable] = None
+        status_callback: Optional[callable] = None,
+        model_override: Optional[str] = None  # Override interpreter model (for console command)
     ) -> OrchestrationPlan:
         """
         Analyze user request and produce an orchestration plan.
@@ -388,7 +389,7 @@ class RequestInterpreter:
                     timestamp=time.time()
                 )
             
-            plan = await self._llm_interpret(message, context, conversation_history)
+            plan = await self._llm_interpret(message, context, conversation_history, model=model_override)
         
         # POST-PROCESSING: Inject username from connected_accounts if needed
         if plan and plan.tool_sequence:
@@ -1812,7 +1813,8 @@ INVESTIGATION REQUESTS (from prior pass):
         self,
         message: str,
         context: Dict[str, Any],
-        conversation_history: Optional[List[Dict[str, str]]] = None
+        conversation_history: Optional[List[Dict[str, str]]] = None,
+        model: Optional[str] = None  # Override model (for console command)
     ) -> OrchestrationPlan:
         """
         Use LLM as PRIMARY interpreter for natural language understanding.
@@ -1865,9 +1867,12 @@ Output ONLY valid JSON:"""
             print(f"   conversation_history (full):\n{conversation_history}")
             print(f"   context_summary (full, {len(context_summary)} chars):\n{context_summary}")
             print(f"   history_summary (full, {len(history_summary)} chars):\n{history_summary}")
+            # Use provided model or fall back to self.model
+            effective_model = model or self.model
+            
             print(f"   system_prompt (full, {len(system_prompt)} chars):\n{system_prompt}")
             print(f"   user_prompt (full, {len(user_prompt)} chars):\n{user_prompt}")
-            print(f"   model={self.model} use_compact_prompt={self.use_compact_prompt}")
+            print(f"   model={effective_model} (override={model is not None}) use_compact_prompt={self.use_compact_prompt}")
             
             # Use router if available (enables prefix caching and session management)
             if self.llm_router:
@@ -1875,7 +1880,7 @@ Output ONLY valid JSON:"""
                 session_id = context.get("session_id", "interpreter_default")
                 
                 # Set temperature (gpt-5 models don't support custom temperature)
-                temperature = None if self.model.startswith("gpt-5") else 0.3
+                temperature = None if effective_model.startswith("gpt-5") else 0.3
                 
                 print(f"   Using llm_router with session_id={session_id}, subsession=interpreter")
                 
@@ -1886,7 +1891,7 @@ Output ONLY valid JSON:"""
                     system_prompt=system_prompt,
                     user_text=user_prompt,
                     subsession="interpreter",
-                    model=self.model,
+                    model=effective_model,
                     temperature=temperature,
                     provider="openai",  # Explicitly use OpenAI provider (default, skips vLLM health check)
                 )
@@ -1900,14 +1905,14 @@ Output ONLY valid JSON:"""
                 
                 # gpt-5 models don't support custom temperature, only default (1.0)
                 llm_kwargs = {
-                    "model": self.model,
+                    "model": effective_model,
                     "messages": [
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": user_prompt}
                     ],
                 }
                 # No token limits - let model use defaults
-                if not self.model.startswith("gpt-5"):
+                if not effective_model.startswith("gpt-5"):
                     llm_kwargs["temperature"] = 0.3
                 
                 print(f"   llm_kwargs (full):\n{llm_kwargs}")
@@ -2183,7 +2188,7 @@ Output ONLY valid JSON:"""
                 print(f"   ⚠️ Interpreter loop failed, falling back: {e}")
         
         # Fall back to standard interpretation
-        return await self._llm_interpret(message, context)
+        return await self._llm_interpret(message, context, model=None)
     
     def _build_context_summary(self, context: Dict[str, Any]) -> str:
         """Build a rich context summary for the interpreter"""

@@ -208,6 +208,45 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
     }
   }, []);
   
+  // Console command handler for interpreter model
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    
+    // Expose global functions for console commands
+    (window as any).setInterpreterModel = (model: string) => {
+      if (!model || typeof model !== 'string') {
+        console.error('Usage: setInterpreterModel("gpt-4o-mini")');
+        return;
+      }
+      localStorage.setItem('CHESSTER_INTERPRETER_MODEL', model);
+      console.log(`✅ Interpreter model set to: ${model}`);
+    };
+    
+    (window as any).getInterpreterModel = () => {
+      const model = localStorage.getItem('CHESSTER_INTERPRETER_MODEL') || 'gpt-5-mini (default)';
+      console.log(`Current interpreter model: ${model}`);
+      return model;
+    };
+    
+    (window as any).clearInterpreterModel = () => {
+      localStorage.removeItem('CHESSTER_INTERPRETER_MODEL');
+      console.log(`✅ Interpreter model cleared, will use default: gpt-5-mini`);
+    };
+    
+    // Log available commands
+    console.log('%c🎮 Chesster Console Commands:', 'color: #4CAF50; font-weight: bold;');
+    console.log('  setInterpreterModel("gpt-4o-mini")  - Set interpreter model');
+    console.log('  getInterpreterModel()                - Get current interpreter model');
+    console.log('  clearInterpreterModel()              - Clear and use default');
+    
+    // Cleanup on unmount
+    return () => {
+      delete (window as any).setInterpreterModel;
+      delete (window as any).getInterpreterModel;
+      delete (window as any).clearInterpreterModel;
+    };
+  }, []);
+  
   // Lesson system state
   const [showLessonBuilder, setShowLessonBuilder] = useState(false);
   const [showOpeningModal, setShowOpeningModal] = useState(false);
@@ -3375,6 +3414,11 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
         console.log('='.repeat(80) + '\n');
       }
       
+      // Get interpreter model from localStorage (set via console command)
+      const interpreterModel = typeof window !== 'undefined' 
+        ? localStorage.getItem('CHESSTER_INTERPRETER_MODEL') 
+        : null;
+      
       const requestBody = JSON.stringify({
         messages: finalMessages,
         temperature,
@@ -3382,7 +3426,8 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
         use_tools: useTools,
         session_id: sessionId,
         task_id: activeTab?.id || null,
-        context
+        context,
+        interpreter_model: interpreterModel || undefined  // Include if set via console command
       });
       vLog("POST /llm_chat_stream bytes", requestBody.length);
       

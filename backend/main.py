@@ -3349,6 +3349,7 @@ class LLMRequest(BaseModel):
     use_tools: bool = True  # Enable function calling
     context: Optional[Dict[str, Any]] = None  # Board state, PGN, mode, etc.
     max_tool_iterations: int = 5  # Prevent infinite loops
+    interpreter_model: Optional[str] = None  # Override interpreter model (for console command)
 
 
 @app.post("/llm_chat")
@@ -4055,7 +4056,8 @@ async def llm_chat_stream(request: LLMRequest):
                 orchestration_plan = await request_interpreter.interpret(
                     message=last_user_message,
                     context=context,
-                    conversation_history=request.messages
+                    conversation_history=request.messages,
+                    model_override=request.interpreter_model  # Allow console command to override model
                 )
                 interpreter_time = time.time() - interpreter_start
                 print(f"🔍 [PERFORMANCE] Interpreter took {interpreter_time:.2f}s")
