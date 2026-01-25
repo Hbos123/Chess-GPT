@@ -856,9 +856,15 @@
   align-items: center;
   gap: 8px;
   padding: 8px 16px;
-  border-bottom: 1px solid var(--border-color);
   flex-shrink: 0; /* Never shrink */
-  background: var(--bg-primary);
+  /* Invisible banner: no bar background/border */
+  background: transparent;
+  border-bottom: none;
+}
+
+/* Keep Load game on the left; push Show chessboard to the right */
+.conversation-toolbar .toolbar-button:last-child {
+  margin-left: auto;
 }
 
 .chat-layout.with-board .conversation-toolbar {
@@ -892,13 +898,13 @@
 /* Desktop toolbar - subtle styling */
 .chat-layout:not(.mobile-mode) .conversation-toolbar {
   padding: 10px 20px;
-  border-bottom: 1px solid var(--border-color);
+  border-bottom: none;
 }
 
 /* Mobile toolbar */
 .chat-layout.mobile-mode .conversation-toolbar {
   padding: 10px 16px;
-  border-bottom: 1px solid var(--border-color);
+  border-bottom: none;
 }
 
 .chat-layout.mobile-mode .toolbar-button {
