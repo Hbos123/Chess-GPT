@@ -844,7 +844,7 @@ class ToolExecutor:
                     print(f"   📎 Auto-injected from context.connected_accounts: {username} on {platform}")
         
         # Support both 'count' and 'max_games' as parameters
-        max_games = args.get("count") or args.get("max_games", 1)  # Default to 1 game
+        max_games = args.get("count") or args.get("max_games", 5)  # Default to 5 games
         games_to_analyze = args.get("games_to_analyze", max_games)  # Analyze all fetched by default
         depth = args.get("depth", 14)  # Fast for overview - deep analysis on-demand
         query = args.get("query", "")
@@ -953,7 +953,7 @@ class ToolExecutor:
             max_opponent_rating=max_opponent_rating,
             color=color_norm,
             min_moves=min_moves,
-            max_games=max(50, fetch_cap),
+            max_games=fetch_cap,  # Respect the requested count (no forced minimum)
         )
         games = filtered.get("games", [])
 
