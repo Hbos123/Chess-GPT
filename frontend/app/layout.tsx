@@ -53,11 +53,14 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <body>
-        <Script
+      <head>
+        <script
+          async
           src="https://js.stripe.com/v3/pricing-table.js"
-          strategy="lazyOnload"
+          crossOrigin="anonymous"
         />
+      </head>
+      <body>
         <div className="app-root">
           <Providers>{children}</Providers>
         </div>

@@ -6302,6 +6302,84 @@ async def billing_portal(payload: BillingPortalPayload):
         raise HTTPException(status_code=500, detail=f"Failed to create billing portal session: {str(e)}")
 
 
+@app.get("/debug/stripe-customer")
+async def debug_stripe_customer(user_id: str):
+    """
+    Debug endpoint to check Stripe customer status.
+    Helps diagnose why billing portal might be failing.
+    """
+    if not supabase_client:
+        return {"error": "Supabase not initialized"}
+    
+    try:
+        import stripe  # type: ignore
+    except Exception as e:
+        return {"error": f"Stripe library not available: {str(e)}"}
+    
+    stripe_secret = os.getenv("STRIPE_SECRET_KEY")
+    if not stripe_secret:
+        return {"error": "STRIPE_SECRET_KEY not set"}
+    
+    stripe.api_key = stripe_secret
+    
+    # Get customer ID from Supabase
+    customer_id = await asyncio.to_thread(supabase_client.get_stripe_customer_id, user_id)
+    
+    # Get user email
+    import requests
+    supabase_url = os.getenv("SUPABASE_URL")
+    service_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+    user_email = None
+    
+    if supabase_url and service_key:
+        headers = {
+            "apikey": service_key,
+            "Authorization": f"Bearer {service_key}",
+        }
+        try:
+            user_response = requests.get(
+                f"{supabase_url}/auth/v1/admin/users/{user_id}",
+                headers=headers,
+                timeout=10,
+            )
+            if user_response.status_code == 200:
+                user_email = user_response.json().get("email")
+        except Exception as e:
+            return {"error": f"Failed to get user email: {str(e)}"}
+    
+    # Search Stripe for customers with this email
+    stripe_customers_by_email = []
+    if user_email:
+        try:
+            customers = stripe.Customer.list(email=user_email, limit=10)
+            stripe_customers_by_email = [
+                {
+                    "id": c.id,
+                    "email": c.email,
+                    "created": datetime.fromtimestamp(c.created).isoformat() if c.created else None,
+                    "metadata": c.metadata,
+                }
+                for c in customers.data
+            ]
+        except Exception as e:
+            return {"error": f"Failed to search Stripe customers: {str(e)}"}
+    
+    # Get subscription info from Supabase
+    subscription_info = None
+    try:
+        subscription_info = await asyncio.to_thread(supabase_client.get_subscription_overview, user_id)
+    except Exception as e:
+        pass
+    
+    return {
+        "user_id": user_id,
+        "user_email": user_email,
+        "supabase_customer_id": customer_id,
+        "stripe_customers_by_email": stripe_customers_by_email,
+        "subscription_info": subscription_info,
+    }
+
+
 @app.post("/webhooks/stripe")
 async def stripe_webhook(request: Request):
     """
