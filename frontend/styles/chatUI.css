@@ -45,6 +45,8 @@
   --shell-gutter: clamp(16px, 4vw, 40px);
   --transition-fast: 160ms ease;
   --transition-slow: 280ms cubic-bezier(0.4, 0.14, 0.3, 1);
+  /* Reserve space for the fixed (overlay) bottom composer so chat doesn't hide behind it */
+  --bottom-composer-overlay-reserve: 104px;
 }
 
 [data-theme="day"] {
@@ -759,16 +761,24 @@
 
 .chat-layout.with-board.mobile-mode .bottom-composer,
 .chat-layout.mobile-mode .bottom-composer {
-  position: relative; /* NOT fixed - in flex flow */
-  flex-shrink: 0; /* Never shrink */
+  /* Overlay bar (not a footer) */
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
   width: 100%;
-  padding: 8px 16px; /* Compact padding */
-  padding-bottom: max(8px, env(safe-area-inset-bottom)); /* Fill to bottom without adding "dead space" */
-  border-top: 1px solid var(--border-color);
-  z-index: 50;
-  box-shadow: 0 -1px 4px rgba(0,0,0,0.05); /* Very subtle shadow */
+  z-index: 200;
+  
+  /* Invisible container: only controls appear to float */
+  background: transparent;
+  border-top: none;
+  box-shadow: none;
+  backdrop-filter: none;
+
+  /* Keep safe-area padding so controls don't collide with iOS home indicator */
+  padding: 8px 16px;
+  padding-bottom: max(8px, env(safe-area-inset-bottom));
   box-sizing: border-box;
-  margin-bottom: 0; /* Ensure no gap at bottom */
 }
 
 .chat-layout.with-board.mobile-mode .composer-inner,
@@ -1112,6 +1122,8 @@
 /* Desktop conversation-stream padding (inside card) */
 .chat-layout:not(.mobile-mode) .conversation-stream {
   padding: 48px clamp(20px, 3vw, 40px);
+  /* Leave space for overlay composer so the last messages stay visible */
+  padding-bottom: calc(48px + var(--bottom-composer-overlay-reserve) + env(safe-area-inset-bottom));
 }
 
 /* Desktop toolbar styling */
@@ -1181,6 +1193,8 @@
   -webkit-overflow-scrolling: touch; /* iOS smooth scrolling */
   scroll-behavior: auto; /* No smooth scroll - avoids jank with programmatic scrolling */
   padding: 16px; /* Consistent internal padding */
+  /* Leave space for overlay composer so messages are not hidden */
+  padding-bottom: calc(16px + var(--bottom-composer-overlay-reserve) + env(safe-area-inset-bottom));
   box-sizing: border-box;
 }
 
@@ -1631,14 +1645,22 @@
    ======================================== */
 
 .bottom-composer {
-  position: relative; /* NOT fixed - in flex flow */
+  /* Overlay bar (not a footer) */
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
   flex-shrink: 0; /* Never shrink */
-  background: rgba(12, 17, 26, 0.92);
-  backdrop-filter: blur(8px);
-  border-top: 1px solid var(--border-color);
-  padding: 12px 0; /* Reduced vertical padding for compact look */
-  z-index: 90;
-  box-shadow: 0 -2px 8px rgba(0,0,0,0.1); /* Subtle shadow */
+
+  /* Invisible container: only controls appear to float */
+  background: transparent;
+  border-top: none;
+  box-shadow: none;
+  backdrop-filter: none;
+
+  padding: 12px 0;
+  padding-bottom: max(12px, env(safe-area-inset-bottom));
+  z-index: 200;
   font-size: 14px;
 }
 
