@@ -6548,6 +6548,16 @@ async def stripe_webhook(request: Request):
         raise HTTPException(status_code=500, detail=f"Webhook processing error: {str(e)}")
 
 
+@app.post("/subscription/webhook")
+async def stripe_webhook_subscription(request: Request):
+    """
+    Alias for /webhooks/stripe to match existing Stripe webhook configuration.
+    This endpoint is configured in Stripe Dashboard as: https://chesster-backend.onrender.com/subscription/webhook
+    """
+    # Reuse the same handler logic
+    return await stripe_webhook(request)
+
+
 @app.get("/profile/validate-account")
 async def validate_account(
     username: str = Query(..., description="Username to validate"),
