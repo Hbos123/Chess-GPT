@@ -1395,6 +1395,7 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
   // NEW: ChatGPT-style UI state
   const [isFirstMessage, setIsFirstMessage] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
+  const [openSettingsNonce, setOpenSettingsNonce] = useState(0);
   const [showLoadGame, setShowLoadGame] = useState(false);
   const [boardDockOpen, setBoardDockOpen] = useState(false);
   const [showRequestOptions, setShowRequestOptions] = useState(false);
@@ -12788,6 +12789,10 @@ Provide 2-3 sentences of natural language commentary explaining why this deviati
     <div data-theme={theme} className="app-shell">
       <TopBar
         onToggleHistory={() => setShowHistory(!showHistory)}
+        onOpenSettings={() => {
+          setShowHistory(true);
+          setOpenSettingsNonce((n) => n + 1);
+        }}
         onSignIn={handleSignInClick}
         onSignOut={handleAuthSignOut}
         onSwitchAccount={handleSwitchAccount}
@@ -13247,6 +13252,7 @@ Provide 2-3 sentences of natural language commentary explaining why this deviati
 
       <HistoryCurtain
         open={showHistory}
+        openSettingsNonce={openSettingsNonce}
         onClose={() => setShowHistory(false)}
         onSelectThread={(threadId) => {
           setCurrentThreadId(threadId);

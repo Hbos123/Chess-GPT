@@ -136,6 +136,7 @@ interface HistoryCurtainProps {
   onOpenProfileDashboard?: () => void;
   onOpenPersonalReview?: () => void;
   userId?: string | null;
+  openSettingsNonce?: number;
 }
 
 export default function HistoryCurtain({ 
@@ -153,6 +154,7 @@ export default function HistoryCurtain({
   onOpenProfileDashboard,
   onOpenPersonalReview,
   userId,
+  openSettingsNonce,
 }: HistoryCurtainProps) {
   const user = null; // Auth optional for now
   const backendBase = getBackendBase();
@@ -163,12 +165,21 @@ export default function HistoryCurtain({
   const [expandedTab, setExpandedTab] = useState<'personal' | 'settings' | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [maskUsernamesInUI, setMaskUsernamesInUI] = useState(true);
-  const [interpreterModel, setInterpreterModel] = useState<string>("");
   const [subscriptionInfo, setSubscriptionInfo] = useState<any>(null);
   const [subscriptionLoading, setSubscriptionLoading] = useState(false);
   const [subscriptionError, setSubscriptionError] = useState<string>("");
   const [isRefreshing, setIsRefreshing] = useState(false);
   const refreshInProgressRef = useRef(false);
+  const lastOpenSettingsNonceRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    if (openSettingsNonce === undefined || openSettingsNonce === null) return;
+    if (lastOpenSettingsNonceRef.current === openSettingsNonce) return;
+    lastOpenSettingsNonceRef.current = openSettingsNonce;
+    setShowSettings(true);
+  }, [open, openSettingsNonce]);
+
 
   const maskUsername = (u?: string | null) => {
     const s = (u ?? "").trim();
@@ -198,11 +209,6 @@ export default function HistoryCurtain({
       setMaskUsernamesInUI(raw === null ? true : raw === "true");
     } catch {
       setMaskUsernamesInUI(true);
-    }
-    try {
-      setInterpreterModel(window.localStorage.getItem("cg_interpreter_model") ?? "");
-    } catch {
-      setInterpreterModel("");
     }
   }, []);
 
@@ -235,26 +241,6 @@ export default function HistoryCurtain({
       cancelled = true;
     };
   }, [showSettings, userId, backendBase]);
-
-  const handleSavePrivacyMask = (next: boolean) => {
-    setMaskUsernamesInUI(next);
-    try {
-      window.localStorage.setItem("cg_mask_usernames", next ? "true" : "false");
-    } catch {
-      // ignore
-    }
-  };
-
-  const handleInterpreterModelChange = (next: string) => {
-    setInterpreterModel(next);
-    try {
-      const trimmed = next.trim();
-      if (!trimmed) window.localStorage.removeItem("cg_interpreter_model");
-      else window.localStorage.setItem("cg_interpreter_model", trimmed);
-    } catch {
-      // ignore
-    }
-  };
 
   const handleManageSubscription = async () => {
     if (!userId) {
@@ -1293,64 +1279,6 @@ export default function HistoryCurtain({
     <div className="curtain-content">
       <form className="settings-form" onSubmit={(e) => e.preventDefault()}>
         <fieldset className="settings-group">
-          <legend>Privacy</legend>
-          <label className="toggle-row">
-            <input
-              type="checkbox"
-              checked={maskUsernamesInUI}
-              onChange={(e) => handleSavePrivacyMask(e.target.checked)}
-            />
-            <span>Mask usernames in UI (recommended)</span>
-          </label>
-          <p className="settings-note">
-            Helps keep screenshots share-safe by masking your linked usernames throughout the app.
-          </p>
-        </fieldset>
-
-        <fieldset className="settings-group">
-          <legend>AI</legend>
-          <label>
-            Interpreter model override
-            <input
-              type="text"
-              value={interpreterModel}
-              onChange={(e) => handleInterpreterModelChange(e.target.value)}
-              placeholder='e.g. gpt-5-nano (leave blank for default)'
-            />
-          </label>
-          <p className="settings-note">
-            Leave blank to use the backend default. This setting affects how requests are interpreted before tools run.
-          </p>
-        </fieldset>
-
-        <fieldset className="settings-group">
-          <legend>Chess accounts</legend>
-          <p className="settings-note">
-            To link your chess accounts, use the “Personal” area and click “Edit profile setup”.
-          </p>
-          {profilePreferences?.accounts && profilePreferences.accounts.length > 0 ? (
-            <div className="linked-accounts-list">
-              {profilePreferences.accounts.map((acc, idx) => {
-                const platformRaw = String((acc as any).platform || "");
-                const platformLabel =
-                  platformRaw === "chesscom" || platformRaw === "chess.com"
-                    ? "Chess.com"
-                    : "Lichess";
-                const usernameLabel = maskUsernamesInUI ? maskUsername(acc.username) : (acc.username || "Not set");
-                return (
-                  <div key={idx} className="linked-account-item">
-                    <span className="account-platform">{platformLabel}</span>
-                    <span className="account-username">{usernameLabel}</span>
-                  </div>
-                );
-              })}
-            </div>
-          ) : (
-            <p className="settings-empty">No accounts linked yet.</p>
-          )}
-        </fieldset>
-
-        <fieldset className="settings-group">
           <legend>Subscription</legend>
 
           {!userId && <p className="settings-empty">Sign in to view your subscription.</p>}
@@ -1390,9 +1318,38 @@ export default function HistoryCurtain({
             </>
           )}
         </fieldset>
+
+        <fieldset className="settings-group">
+          <legend>Chess accounts</legend>
+          <p className="settings-note">
+            To link your chess accounts, use the “Personal” area and click “Edit profile setup”.
+          </p>
+
+          {profilePreferences?.accounts && profilePreferences.accounts.length > 0 ? (
+            <div className="linked-accounts-list">
+              {profilePreferences.accounts.map((acc, idx) => {
+                const platformRaw = String((acc as any).platform || "");
+                const platformLabel =
+                  platformRaw === "chesscom" || platformRaw === "chess.com"
+                    ? "Chess.com"
+                    : "Lichess";
+                const usernameLabel = maskUsernamesInUI ? maskUsername(acc.username) : (acc.username || "Not set");
+                return (
+                  <div key={idx} className="linked-account-item">
+                    <span className="account-platform">{platformLabel}</span>
+                    <span className="account-username">{usernameLabel}</span>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <p className="settings-empty">No accounts linked yet.</p>
+          )}
+        </fieldset>
       </form>
     </div>
   );
+
 
   if (!open) return null;
 

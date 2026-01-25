@@ -251,15 +251,10 @@ html, body {
   border: 1px solid var(--border-color);
   border-radius: 12px;
   box-shadow: 0 10px 30px var(--shadow);
-  display: none;
+  display: flex;
   flex-direction: column;
   min-width: 200px;
   overflow: hidden;
-}
-
-.user-menu:hover .user-dropdown,
-.user-menu:focus-within .user-dropdown {
-  display: flex;
 }
 
 .user-dropdown button {

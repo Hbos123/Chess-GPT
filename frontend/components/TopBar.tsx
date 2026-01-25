@@ -6,6 +6,7 @@ interface TopBarProps {
   onSignIn?: () => void;
   onSignOut?: () => Promise<void> | void;
   onSwitchAccount?: () => Promise<void> | void;
+  onOpenSettings?: () => void;
   userEmail?: string | null;
   userName?: string | null;
   authLoading?: boolean;
@@ -17,6 +18,7 @@ export default function TopBar({
   onSignIn,
   onSignOut,
   onSwitchAccount,
+  onOpenSettings,
   userEmail,
   userName,
   authLoading,
@@ -103,6 +105,15 @@ export default function TopBar({
                   }}
                 >
                   Change account
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    onOpenSettings?.();
+                  }}
+                >
+                  Manage subscription
                 </button>
                 <button
                   type="button"
