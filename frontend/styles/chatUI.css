@@ -765,8 +765,8 @@
   position: fixed;
   left: 0;
   right: 0;
-  /* CRITICAL FIX: Use safe-area-inset-bottom for bottom position on iOS PWA */
-  bottom: env(safe-area-inset-bottom, 0);
+  /* Position at viewport edge - safe area handled via padding */
+  bottom: 0;
   width: 100%;
   z-index: 200;
   
@@ -776,7 +776,7 @@
   box-shadow: none;
   backdrop-filter: none;
 
-  /* Keep safe-area padding so controls don't collide with iOS home indicator */
+  /* Safe area handled via padding to avoid double application */
   padding: 8px 16px;
   padding-bottom: max(8px, env(safe-area-inset-bottom));
   box-sizing: border-box;
@@ -1658,8 +1658,8 @@
   position: fixed;
   left: 0;
   right: 0;
-  /* CRITICAL FIX: Use safe-area-inset-bottom for bottom position on iOS PWA */
-  bottom: env(safe-area-inset-bottom, 0);
+  /* Position at viewport edge - safe area handled via padding */
+  bottom: 0;
   flex-shrink: 0; /* Never shrink */
 
   /* Invisible container: only controls appear to float */
@@ -1669,6 +1669,7 @@
   backdrop-filter: none;
 
   padding: 12px 0;
+  /* Safe area handled via padding to avoid double application */
   padding-bottom: max(12px, env(safe-area-inset-bottom));
   z-index: 200;
   font-size: 14px;
