@@ -765,7 +765,8 @@
   position: fixed;
   left: 0;
   right: 0;
-  bottom: 0;
+  /* CRITICAL FIX: Use safe-area-inset-bottom for bottom position on iOS PWA */
+  bottom: env(safe-area-inset-bottom, 0);
   width: 100%;
   z-index: 200;
   
@@ -1657,7 +1658,8 @@
   position: fixed;
   left: 0;
   right: 0;
-  bottom: 0;
+  /* CRITICAL FIX: Use safe-area-inset-bottom for bottom position on iOS PWA */
+  bottom: env(safe-area-inset-bottom, 0);
   flex-shrink: 0; /* Never shrink */
 
   /* Invisible container: only controls appear to float */
