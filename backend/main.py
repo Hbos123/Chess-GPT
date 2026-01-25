@@ -6179,6 +6179,13 @@ class BillingPortalPayload(BaseModel):
     return_url: Optional[str] = None
 
 
+class CheckoutPayload(BaseModel):
+    user_id: str
+    user_email: Optional[str] = None
+    product_id: str  # Stripe Product ID (we'll get the default price)
+    return_url: Optional[str] = None
+
+
 @app.post("/billing/portal")
 async def billing_portal(payload: BillingPortalPayload):
     """

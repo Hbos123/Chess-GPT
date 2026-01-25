@@ -315,10 +315,54 @@ export default function HistoryCurtain({
     }
   };
 
-  const handleSubscribe = async () => {
-    // Same as manage subscription - billing portal handles both subscribing and managing
-    // handleManageSubscription already gets email and passes it, so just call it
-    await handleManageSubscription();
+  const handleSubscribe = async (productId: string) => {
+    if (!userId) {
+      alert("Sign in to subscribe.");
+      return;
+    }
+    
+    // Get user email
+    let userEmail: string | undefined;
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      userEmail = user?.email || undefined;
+    } catch (e) {
+      console.warn("Could not get user email:", e);
+    }
+    
+    try {
+      const url = `${backendBase.replace(/\/$/, "")}/stripe/create-checkout`;
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          user_id: userId,
+          user_email: userEmail,
+          product_id: productId,
+          return_url: typeof window !== "undefined" ? window.location.href : undefined,
+        }),
+      });
+      if (!res.ok) {
+        const errorText = await res.text();
+        throw new Error(errorText);
+      }
+      const data = await res.json();
+      if (data?.url) {
+        // Redirect to Stripe Checkout
+        window.location.href = data.url;
+      } else {
+        throw new Error("No checkout URL returned.");
+      }
+    } catch (e: any) {
+      let errorMsg = e?.message || "Failed to create checkout session.";
+      try {
+        const errorJson = JSON.parse(errorMsg);
+        errorMsg = errorJson.detail || errorMsg;
+      } catch {
+        // Not JSON, use as-is
+      }
+      alert(errorMsg);
+    }
   };
 
   const linkedAccounts = (profilePreferences?.accounts ?? []).map((account, index) => ({
