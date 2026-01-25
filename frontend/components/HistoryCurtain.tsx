@@ -171,6 +171,7 @@ export default function HistoryCurtain({
   const [subscriptionError, setSubscriptionError] = useState<string>("");
   const [isRefreshing, setIsRefreshing] = useState(false);
   const refreshInProgressRef = useRef(false);
+  const lastOpenSettingsNonceRef = useRef<number | null>(null);
 
   const maskUsername = (u?: string | null) => {
     const s = (u ?? "").trim();
