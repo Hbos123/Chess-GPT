@@ -772,6 +772,20 @@ app = FastAPI(title="Chess GPT Backend", version="1.0.0", lifespan=lifespan)
 async def health():
     return {"status": "ok"}
 
+# Warm-up endpoint for interpreter API (called when user starts typing)
+@app.post("/warmup/interpreter")
+async def warmup_interpreter():
+    """Warm up the interpreter API connection and cache."""
+    try:
+        # Just ensure the interpreter is initialized and router is ready
+        if request_interpreter and request_interpreter.llm_router:
+            # Trigger a minimal warm-up call
+            request_interpreter._warm_up_system_prompt()
+        return {"status": "warmed_up"}
+    except Exception as e:
+        # Non-fatal - just return error
+        return {"status": "error", "message": str(e)}
+
 # CORS - Allow local development origins and production domains (Vercel, Render, etc.)
 # Note: Cannot use allow_origins=["*"] with allow_credentials=True per CORS spec.
 # We whitelist common local dev origins explicitly, and additionally allow common LAN origins and Vercel domains via regex.

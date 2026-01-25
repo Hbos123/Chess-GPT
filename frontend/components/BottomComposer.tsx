@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 
 interface BottomComposerProps {
   onSend: (message: string) => void;
@@ -16,11 +16,44 @@ export default function BottomComposer({
   optionsDisabled,
 }: BottomComposerProps) {
   const [input, setInput] = useState('');
+  const warmUpTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const hasWarmedUpRef = useRef(false);
+
+  // Warm up interpreter API when user starts typing
+  useEffect(() => {
+    if (input.trim().length > 0 && !hasWarmedUpRef.current) {
+      // Clear existing timeout
+      if (warmUpTimeoutRef.current) {
+        clearTimeout(warmUpTimeoutRef.current);
+      }
+      
+      // Debounce: warm up after 300ms of typing
+      warmUpTimeoutRef.current = setTimeout(() => {
+        const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000';
+        // Fire-and-forget warm-up request
+        fetch(`${backendUrl}/warmup/interpreter`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({}),
+        }).catch(() => {
+          // Ignore errors - this is just a warm-up
+        });
+        hasWarmedUpRef.current = true;
+      }, 300);
+    }
+    
+    return () => {
+      if (warmUpTimeoutRef.current) {
+        clearTimeout(warmUpTimeoutRef.current);
+      }
+    };
+  }, [input]);
 
   const handleSend = () => {
     if (input.trim() && !disabled) {
       onSend(input);
       setInput('');
+      hasWarmedUpRef.current = false; // Reset for next message
     }
   };
 

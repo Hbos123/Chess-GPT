@@ -844,8 +844,8 @@ class ToolExecutor:
                     print(f"   📎 Auto-injected from context.connected_accounts: {username} on {platform}")
         
         # Support both 'count' and 'max_games' as parameters
-        max_games = args.get("count") or args.get("max_games", 5)
-        games_to_analyze = args.get("games_to_analyze", min(3, max_games))
+        max_games = args.get("count") or args.get("max_games", 1)  # Default to 1 game
+        games_to_analyze = args.get("games_to_analyze", max_games)  # Analyze all fetched by default
         depth = args.get("depth", 14)  # Fast for overview - deep analysis on-demand
         query = args.get("query", "")
         time_control = args.get("time_control", "all")
@@ -1421,7 +1421,7 @@ Return ONLY valid JSON in this exact format:
 
             def call_openai():
                 return self.openai_client.chat.completions.create(
-                    model="gpt-5-mini",
+                    model="gpt-5",
                     messages=[
                         {"role": "system", "content": "Return only valid JSON. No markdown. Follow constraints strictly."},
                         {"role": "user", "content": prompt},
@@ -1436,7 +1436,7 @@ Return ONLY valid JSON in this exact format:
                     system_prompt="Return only valid JSON. No markdown. Follow constraints strictly.",
                     user_text=prompt,
                     temperature=0.4,
-                    model="gpt-5-mini",
+                    model="gpt-5",
                 )
                 content = json.dumps(parsed, ensure_ascii=False)
             else:
@@ -2164,7 +2164,7 @@ Write your response now based on the game data provided."""
                     system_prompt=system_prompt,
                     user_text=context,
                     temperature=0.7,
-                    model="gpt-5-mini",
+                    model="gpt-5",
                 ).strip()
             
             loop = asyncio.get_event_loop()
@@ -2172,7 +2172,7 @@ Write your response now based on the game data provided."""
                 response = await loop.run_in_executor(
                     executor,
                     lambda: self.openai_client.chat.completions.create(
-                        model="gpt-5-mini",
+                        model="gpt-5",
                         messages=[
                             {"role": "system", "content": system_prompt},
                             {"role": "user", "content": context}

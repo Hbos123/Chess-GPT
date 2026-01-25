@@ -557,16 +557,30 @@ The user is asking about this resulting position.
                 response = None
                 if self.llm_router:
                     try:
-                        result_json = self.llm_router.complete_json(
-                            session_id=session_id or "default",
-                            stage="interpreter",
-                            subsession="interpreter",
-                            system_prompt=MIN_SYSTEM_PROMPT_V1,
-                            task_seed=INTERPRETER_CONTRACT_V1,
-                            user_text=user_prompt,
-                            temperature=(0.1 if not self.model.startswith("gpt-5") else None),
-                            model=self.model,
-                        )
+                        # Use streaming for faster first token
+                        if hasattr(self.llm_router, 'complete_json_streaming'):
+                            result_json, ttft_ms, total_ms = self.llm_router.complete_json_streaming(
+                                session_id=session_id or "default",
+                                stage="interpreter",
+                                subsession="interpreter",
+                                system_prompt=MIN_SYSTEM_PROMPT_V1,
+                                task_seed=INTERPRETER_CONTRACT_V1,
+                                user_text=user_prompt,
+                                temperature=(0.1 if not self.model.startswith("gpt-5") else None),
+                                model=self.model,
+                            )
+                            print(f"🔍 [INTERPRETER_STREAMING] TTFT={ttft_ms:.1f}ms, Total={total_ms:.1f}ms")
+                        else:
+                            result_json = self.llm_router.complete_json(
+                                session_id=session_id or "default",
+                                stage="interpreter",
+                                subsession="interpreter",
+                                system_prompt=MIN_SYSTEM_PROMPT_V1,
+                                task_seed=INTERPRETER_CONTRACT_V1,
+                                user_text=user_prompt,
+                                temperature=(0.1 if not self.model.startswith("gpt-5") else None),
+                                model=self.model,
+                            )
                         # Log full raw output for main interpreter flow
                         print(f"🔍 [INTERPRETER_RAW_OUTPUT] main interpreter flow - result_json")
                         print(f"   result_json (full):\n{result_json}")

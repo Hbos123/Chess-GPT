@@ -575,4 +575,151 @@ class LLMRouter:
                 pass
             raise
 
+    def complete_json_streaming(
+        self,
+        *,
+        session_id: str,
+        stage: str,
+        system_prompt: str,
+        user_text: str,
+        task_seed: Optional[str] = None,
+        subsession: Optional[str] = None,
+        max_tokens: Optional[int] = None,
+        temperature: Optional[float] = None,
+        model: Optional[str] = None,
+        provider: Optional[Provider] = None,
+    ) -> Tuple[Dict[str, Any], Optional[float], float]:
+        """
+        Stream JSON response and parse incrementally.
+        Returns (result_dict, ttft_ms, total_ms) as soon as valid JSON is complete.
+        """
+        import json
+        import re
+        
+        provider = provider or _stage_provider(stage)
+        if self.config.vllm_only and provider != "vllm":
+            raise RuntimeError("VLLM_ONLY is enabled; non-vLLM providers are disabled.")
+        client, default_model = self._client_for(provider)
+        if provider == "vllm" and isinstance(model, str) and model.lower().startswith("gpt-"):
+            model = None
+        chosen_model = model or default_model
+        if not chosen_model:
+            raise ValueError("Model must be provided for openai provider.")
+
+        if provider == "vllm":
+            self.check_vllm_health()
+
+        skey = self._session_key(session_id, subsession or stage)
+        state = self.sessions.get_or_create(skey, system_prompt or "")
+        if task_seed:
+            self.sessions.seed_once(skey, task_seed)
+
+        prefix = state.working_context or ""
+        user_chunk = (user_text or "").strip()
+        prefix_chars = len(prefix or "")
+        prompt_text = prefix
+        if prompt_text:
+            prompt_text += "\n\n"
+        prompt_text += f"USER: {user_chunk}\nASSISTANT:"
+
+        kwargs: Dict[str, Any] = {
+            "model": chosen_model,
+            "messages": [
+                {"role": "system", "content": state.system_prompt},
+                {"role": "user", "content": prompt_text},
+            ],
+            "response_format": {"type": "json_object"},
+        }
+        if temperature is not None and "gpt-5" not in chosen_model.lower():
+            kwargs["temperature"] = temperature
+        if max_tokens is not None:
+            model_lower = chosen_model.lower() if chosen_model else ""
+            if "gpt-5" in model_lower:
+                kwargs["max_completion_tokens"] = int(max_tokens)
+            else:
+                kwargs["max_tokens"] = int(max_tokens)
+
+        # Stream the response
+        t0 = time.monotonic()
+        first_token_ts: Optional[float] = None
+        accumulated = ""
+        stream = client.chat.completions.create(**{**kwargs, "stream": True})
+        
+        try:
+            for event in stream:
+                delta = getattr(event.choices[0], "delta", None) if event.choices else None
+                piece = getattr(delta, "content", None) if delta else None
+                if piece:
+                    if first_token_ts is None:
+                        first_token_ts = time.monotonic()
+                    accumulated += piece
+                    
+                    # Try to parse JSON incrementally
+                    s = accumulated.strip()
+                    # Strip code fences if present
+                    if s.startswith("```"):
+                        s = re.sub(r'^```(?:json)?\s*', '', s)
+                        s = re.sub(r'\s*```$', '', s)
+                    
+                    # Find first complete JSON object by counting braces
+                    start_idx = s.find("{")
+                    if start_idx != -1:
+                        brace_count = 0
+                        for i in range(start_idx, len(s)):
+                            if s[i] == "{":
+                                brace_count += 1
+                            elif s[i] == "}":
+                                brace_count -= 1
+                                if brace_count == 0:
+                                    # Found complete JSON
+                                    candidate = s[start_idx:i+1]
+                                    try:
+                                        result = json.loads(candidate)
+                                        # Success! Return early
+                                        ttft_ms = (first_token_ts - t0) * 1000.0 if first_token_ts else None
+                                        total_ms = (time.monotonic() - t0) * 1000.0
+                                        
+                                        # Persist transcript
+                                        self.sessions.append_user(skey, user_chunk)
+                                        self.sessions.append_assistant(candidate)
+                                        
+                                        # Log
+                                        print(f"🔍 [INTERPRETER_STREAMING] JSON complete early")
+                                        print(f"   stage={stage} session_id={session_id} subsession={subsession or 'main'}")
+                                        print(f"   ttft_ms={ttft_ms:.1f}ms total_ms={total_ms:.1f}ms")
+                                        print(f"   accumulated_chars={len(accumulated)} json_chars={len(candidate)}")
+                                        
+                                        return result, ttft_ms, total_ms
+                                    except json.JSONDecodeError:
+                                        # Not complete yet, continue
+                                        pass
+        finally:
+            try:
+                stream.close()
+            except:
+                pass
+
+        # Fallback: parse full accumulated text
+        total_ms = (time.monotonic() - t0) * 1000.0
+        ttft_ms = (first_token_ts - t0) * 1000.0 if first_token_ts else None
+        
+        # Use same JSON parsing logic as complete_json
+        s = (accumulated or "").strip()
+        if s.startswith("```"):
+            s = s.strip("`")
+        i = s.find("{")
+        j = s.rfind("}")
+        if i != -1 and j != -1 and j > i:
+            candidate = s[i : j + 1]
+            try:
+                result = json.loads(candidate)
+                self.sessions.append_user(skey, user_chunk)
+                self.sessions.append_assistant(candidate)
+                return result, ttft_ms, total_ms
+            except Exception:
+                pass
+        
+        # If we get here, parsing failed
+        raise ValueError(f"Failed to parse JSON from streamed response: {accumulated[:200]}...")
+
 
