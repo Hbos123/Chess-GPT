@@ -136,6 +136,7 @@ interface HistoryCurtainProps {
   onOpenProfileDashboard?: () => void;
   onOpenPersonalReview?: () => void;
   userId?: string | null;
+  openSettingsNonce?: number;
 }
 
 export default function HistoryCurtain({ 
@@ -153,6 +154,7 @@ export default function HistoryCurtain({
   onOpenProfileDashboard,
   onOpenPersonalReview,
   userId,
+  openSettingsNonce,
 }: HistoryCurtainProps) {
   const user = null; // Auth optional for now
   const backendBase = getBackendBase();
@@ -235,6 +237,15 @@ export default function HistoryCurtain({
       cancelled = true;
     };
   }, [showSettings, userId, backendBase]);
+
+  // Watch for openSettingsNonce changes to programmatically open settings
+  useEffect(() => {
+    if (!open) return;
+    if (openSettingsNonce === undefined || openSettingsNonce === null) return;
+    if (lastOpenSettingsNonceRef.current === openSettingsNonce) return;
+    lastOpenSettingsNonceRef.current = openSettingsNonce;
+    setShowSettings(true);
+  }, [open, openSettingsNonce]);
 
   const handleSavePrivacyMask = (next: boolean) => {
     setMaskUsernamesInUI(next);
