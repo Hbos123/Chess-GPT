@@ -3817,10 +3817,30 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
                         const baseResult = isTruncated ? {} : (tc.result || {});
                         
                         console.log(`📦 [Chunked Merge] Tool: ${tc.tool}, isTruncated: ${isTruncated}`);
-                        console.log(`📦 [Chunked Merge] chunkedGameData:`, !!chunkedGameData);
-                        console.log(`📦 [Chunked Merge] chunkedStatsData:`, !!chunkedStatsData);
-                        console.log(`📦 [Chunked Merge] chunkedNarrativeData:`, !!chunkedNarrativeData);
-                        console.log(`📦 [Chunked Merge] chunkedWalkthroughData:`, !!chunkedWalkthroughData);
+                        console.log(`📦 [Chunked Merge] chunkedGameData keys:`, chunkedGameData ? Object.keys(chunkedGameData) : []);
+                        console.log(`📦 [Chunked Merge] chunkedStatsData keys:`, chunkedStatsData ? Object.keys(chunkedStatsData) : []);
+                        console.log(`📦 [Chunked Merge] chunkedNarrativeData keys:`, chunkedNarrativeData ? Object.keys(chunkedNarrativeData) : []);
+                        console.log(`📦 [Chunked Merge] chunkedWalkthroughData keys:`, chunkedWalkthroughData ? Object.keys(chunkedWalkthroughData) : []);
+                        
+                        // Build first_game from chunkedGameData if available
+                        let firstGame = baseResult.first_game;
+                        if (chunkedGameData) {
+                          // chunkedGameData might have first_game directly, or we need to construct it
+                          if (chunkedGameData.first_game) {
+                            firstGame = chunkedGameData.first_game;
+                          } else if (chunkedGameData.pgn) {
+                            // Construct first_game from available data
+                            firstGame = {
+                              pgn: chunkedGameData.pgn,
+                              white: chunkedGameData.white || chunkedGameData.first_game?.white,
+                              black: chunkedGameData.black || chunkedGameData.first_game?.black,
+                              date: chunkedGameData.date || chunkedGameData.first_game?.date,
+                              result: chunkedGameData.result || chunkedGameData.first_game?.result,
+                              time_control: chunkedGameData.time_control || chunkedGameData.first_game?.time_control,
+                              opening: chunkedGameData.opening || chunkedGameData.first_game?.opening,
+                            };
+                          }
+                        }
                         
                         return {
                           ...tc,
@@ -3830,6 +3850,8 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
                             ...(chunkedGameData || {}),
                             ...(chunkedStatsData || {}),
                             ...(chunkedNarrativeData || {}),
+                            // Ensure first_game is set from chunked data if available
+                            first_game: firstGame || baseResult.first_game,
                             // Build first_game_review from walkthrough data
                             first_game_review: chunkedWalkthroughData ? {
                               ply_records: chunkedWalkthroughData.ply_records || [],
@@ -3849,6 +3871,14 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
                         };
                       }
                       return tc;
+                    });
+                  } else {
+                    // Even if no chunked data, check if result is truncated and log warning
+                    mergedToolCalls.forEach((tc: any) => {
+                      if (tc.tool === "fetch_and_review_games" && tc.result?._truncated === true) {
+                        console.warn('⚠️ [Chunked Merge] Result is truncated but no chunked data received! Size:', tc.result._size);
+                        console.warn('⚠️ [Chunked Merge] This may indicate chunked data events arrived after complete event');
+                      }
                     });
                   }
                   
@@ -3932,6 +3962,21 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
                       buttons: data.buttons,
                       graphData: finalGraphData
                     });
+                    
+                    // Log merged tool calls for debugging
+                    mergedToolCalls.forEach((tc: any) => {
+                      if (tc.tool === "fetch_and_review_games") {
+                        console.log('✅ [Resolve] Merged tool call result:', {
+                          hasResult: !!tc.result,
+                          success: tc.result?.success,
+                          hasFirstGame: !!tc.result?.first_game,
+                          hasFirstGameReview: !!tc.result?.first_game_review,
+                          isTruncated: tc.result?._truncated,
+                          resultKeys: tc.result ? Object.keys(tc.result) : []
+                        });
+                      }
+                    });
+                    
                     return true;
                   }
                   
@@ -3957,6 +4002,21 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
                     buttons: data.buttons || [],  // Include buttons (empty array if not present)
                     graphData: finalGraphData  // Include graph data if any graph tools were called
                   });
+                  
+                  // Log merged tool calls for debugging
+                  mergedToolCalls.forEach((tc: any) => {
+                    if (tc.tool === "fetch_and_review_games") {
+                      console.log('✅ [Resolve] Merged tool call result:', {
+                        hasResult: !!tc.result,
+                        success: tc.result?.success,
+                        hasFirstGame: !!tc.result?.first_game,
+                        hasFirstGameReview: !!tc.result?.first_game_review,
+                        isTruncated: tc.result?._truncated,
+                        resultKeys: tc.result ? Object.keys(tc.result) : []
+                      });
+                    }
+                  });
+                  
                   return true; // Signal completion
                 } else if (eventType === "limit_exceeded") {
                   // Handle limit exceeded - show popup but continue conversation
