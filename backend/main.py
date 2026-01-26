@@ -6752,12 +6752,12 @@ async def stripe_webhook(request: Request):
             if subscription_id:
                 subscription = stripe.Subscription.retrieve(subscription_id)
                 price_id = subscription.get("items", {}).get("data", [{}])[0].get("price", {}).get("id")
+                product_id = subscription.get("items", {}).get("data", [{}])[0].get("price", {}).get("product")
                 
-                # Map Stripe price_id to tier_id
-                # You'll need to configure this mapping based on your Stripe price IDs
+                # Map Stripe price_id or product_id to tier_id
                 tier_id = "unpaid"  # Default
                 if price_id:
-                    # Query subscription_tiers to find matching stripe_price_id
+                    # First try to match by stripe_price_id in database
                     try:
                         tier_result = (
                             supabase_client.client.table("subscription_tiers")
@@ -6768,8 +6768,23 @@ async def stripe_webhook(request: Request):
                         )
                         if tier_result.data and len(tier_result.data) > 0:
                             tier_id = tier_result.data[0].get("id")
+                            print(f"[STRIPE_WEBHOOK] Mapped price_id {price_id} to tier {tier_id}")
                     except Exception as e:
                         print(f"[STRIPE_WEBHOOK] Error mapping price_id to tier: {e}")
+                
+                # Fallback: Map by product_id if price_id lookup failed
+                if tier_id == "unpaid" and product_id:
+                    # Product ID to tier mapping
+                    product_to_tier = {
+                        "prod_TqH4CqNKemJjTi": "lite",      # Lite tier
+                        "prod_TqH4m9kERqeESC": "starter",   # Starter tier
+                        "prod_TqH5itxYTmQls0": "full"       # Full tier
+                    }
+                    if product_id in product_to_tier:
+                        tier_id = product_to_tier[product_id]
+                        print(f"[STRIPE_WEBHOOK] Mapped product_id {product_id} to tier {tier_id}")
+                    else:
+                        print(f"[STRIPE_WEBHOOK] Unknown product_id: {product_id}, defaulting to unpaid")
                 
                 subscription_data = {
                     "stripe_subscription_id": subscription_id,
@@ -6795,6 +6810,7 @@ async def stripe_webhook(request: Request):
             customer_id = subscription.get("customer")
             subscription_id = subscription.get("id")
             price_id = subscription.get("items", {}).get("data", [{}])[0].get("price", {}).get("id")
+            product_id = subscription.get("items", {}).get("data", [{}])[0].get("price", {}).get("product")
             
             # Get customer to find user_id
             customer = stripe.Customer.retrieve(customer_id)
@@ -6811,9 +6827,10 @@ async def stripe_webhook(request: Request):
                 print(f"[STRIPE_WEBHOOK] No user_id found for subscription {subscription_id}, customer {customer_id}")
                 return {"status": "ok", "message": "No user_id found"}
             
-            # Map price_id to tier_id
+            # Map price_id or product_id to tier_id
             tier_id = "unpaid"
             if price_id:
+                # First try to match by stripe_price_id in database
                 try:
                     tier_result = (
                         supabase_client.client.table("subscription_tiers")
@@ -6824,8 +6841,23 @@ async def stripe_webhook(request: Request):
                     )
                     if tier_result.data and len(tier_result.data) > 0:
                         tier_id = tier_result.data[0].get("id")
+                        print(f"[STRIPE_WEBHOOK] Mapped price_id {price_id} to tier {tier_id}")
                 except Exception as e:
                     print(f"[STRIPE_WEBHOOK] Error mapping price_id to tier: {e}")
+            
+            # Fallback: Map by product_id if price_id lookup failed
+            if tier_id == "unpaid" and product_id:
+                # Product ID to tier mapping
+                product_to_tier = {
+                    "prod_TqH4CqNKemJjTi": "lite",      # Lite tier
+                    "prod_TqH4m9kERqeESC": "starter",   # Starter tier
+                    "prod_TqH5itxYTmQls0": "full"       # Full tier
+                }
+                if product_id in product_to_tier:
+                    tier_id = product_to_tier[product_id]
+                    print(f"[STRIPE_WEBHOOK] Mapped product_id {product_id} to tier {tier_id}")
+                else:
+                    print(f"[STRIPE_WEBHOOK] Unknown product_id: {product_id}, defaulting to unpaid")
             
             await asyncio.to_thread(
                 supabase_client.upsert_user_subscription,
@@ -6861,9 +6893,12 @@ async def stripe_webhook(request: Request):
                 return {"status": "ok", "message": "No user_id found"}
             
             price_id = subscription.get("items", {}).get("data", [{}])[0].get("price", {}).get("id")
-            # Default to "unpaid" if tier can't be determined (prevents null constraint violation)
-            tier_id = "unpaid"
+            product_id = subscription.get("items", {}).get("data", [{}])[0].get("price", {}).get("product")
+            
+            # Map price_id or product_id to tier_id
+            tier_id = "unpaid"  # Default
             if price_id:
+                # First try to match by stripe_price_id in database
                 try:
                     tier_result = (
                         supabase_client.client.table("subscription_tiers")
@@ -6874,8 +6909,23 @@ async def stripe_webhook(request: Request):
                     )
                     if tier_result.data and len(tier_result.data) > 0:
                         tier_id = tier_result.data[0].get("id")
+                        print(f"[STRIPE_WEBHOOK] Mapped price_id {price_id} to tier {tier_id}")
                 except Exception as e:
                     print(f"[STRIPE_WEBHOOK] Error mapping price_id to tier: {e}")
+            
+            # Fallback: Map by product_id if price_id lookup failed
+            if tier_id == "unpaid" and product_id:
+                # Product ID to tier mapping
+                product_to_tier = {
+                    "prod_TqH4CqNKemJjTi": "lite",      # Lite tier
+                    "prod_TqH4m9kERqeESC": "starter",   # Starter tier
+                    "prod_TqH5itxYTmQls0": "full"       # Full tier
+                }
+                if product_id in product_to_tier:
+                    tier_id = product_to_tier[product_id]
+                    print(f"[STRIPE_WEBHOOK] Mapped product_id {product_id} to tier {tier_id}")
+                else:
+                    print(f"[STRIPE_WEBHOOK] Unknown product_id: {product_id}, defaulting to unpaid")
             
             await asyncio.to_thread(
                 supabase_client.upsert_user_subscription,
