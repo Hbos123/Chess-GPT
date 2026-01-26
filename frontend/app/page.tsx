@@ -6103,7 +6103,8 @@ If they ask about the game, refer to this data.
       console.log('🔍 [Personal Review Check] result.tool_calls:', result.tool_calls);
       const personalReviewTool = result.tool_calls?.find((tc: any) => tc.tool === 'fetch_and_review_games');
       const hasSelectGamesTool = Array.isArray(result.tool_calls) && result.tool_calls.some((tc: any) => tc?.tool === "select_games");
-      const isGameReviewIntent = result.detected_intent === "game_review";
+      // Check both detected_intent and orchestration mode for review detection
+      const isGameReviewIntent = result.detected_intent === "game_review" || result.orchestration?.mode === "review";
       console.log('🔍 [Personal Review Check] personalReviewTool:', personalReviewTool);
       if (personalReviewTool) {
         console.log('🔍 [Personal Review Check] result object:', personalReviewTool.result);
@@ -6203,6 +6204,16 @@ If they ask about the game, refer to this data.
             addAssistantMessage(reviewResult.narrative, {
               gameReviewTable: tableData
             }, result.graphData);
+          }
+          
+          // Automatically open PersonalReview component for profile reviews
+          // Check if we have stats/charts (profile review) vs just game review
+          const hasProfileData = reviewResult.stats || reviewResult.charts || reviewResult.phase_stats;
+          if (hasProfileData) {
+            console.log('🎯 [Personal Review] Opening PersonalReview component with profile data');
+            setTimeout(() => {
+              setShowPersonalReview(true);
+            }, 500); // Small delay to let walkthrough initialize
           }
           
           setTimeout(() => {
