@@ -6101,16 +6101,69 @@ If they ask about the game, refer to this data.
       // ===== HANDLE PERSONAL REVIEW (fetch_and_review_games) =====
       console.log('🔍 [Personal Review Check] Full result:', result);
       console.log('🔍 [Personal Review Check] result.tool_calls:', result.tool_calls);
+      console.log('🔍 [Personal Review Check] result.tool_calls type:', typeof result.tool_calls);
+      console.log('🔍 [Personal Review Check] result.tool_calls length:', result.tool_calls?.length);
+      
+      // Log each tool call structure
+      if (result.tool_calls && Array.isArray(result.tool_calls)) {
+        result.tool_calls.forEach((tc: any, idx: number) => {
+          console.log(`🔍 [Personal Review Check] Tool call ${idx}:`, {
+            tool: tc.tool,
+            hasResult: !!tc.result,
+            resultType: typeof tc.result,
+            resultKeys: tc.result && typeof tc.result === 'object' ? Object.keys(tc.result) : [],
+            fullToolCall: tc
+          });
+        });
+      }
+      
       const personalReviewTool = result.tool_calls?.find((tc: any) => tc.tool === 'fetch_and_review_games');
       const hasSelectGamesTool = Array.isArray(result.tool_calls) && result.tool_calls.some((tc: any) => tc?.tool === "select_games");
       // Check both detected_intent and orchestration mode for review detection
       const isGameReviewIntent = result.detected_intent === "game_review" || result.orchestration?.mode === "review";
       console.log('🔍 [Personal Review Check] personalReviewTool:', personalReviewTool);
+      
       if (personalReviewTool) {
+        console.log('🔍 [Personal Review Check] personalReviewTool keys:', Object.keys(personalReviewTool));
         console.log('🔍 [Personal Review Check] result object:', personalReviewTool.result);
-        console.log('🔍 [Personal Review Check] success:', personalReviewTool.result?.success);
-        console.log('🔍 [Personal Review Check] first_game:', personalReviewTool.result?.first_game);
-        console.log('🔍 [Personal Review Check] first_game_review:', personalReviewTool.result?.first_game_review ? 'EXISTS' : 'NULL');
+        console.log('🔍 [Personal Review Check] result object type:', typeof personalReviewTool.result);
+        
+        // Check if result is a string that needs parsing
+        if (typeof personalReviewTool.result === 'string') {
+          console.log('🔍 [Personal Review Check] Result is a string, attempting to parse...');
+          try {
+            const parsed = JSON.parse(personalReviewTool.result);
+            console.log('🔍 [Personal Review Check] Parsed result:', parsed);
+            console.log('🔍 [Personal Review Check] Parsed success:', parsed.success);
+            console.log('🔍 [Personal Review Check] Parsed first_game:', parsed.first_game);
+            console.log('🔍 [Personal Review Check] Parsed first_game_review:', parsed.first_game_review ? 'EXISTS' : 'NULL');
+            // Update the tool call with parsed result
+            personalReviewTool.result = parsed;
+          } catch (e) {
+            console.error('❌ [Personal Review Check] Failed to parse result string:', e);
+          }
+        }
+        
+        // Check if result exists and has expected structure
+        if (personalReviewTool.result && typeof personalReviewTool.result === 'object') {
+          console.log('🔍 [Personal Review Check] result keys:', Object.keys(personalReviewTool.result));
+          console.log('🔍 [Personal Review Check] success:', personalReviewTool.result.success);
+          console.log('🔍 [Personal Review Check] success type:', typeof personalReviewTool.result.success);
+          console.log('🔍 [Personal Review Check] first_game:', personalReviewTool.result.first_game);
+          console.log('🔍 [Personal Review Check] first_game type:', typeof personalReviewTool.result.first_game);
+          console.log('🔍 [Personal Review Check] first_game_review:', personalReviewTool.result.first_game_review ? 'EXISTS' : 'NULL');
+          console.log('🔍 [Personal Review Check] first_game_review type:', typeof personalReviewTool.result.first_game_review);
+          
+          // Also check nested structures
+          if (personalReviewTool.result.first_game) {
+            console.log('🔍 [Personal Review Check] first_game keys:', Object.keys(personalReviewTool.result.first_game));
+            console.log('🔍 [Personal Review Check] first_game.pgn:', personalReviewTool.result.first_game.pgn);
+          }
+        } else {
+          console.warn('⚠️ [Personal Review Check] No result object found or result is not an object');
+        }
+      } else {
+        console.log('🔍 [Personal Review Check] No personalReviewTool found');
       }
       
       // Check for personal review result (allow for missing PGN gracefully)
