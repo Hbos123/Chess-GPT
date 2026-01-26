@@ -70,6 +70,8 @@ const LESSON_ARROW_COLORS = {
 function HomeInner() {
   const searchParams = useSearchParams();
   const mobileParam = searchParams.get("mobile");
+  const settingsParam = searchParams.get("settings");
+  const checkoutStatus = searchParams.get("checkout");
   const [autoMobileMode, setAutoMobileMode] = useState(false);
 
   useEffect(() => {
