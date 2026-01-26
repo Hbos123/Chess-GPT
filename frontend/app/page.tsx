@@ -221,6 +221,29 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
     }
   }, []);
   
+  // Handle settings query param to open settings modal
+  useEffect(() => {
+    if (settingsParam === 'open') {
+      setShowHistory(true);
+      setOpenSettingsNonce((n) => n + 1);
+      
+      // Show success/cancel message if from checkout
+      if (checkoutStatus === 'success') {
+        console.log('Checkout successful');
+      } else if (checkoutStatus === 'canceled') {
+        console.log('Checkout canceled');
+      }
+      
+      // Clean up URL
+      if (typeof window !== 'undefined') {
+        const url = new URL(window.location.href);
+        url.searchParams.delete('settings');
+        url.searchParams.delete('checkout');
+        window.history.replaceState({}, '', url.toString());
+      }
+    }
+  }, [settingsParam, checkoutStatus]);
+  
   
   // Lesson system state
   const [showLessonBuilder, setShowLessonBuilder] = useState(false);
