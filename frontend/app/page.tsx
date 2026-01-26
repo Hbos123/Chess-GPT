@@ -3756,25 +3756,37 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
                   }
                 } else if (eventType === "game_loaded") {
                   // Chunked SSE: Game data for tab loading
+                  console.log("📦 [SSE] game_loaded received", { keys: Object.keys(data), hasFirstGame: !!data.first_game });
                   vLog("📦 SSE game_loaded received");
                   chunkedGameData = data;
                   onStatus({ phase: "loading", message: "Game loaded...", progress: 0.92, timestamp: Date.now() });
                 } else if (eventType === "stats_ready") {
                   // Chunked SSE: Statistics and charts
+                  console.log("📊 [SSE] stats_ready received", { keys: Object.keys(data) });
                   vLog("📊 SSE stats_ready received");
                   chunkedStatsData = data;
                   onStatus({ phase: "loading", message: "Statistics ready...", progress: 0.94, timestamp: Date.now() });
                 } else if (eventType === "narrative") {
                   // Chunked SSE: Narrative text
+                  console.log("📝 [SSE] narrative received", { hasNarrative: !!data.narrative });
                   vLog("📝 SSE narrative received");
                   chunkedNarrativeData = data;
                   onStatus({ phase: "loading", message: "Narrative ready...", progress: 0.96, timestamp: Date.now() });
                 } else if (eventType === "walkthrough_data") {
                   // Chunked SSE: Walkthrough data (minimal ply records)
+                  console.log("🚶 [SSE] walkthrough_data received", { plies: data.ply_records?.length, keys: Object.keys(data) });
                   vLog("🚶 SSE walkthrough_data received", { plies: data.ply_records?.length });
                   chunkedWalkthroughData = data;
                   onStatus({ phase: "loading", message: "Walkthrough ready...", progress: 0.98, timestamp: Date.now() });
                 } else if (eventType === "complete") {
+                  console.log("🎉 [SSE] complete received", { 
+                    hasToolCalls: !!data.tool_calls, 
+                    toolCallsCount: data.tool_calls?.length,
+                    chunkedGameData: !!chunkedGameData,
+                    chunkedStatsData: !!chunkedStatsData,
+                    chunkedNarrativeData: !!chunkedNarrativeData,
+                    chunkedWalkthroughData: !!chunkedWalkthroughData
+                  });
                   vLog("🎉 SSE complete received", (data.response?.slice(0, 140) || data.content?.slice(0, 140)));
                   setAnalysisInProgress(false);
                   
@@ -3811,12 +3823,13 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
                     console.log("📦 Merging chunked data into result...");
                     // Find the game review tool call and enhance it
                     mergedToolCalls = mergedToolCalls.map((tc: any) => {
-                      if (tc.tool === "fetch_and_review_games" || tc.result?._chunked) {
-                        // Check if result is truncated - if so, build from chunked data
+                      if (tc.tool === "fetch_and_review_games" || tc.result?._chunked || tc.result?._chunked === true) {
+                        // Check if result is truncated or chunked - if so, build from chunked data
                         const isTruncated = tc.result?._truncated === true;
-                        const baseResult = isTruncated ? {} : (tc.result || {});
+                        const isChunked = tc.result?._chunked === true;
+                        const baseResult = (isTruncated || isChunked) ? {} : (tc.result || {});
                         
-                        console.log(`📦 [Chunked Merge] Tool: ${tc.tool}, isTruncated: ${isTruncated}`);
+                        console.log(`📦 [Chunked Merge] Tool: ${tc.tool}, isTruncated: ${isTruncated}, isChunked: ${isChunked}`);
                         console.log(`📦 [Chunked Merge] chunkedGameData keys:`, chunkedGameData ? Object.keys(chunkedGameData) : []);
                         console.log(`📦 [Chunked Merge] chunkedStatsData keys:`, chunkedStatsData ? Object.keys(chunkedStatsData) : []);
                         console.log(`📦 [Chunked Merge] chunkedNarrativeData keys:`, chunkedNarrativeData ? Object.keys(chunkedNarrativeData) : []);
