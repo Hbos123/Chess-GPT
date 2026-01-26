@@ -3812,11 +3812,21 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
                     // Find the game review tool call and enhance it
                     mergedToolCalls = mergedToolCalls.map((tc: any) => {
                       if (tc.tool === "fetch_and_review_games" || tc.result?._chunked) {
+                        // Check if result is truncated - if so, build from chunked data
+                        const isTruncated = tc.result?._truncated === true;
+                        const baseResult = isTruncated ? {} : (tc.result || {});
+                        
+                        console.log(`📦 [Chunked Merge] Tool: ${tc.tool}, isTruncated: ${isTruncated}`);
+                        console.log(`📦 [Chunked Merge] chunkedGameData:`, !!chunkedGameData);
+                        console.log(`📦 [Chunked Merge] chunkedStatsData:`, !!chunkedStatsData);
+                        console.log(`📦 [Chunked Merge] chunkedNarrativeData:`, !!chunkedNarrativeData);
+                        console.log(`📦 [Chunked Merge] chunkedWalkthroughData:`, !!chunkedWalkthroughData);
+                        
                         return {
                           ...tc,
                           result: {
-                            ...tc.result,
-                            // Merge in chunked data
+                            ...baseResult,
+                            // Merge in chunked data (these will override truncated placeholder)
                             ...(chunkedGameData || {}),
                             ...(chunkedStatsData || {}),
                             ...(chunkedNarrativeData || {}),
@@ -3827,11 +3837,14 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
                               opening: chunkedWalkthroughData.opening || {},
                               game_metadata: chunkedWalkthroughData.game_metadata || {},
                               stats: chunkedWalkthroughData.stats || {}
-                            } : tc.result?.first_game_review,
-                            selected_key_moments: chunkedWalkthroughData?.selected_key_moments || tc.result?.selected_key_moments,
-                            selection_rationale: chunkedWalkthroughData?.selection_rationale || tc.result?.selection_rationale,
-                            pre_commentary_by_ply: chunkedWalkthroughData?.pre_commentary_by_ply || tc.result?.pre_commentary_by_ply,
-                            _chunked: false // Mark as merged
+                            } : (baseResult.first_game_review || chunkedWalkthroughData),
+                            selected_key_moments: chunkedWalkthroughData?.selected_key_moments || baseResult?.selected_key_moments,
+                            selection_rationale: chunkedWalkthroughData?.selection_rationale || baseResult?.selection_rationale,
+                            pre_commentary_by_ply: chunkedWalkthroughData?.pre_commentary_by_ply || baseResult?.pre_commentary_by_ply,
+                            // Ensure success is set if we have data
+                            success: baseResult.success !== undefined ? baseResult.success : (chunkedGameData || chunkedStatsData || chunkedNarrativeData ? true : undefined),
+                            _chunked: false, // Mark as merged
+                            _truncated: false // Clear truncation flag
                           }
                         };
                       }
@@ -6127,6 +6140,12 @@ If they ask about the game, refer to this data.
         console.log('🔍 [Personal Review Check] personalReviewTool keys:', Object.keys(personalReviewTool));
         console.log('🔍 [Personal Review Check] result object:', personalReviewTool.result);
         console.log('🔍 [Personal Review Check] result object type:', typeof personalReviewTool.result);
+        
+        // Check if result is truncated
+        if (personalReviewTool.result?._truncated === true) {
+          console.warn('⚠️ [Personal Review Check] Result is truncated! Size:', personalReviewTool.result._size);
+          console.warn('⚠️ [Personal Review Check] This should have been merged with chunked data. Check chunked data merge logic.');
+        }
         
         // Check if result is a string that needs parsing
         if (typeof personalReviewTool.result === 'string') {
