@@ -1,5 +1,5 @@
 """
-Supabase Client for Chess GPT
+Supabase Client for Chesster
 Handles all database operations with Supabase
 """
 

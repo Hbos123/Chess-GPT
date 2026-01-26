@@ -28,7 +28,7 @@ export default function DevTestPanel() {
       run: async () => {
         const response = await fetch(`${getBackendBase()}/meta`);
         const data = await response.json();
-        if (data.name === 'Chess GPT') {
+        if (data.name === 'Chesster') {
           return { passed: true, message: `Version ${data.version}` };
         }
         throw new Error('Invalid response');

@@ -469,7 +469,7 @@ export default function LoadGamePanel({ onLoad, onClose, initialTab = 'pgn' }: L
                 <p>
                   Drag & drop a board photo here or use the buttons below.
                   <br />
-                  Digital mode works best with Chess GPT screenshots. Physical boards are experimental.
+                  Digital mode works best with Chesster screenshots. Physical boards are experimental.
                 </p>
               )}
             </div>

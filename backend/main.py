@@ -229,7 +229,7 @@ def _ensure_stockfish_present() -> bool:
 
 # System prompt
 # System prompt for the LLM
-SYSTEM_PROMPT = """You are Chess GPT. You must not invent concrete evaluations, tablebase facts, or long variations. For any concrete claims (evals, PVs, winning lines, best moves), you rely on tool outputs the client provides from backend endpoints:
+SYSTEM_PROMPT = """You are Chesster. You must not invent concrete evaluations, tablebase facts, or long variations. For any concrete claims (evals, PVs, winning lines, best moves), you rely on tool outputs the client provides from backend endpoints:
 
 - analyze_position(fen, lines, depth) for evaluations, candidates, threats, and themes.
 - play_move(fen, user_move_san, engine_elo, time_ms) for engine replies during play.
@@ -765,7 +765,7 @@ async def lifespan(app: FastAPI):
             pass
 
 
-app = FastAPI(title="Chess GPT Backend", version="1.0.0", lifespan=lifespan)
+app = FastAPI(title="Chesster Backend", version="1.0.0", lifespan=lifespan)
 
 # Lightweight liveness probe for dev tooling / scripts.
 @app.get("/health")
@@ -1104,14 +1104,14 @@ class OpeningLessonRequest(BaseModel):
 
 @app.get("/")
 async def root():
-    return {"message": "Chess GPT Backend API", "status": "running"}
+    return {"message": "Chesster Backend API", "status": "running"}
 
 
 @app.get("/meta")
 async def get_meta():
     """Return metadata about the API."""
     return {
-        "name": "Chess GPT",
+        "name": "Chesster",
         "version": "1.0.0",
         "modes": ["PLAY", "ANALYZE", "TACTICS", "DISCUSS"],
         "system_prompt": SYSTEM_PROMPT

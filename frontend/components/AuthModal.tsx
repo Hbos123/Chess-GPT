@@ -167,7 +167,7 @@ export default function AuthModal({ onClose }: AuthModalProps) {
     <div className="auth-modal-overlay" onClick={handleOverlayClick}>
       <div className="auth-modal">
         <div className="auth-header">
-          <h2>♟️ Welcome to Chess GPT</h2>
+          <h2>♟️ Welcome to Chesster</h2>
           <p>Sign in to save your progress and access your data anywhere</p>
           {onClose && (
             <button className="auth-close-btn" onClick={onClose} aria-label="Close sign in dialog">

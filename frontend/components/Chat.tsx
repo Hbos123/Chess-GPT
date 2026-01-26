@@ -375,7 +375,7 @@ export default function Chat({
                   {msg.role === "user"
                     ? "You"
                     : msg.role === "assistant"
-                    ? "Chess GPT"
+                    ? "Chesster"
                     : "System"}
                   {msg.meta && (
                     <button 
@@ -475,7 +475,7 @@ export default function Chat({
         <div className="modal-overlay" onClick={() => setShowMetaModal(false)}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
-              <h3>📊 Chess GPT Analysis</h3>
+              <h3>📊 Chesster Analysis</h3>
               <button onClick={() => setShowMetaModal(false)} className="modal-close">×</button>
             </div>
             <div className="modal-body">
@@ -495,7 +495,7 @@ export default function Chat({
               
               {selectedMeta.structuredAnalysis && (
                 <div className="meta-section">
-                  <strong>Chess GPT Structured Analysis:</strong>
+                  <strong>Chesster Structured Analysis:</strong>
                   <pre className="meta-data">{selectedMeta.structuredAnalysis}</pre>
                 </div>
               )}

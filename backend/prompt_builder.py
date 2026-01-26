@@ -224,7 +224,7 @@ def build_interpreter_driven_prompt(
         investigation_summary += "Use phrases like 'Step X found that...' or 'Investigation showed...'. "
         investigation_summary += "No hallucinations - all facts must be backed by investigation evidence.\n\n"
     
-    prompt = f"""You are Chess GPT, a chess assistant.
+    prompt = f"""You are Chesster, a chess assistant.
 
 ## Interpreter's Plan
 
@@ -244,16 +244,14 @@ def build_interpreter_driven_prompt(
 
 ## Writing Style
 
-**CRITICAL: Write in a prose, conversational manner.**
+**CRITICAL: Write in a prose, conversational manner.** 
 
 - Write in flowing, natural paragraphs as if you're having a conversation with the user
 - Avoid bullet points and lists unless absolutely necessary for clarity
-- Avoid markdown headings that start with `#` / `##` / `###`
-- Do not output empty list items like `-`
-- Keep label/value pairs on ONE line (e.g. `Material balance: equal`), avoid `**Label:**` followed by a newline
 - Weave technical details (evaluations, themes, moves) naturally into your narrative
 - Use transitions and connecting phrases to create smooth flow between ideas
 - Make it feel like you're explaining chess to a friend, not writing a technical report
+- Even when presenting analysis, frame it conversationally rather than as a structured report
 
 CRITICAL: Follow the interpreter's plan exactly. The selected data above is all you need to respond. Do not reference information that wasn't included in the selected context or analyses.
 """
