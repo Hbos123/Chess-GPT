@@ -188,6 +188,7 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
     available_tools: any;
   } | null>(null);
   const [openSettingsNonce, setOpenSettingsNonce] = useState(0);
+  const [lightningMode, setLightningMode] = useState(false);
 
   // Stable per-tab session id for backend-side LLM prefix caching.
   // Use sessionStorage (tab-scoped) to avoid collisions across tabs.
@@ -216,44 +217,6 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
     }
   }, []);
   
-  // Console command handler for interpreter model
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    
-    // Expose global functions for console commands
-    (window as any).setInterpreterModel = (model: string) => {
-      if (!model || typeof model !== 'string') {
-        console.error('Usage: setInterpreterModel("gpt-4o-mini")');
-        return;
-      }
-      localStorage.setItem('CHESSTER_INTERPRETER_MODEL', model);
-      console.log(`✅ Interpreter model set to: ${model}`);
-    };
-    
-    (window as any).getInterpreterModel = () => {
-      const model = localStorage.getItem('CHESSTER_INTERPRETER_MODEL') || 'gpt-5-mini (default)';
-      console.log(`Current interpreter model: ${model}`);
-      return model;
-    };
-    
-    (window as any).clearInterpreterModel = () => {
-      localStorage.removeItem('CHESSTER_INTERPRETER_MODEL');
-      console.log(`✅ Interpreter model cleared, will use default: gpt-5-mini`);
-    };
-    
-    // Log available commands
-    console.log('%c🎮 Chesster Console Commands:', 'color: #4CAF50; font-weight: bold;');
-    console.log('  setInterpreterModel("gpt-4o-mini")  - Set interpreter model');
-    console.log('  getInterpreterModel()                - Get current interpreter model');
-    console.log('  clearInterpreterModel()              - Clear and use default');
-    
-    // Cleanup on unmount
-    return () => {
-      delete (window as any).setInterpreterModel;
-      delete (window as any).getInterpreterModel;
-      delete (window as any).clearInterpreterModel;
-    };
-  }, []);
   
   // Lesson system state
   const [showLessonBuilder, setShowLessonBuilder] = useState(false);
@@ -3363,6 +3326,53 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
       // so adding extra system-level tool policy here is redundant and wastes tokens.
       const finalMessages = messages;
       
+      // Extract last user message for tool call parsing
+      const lastUserMessageObj = finalMessages.find((m, idx, arr) => {
+        // Find last user message
+        for (let i = arr.length - 1; i >= 0; i--) {
+          if (arr[i].role === 'user') {
+            return i === idx;
+          }
+        }
+        return false;
+      });
+      const last_user_message = lastUserMessageObj?.content || '';
+      
+      // Parse tool calls from message (@tool_name(args))
+      const parseToolCalls = (message: string): Array<{tool: string, args: any}> => {
+        const toolCalls: Array<{tool: string, args: any}> = [];
+        const regex = /@(\w+)\s*\(([^)]*)\)/g;
+        let match;
+        
+        while ((match = regex.exec(message)) !== null) {
+          const toolName = match[1];
+          const argsString = match[2].trim();
+          
+          // Parse arguments - handle partial args with `-` placeholders
+          const args: any = {};
+          if (argsString) {
+            const argParts = argsString.split(',').map(s => s.trim());
+            // Store as array with placeholders, backend will map to tool schema
+            args._raw_args = argParts;
+          }
+          
+          toolCalls.push({ tool: toolName, args });
+        }
+        
+        return toolCalls;
+      };
+      
+      const parsedToolCalls = parseToolCalls(last_user_message);
+      const cleanedMessage = last_user_message.replace(/@\w+\s*\([^)]*\)/g, '').trim();
+      
+      // Update messages to use cleaned message (keep tool calls in context)
+      const messagesWithCleaned = finalMessages.map((msg) => {
+        if (msg.role === 'user' && msg.content === last_user_message) {
+          return { ...msg, content: cleanedMessage || msg.content };
+        }
+        return msg;
+      });
+      
       // Build context
       const cachedAnalysis = analysisCache[fen];
       let lastMoveInfo = null;
@@ -3428,14 +3438,15 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
         : null;
       
       const requestBody = JSON.stringify({
-        messages: finalMessages,
+        messages: messagesWithCleaned,
         temperature,
-        model,
+        model: lightningMode ? "gpt-4o-mini" : model,
         use_tools: useTools,
         session_id: sessionId,
         task_id: activeTab?.id || null,
         context,
-        interpreter_model: interpreterModel || undefined  // Include if set via console command
+        lightning_mode: lightningMode,
+        forced_tool_calls: parsedToolCalls.length > 0 ? parsedToolCalls : undefined
       });
       vLog("POST /llm_chat_stream bytes", requestBody.length);
       
@@ -13265,9 +13276,10 @@ Provide 2-3 sentences of natural language commentary explaining why this deviati
             <BottomComposer
               onSend={handleSendMessage}
               disabled={isAnalyzing}
-              placeholder={isAnalyzing ? "Analyzing position..." : "Ask about the position..."}
+              placeholder={isAnalyzing ? "Analyzing position..." : lightningMode ? "Ask or use @tool_name(args)..." : "Ask about the position..."}
               onOpenOptions={() => setShowRequestOptions(true)}
               optionsDisabled={isAnalyzing || isLegacyReviewing || isGeneratingLesson}
+              lightningMode={lightningMode}
             />
           )}
 
@@ -13439,13 +13451,17 @@ Provide 2-3 sentences of natural language commentary explaining why this deviati
                   <button
                     type="button"
                     onClick={() => {
+                      setLightningMode(!lightningMode);
                       setShowRequestOptions(false);
-                      handleAddBoard();
                     }}
-                    disabled={!fen}
-                    title={!fen ? "No position available" : "Add board to chat"}
+                    style={{
+                      background: lightningMode ? 'var(--accent-primary)' : 'transparent',
+                      color: lightningMode ? 'var(--bg-primary)' : 'var(--text-primary)',
+                      border: '1px solid var(--border-color)',
+                    }}
+                    title={lightningMode ? "Lightning Mode: Fast responses with gpt-4o-mini. Click to switch to Deep Thought mode." : "Lightning Mode: Fast responses but may forget tool calls. Use @tool_name(args) to mandate tools."}
                   >
-                    Add Board
+                    {lightningMode ? '⚡ Lightning Mode ON' : '⚡ Lightning Mode'}
                   </button>
                   <button 
                     type="button"

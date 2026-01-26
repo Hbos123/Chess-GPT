@@ -56,7 +56,7 @@ from srs_scheduler import SRSScheduler
 from drill_card import CardDatabase
 from chat_tools import ALL_TOOLS, get_tools_for_context
 from tool_executor import ToolExecutor
-from enhanced_system_prompt import TOOL_AWARE_SYSTEM_PROMPT
+from enhanced_system_prompt import TOOL_AWARE_SYSTEM_PROMPT, LIGHTNING_MODE_WARNING
 from request_interpreter import RequestInterpreter, execute_analysis_requests
 from prompt_builder import validate_interpreter_selections, build_interpreter_driven_prompt
 from orchestration_plan import OrchestrationPlan, Mode, ResponseStyle
@@ -3363,7 +3363,9 @@ class LLMRequest(BaseModel):
     use_tools: bool = True  # Enable function calling
     context: Optional[Dict[str, Any]] = None  # Board state, PGN, mode, etc.
     max_tool_iterations: int = 5  # Prevent infinite loops
-    interpreter_model: Optional[str] = None  # Override interpreter model (for console command)
+    interpreter_model: Optional[str] = None  # Override interpreter model
+    lightning_mode: bool = False  # Lightning mode: fast responses with gpt-4o-mini
+    forced_tool_calls: Optional[List[Dict[str, Any]]] = None  # Tool calls from @ syntax
 
 
 @app.post("/llm_chat")
@@ -3553,16 +3555,22 @@ async def llm_chat(request: LLMRequest):
             )
             
             # Build interpreter-driven prompt
+            base_prompt = TOOL_AWARE_SYSTEM_PROMPT
+            if request.lightning_mode:
+                base_prompt = LIGHTNING_MODE_WARNING + "\n\n" + base_prompt
+            
             system_prompt = build_interpreter_driven_prompt(
                 orchestration_plan,
                 filtered_context,
                 filtered_analyses,
-                TOOL_AWARE_SYSTEM_PROMPT
+                base_prompt
             )
             print(f"   📋 Using interpreter-driven prompt (filtered context: {len(filtered_context)} keys)")
         else:
             # Fallback if no orchestration plan (shouldn't happen, but safety)
             system_prompt = TOOL_AWARE_SYSTEM_PROMPT
+            if request.lightning_mode:
+                system_prompt = LIGHTNING_MODE_WARNING + "\n\n" + system_prompt
         
         if len(messages) > 0 and messages[0].get("role") == "system":
             # Check if structured output is forced
@@ -4130,14 +4138,68 @@ async def llm_chat_stream(request: LLMRequest, http_request: Request):
                 # Run interpreter
                 import time
                 interpreter_start = time.time()
+                
+                # Force gpt-4o-mini in lightning mode
+                interpreter_model = "gpt-4o-mini" if request.lightning_mode else request.interpreter_model
+                
                 orchestration_plan = await request_interpreter.interpret(
                     message=last_user_message,
                     context=context,
                     conversation_history=request.messages,
-                    model_override=request.interpreter_model  # Allow console command to override model
+                    model_override=interpreter_model
                 )
                 interpreter_time = time.time() - interpreter_start
                 print(f"🔍 [PERFORMANCE] Interpreter took {interpreter_time:.2f}s")
+                
+                # Suggest lightning mode if deep mode is slow
+                if interpreter_time > 10.0 and not request.lightning_mode:
+                    async for event in send_status_event_flushed("status", {
+                        "phase": "interpreting",
+                        "message": "💡 For faster responses, try Lightning Mode (⚡ button in Options)",
+                        "timestamp": _time.time(),
+                        "suggest_lightning_mode": True
+                    }):
+                        yield event
+                
+                # Handle forced tool calls from @ syntax
+                if request.forced_tool_calls and orchestration_plan:
+                    from orchestration_plan import ToolCall
+                    if not orchestration_plan.tool_sequence:
+                        orchestration_plan.tool_sequence = []
+                    
+                    for forced_tool in request.forced_tool_calls:
+                        tool_name = forced_tool.get("tool")
+                        raw_args = forced_tool.get("args", {}).get("_raw_args", [])
+                        
+                        # Map raw args to tool schema
+                        tool_def = next((t for t in ALL_TOOLS if t.get("function", {}).get("name") == tool_name), None)
+                        
+                        if tool_def:
+                            tool_params = tool_def.get("function", {}).get("parameters", {}).get("properties", {})
+                            param_names = list(tool_params.keys())
+                            
+                            # Build arguments dict from positional args
+                            tool_args = {}
+                            for idx, arg_value in enumerate(raw_args):
+                                if idx < len(param_names) and arg_value and arg_value != "-":
+                                    param_name = param_names[idx]
+                                    # Try to parse as JSON, fallback to string
+                                    try:
+                                        tool_args[param_name] = json.loads(arg_value)
+                                    except:
+                                        tool_args[param_name] = arg_value
+                            
+                            # Find existing tool in sequence or add it
+                            existing = next((t for t in orchestration_plan.tool_sequence if t.name == tool_name), None)
+                            if existing:
+                                # Merge arguments (forced args override)
+                                existing.arguments = {**existing.arguments, **tool_args}
+                            else:
+                                # Add new tool to sequence
+                                orchestration_plan.tool_sequence.append(
+                                    ToolCall(name=tool_name, arguments=tool_args)
+                                )
+                            print(f"🔧 [LIGHTNING] Forced tool call: {tool_name} with args: {tool_args}")
                 
                 # Log full orchestration plan
                 print(f"🔍 [DOWNSTREAM_FLOW] Interpreter returned orchestration_plan")
@@ -4391,16 +4453,22 @@ async def llm_chat_stream(request: LLMRequest, http_request: Request):
                 )
                 
                 # Build interpreter-driven prompt
+                base_prompt = TOOL_AWARE_SYSTEM_PROMPT
+                if request.lightning_mode:
+                    base_prompt = LIGHTNING_MODE_WARNING + "\n\n" + base_prompt
+                
                 system_prompt = build_interpreter_driven_prompt(
                     orchestration_plan,
                     filtered_context,
                     filtered_analyses,
-                    TOOL_AWARE_SYSTEM_PROMPT  # Base capabilities for reference
+                    base_prompt  # Base capabilities for reference
                 )
                 print(f"   📋 Using interpreter-driven prompt (filtered context: {len(filtered_context)} keys, analyses: {len(filtered_analyses)} keys)")
             else:
                 # Fallback if no orchestration plan (shouldn't happen, but safety)
                 system_prompt = TOOL_AWARE_SYSTEM_PROMPT
+                if request.lightning_mode:
+                    system_prompt = LIGHTNING_MODE_WARNING + "\n\n" + system_prompt
             
             messages.append({"role": "system", "content": system_prompt})
             messages.extend(request.messages)

@@ -257,7 +257,7 @@ class Summariser:
         # Model is configurable so we can dial cost/quality.
         # Default to cheaper model; `summarise()` includes a retry + fallback guard for reliability.
         self.model = os.getenv("SUMMARISER_MODEL", "gpt-5-mini")
-        self.fallback_model = os.getenv("SUMMARISER_FALLBACK_MODEL", "gpt-5-mini")
+        self.fallback_model = os.getenv("SUMMARISER_FALLBACK_MODEL", "gpt-5")
         try:
             self.max_retries = int(os.getenv("SUMMARISER_MAX_RETRIES", "1"))
         except Exception:
@@ -5973,6 +5973,7 @@ STRICT RULES (anti-hallucination and quality - these are mandatory):
                         task_seed=SUMMARISER_CONTRACT_V1,
                         user_text=cmd,
                         model=model,
+                        max_tokens=int(os.getenv("SUMMARISER_MAX_TOKENS", "1200")),
                     )
                     raw = json.dumps(parsed, ensure_ascii=False)
                 else:
@@ -6193,6 +6194,7 @@ FULL PGN WITH TAG/ROLE DELTAS:
                         task_seed=SUMMARISER_CONTRACT_V1,
                         user_text=cmd,
                         model=chosen_model,
+                        max_tokens=int(os.getenv("SUMMARISER_PROOFREADER_MAX_TOKENS", "900")),
                     )
 
                     if isinstance(repaired, dict) and not _is_low_quality_decision(repaired):

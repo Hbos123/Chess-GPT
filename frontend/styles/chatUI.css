@@ -6062,3 +6062,32 @@ stripe-pricing-table {
     min-height: 300px;
   }
 }
+
+.tool-suggestions-popup {
+  position: fixed;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  z-index: 1000;
+  max-height: 200px;
+  overflow-y: auto;
+  min-width: 280px;
+  max-width: 400px;
+}
+
+.tool-suggestions-popup > div {
+  padding: 10px 12px;
+  cursor: pointer;
+  border-radius: 4px;
+  margin-bottom: 4px;
+  background: transparent;
+  transition: background 0.2s, border-color 0.2s;
+  border: 1px solid transparent;
+}
+
+.tool-suggestions-popup > div:hover {
+  background: var(--bg-secondary);
+  border-color: var(--accent-primary);
+}
+
