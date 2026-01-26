@@ -99,6 +99,10 @@ function HomeInner() {
 }
 
 function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
+  const searchParams = useSearchParams();
+  const settingsParam = searchParams.get("settings");
+  const checkoutStatus = searchParams.get("checkout");
+  
   // Rotating placeholder text for hero composer
   const { text: rotatingPlaceholder, isVisible: placeholderVisible } = useRotatingPlaceholder();
   
