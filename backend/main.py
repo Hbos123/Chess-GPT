@@ -6861,7 +6861,8 @@ async def stripe_webhook(request: Request):
                 return {"status": "ok", "message": "No user_id found"}
             
             price_id = subscription.get("items", {}).get("data", [{}])[0].get("price", {}).get("id")
-            tier_id = None
+            # Default to "unpaid" if tier can't be determined (prevents null constraint violation)
+            tier_id = "unpaid"
             if price_id:
                 try:
                     tier_result = (
