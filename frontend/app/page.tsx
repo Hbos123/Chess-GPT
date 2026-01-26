@@ -6117,9 +6117,18 @@ If they ask about the game, refer to this data.
       const hasPgn = personalReviewTool?.result?.first_game?.pgn && personalReviewTool.result.first_game.pgn.length > 0;
       console.log('🔍 [Personal Review Check] hasPersonalReviewResult:', hasPersonalReviewResult, 'hasPgn:', hasPgn);
       
+      // Check if we have review data - if so, show it regardless of intent detection
+      const hasReviewData = hasPersonalReviewResult && 
+                           (personalReviewTool?.result?.first_game_review || 
+                            personalReviewTool?.result?.stats || 
+                            personalReviewTool?.result?.charts);
+      
       // Only auto-open review tabs when backend says we're actually doing a game review.
       // This prevents game LIST/SELECT requests from opening walkthrough tabs if the wrong tool was called.
-      if (hasPersonalReviewResult && hasPgn && isGameReviewIntent && !hasSelectGamesTool) {
+      // Check orchestration mode as well as detected_intent
+      const isReviewMode = isGameReviewIntent || result.orchestration?.mode === "review";
+      
+      if (hasReviewData && hasPgn && isReviewMode && !hasSelectGamesTool) {
         const reviewResult = personalReviewTool.result;
         console.log('🎯 [Personal Review] Loading game into tab');
         
