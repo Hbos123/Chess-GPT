@@ -364,7 +364,7 @@ function AuthCallbackInner() {
   return (
     <main className="auth-callback-screen">
       <div className={`auth-callback-card ${status}`}>
-        <h1>Chess GPT</h1>
+        <h1>Chesster</h1>
         <p>{message}</p>
         <button
           onClick={() => {

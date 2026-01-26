@@ -3,7 +3,7 @@ import "./styles.css";
 import Providers from "./providers";
 
 export const metadata: Metadata = {
-  title: "Chess GPT",
+  title: "Chesster",
   description: "AI-powered chess analysis and training",
   icons: {
     icon: [
@@ -18,20 +18,20 @@ export const metadata: Metadata = {
   appleWebApp: {
     capable: true,
     statusBarStyle: "black-translucent",
-    title: "Chess GPT",
+    title: "Chesster",
   },
   formatDetection: {
     telephone: false,
   },
   openGraph: {
     type: "website",
-    siteName: "Chess GPT",
-    title: "Chess GPT",
+    siteName: "Chesster",
+    title: "Chesster",
     description: "AI-powered chess analysis and training",
   },
   twitter: {
     card: "summary",
-    title: "Chess GPT",
+    title: "Chesster",
     description: "AI-powered chess analysis and training",
   },
 };
@@ -52,13 +52,6 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <head>
-        <script
-          async
-          src="https://js.stripe.com/v3/pricing-table.js"
-          crossOrigin="anonymous"
-        />
-      </head>
       <body>
         <div className="app-root">
           <Providers>{children}</Providers>

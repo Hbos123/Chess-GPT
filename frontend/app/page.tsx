@@ -4057,7 +4057,7 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
       .then((meta) => {
         setSystemPrompt(meta.system_prompt);
         if (messages.length === 0) {
-            addSystemMessage("Chess GPT ready! Ask me anything about chess, or make a move on the board to start playing. You can also say 'let's play', 'analyze', or 'give me a puzzle'!");
+            addSystemMessage("Chesster ready! Ask me anything about chess, or make a move on the board to start playing. You can also say 'let's play', 'analyze', or 'give me a puzzle'!");
           }
       })
       .catch((err) => {
@@ -4967,7 +4967,7 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
   }
 
   function addAutomatedMessage(content: string) {
-    // Add automated assistant message with "Chess GPT Automated" as sender
+    // Add automated assistant message with "Chesster Automated" as sender
     // Ensure proper line breaks (double newlines for paragraph breaks)
     const formattedContent = content.replace(/\n\n+/g, '\n\n').trim();
     const filteredContent = stripEmojis(formattedContent);
@@ -5943,7 +5943,7 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
 
     if (!llmEnabled) {
       // Provide helpful suggestions without LLM
-      let response = "Hello! I'm Chess GPT. ";
+      let response = "Hello! I'm Chesster. ";
       
       if (boardContext === "starting_position_empty") {
         response += "Here's what you can do:\n\n";
@@ -6024,7 +6024,7 @@ If they ask about the game, refer to this data.
         [
           { 
             role: "system", 
-            content: "You are Chess GPT, a friendly chess assistant. You help users play, analyze, and learn chess. Be warm, encouraging, and concise." 
+            content: "You are Chesster, a friendly chess assistant. You help users play, analyze, and learn chess. Be warm, encouraging, and concise." 
           },
           ...recentHistory,  // Include recent chat for context
           { role: "user", content: userMessage },  // Raw message, not wrapped
@@ -7164,7 +7164,7 @@ WEAVE the talking points into natural sentences. Make it sound like a chess comm
   }
 
   function generateChessGPTStructuredResponse(analysisData: any): string {
-    // Generate the structured Chess GPT response format
+    // Generate the structured Chesster response format
     const evalCp = analysisData.eval_cp || 0;
     const verdict = `${evalCp >= 0 ? '+' : ''}${(evalCp / 100).toFixed(2)} pawns`;
 
@@ -8173,7 +8173,7 @@ ${formatAnalysisCard(analysis.bestMoveReport.analysisAfter)}
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           messages: [
-            { role: 'system', content: 'You are Chess GPT.' },
+            { role: 'system', content: 'You are Chesster.' },
             { role: 'user', content: structuredPrompt }
           ],
           context: {

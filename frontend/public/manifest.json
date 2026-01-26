@@ -1,6 +1,6 @@
 {
-  "name": "Chess GPT",
-  "short_name": "Chess GPT",
+  "name": "Chesster",
+  "short_name": "Chesster",
   "description": "AI-powered chess analysis and training",
   "start_url": "/",
   "display": "standalone",
