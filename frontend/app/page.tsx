@@ -6127,7 +6127,7 @@ If they ask about the game, refer to this data.
       // Only auto-open review tabs when backend says we're actually doing a game review.
       // This prevents game LIST/SELECT requests from opening walkthrough tabs if the wrong tool was called.
       // Check orchestration mode as well as detected_intent
-      const isReviewMode = isGameReviewIntent || result.orchestration?.mode === "review";
+      const isReviewMode = isGameReviewIntent;
       
       if (hasReviewData && hasPgn && isReviewMode && !hasSelectGamesTool) {
         const reviewResult = personalReviewTool.result;
