@@ -15,6 +15,7 @@ import tempfile
 import tarfile
 import zipfile
 from datetime import datetime
+import copy
 
 from fastapi import FastAPI, HTTPException, Query, UploadFile, File, Form, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -5014,7 +5015,10 @@ async def llm_chat_stream(request: LLMRequest, http_request: Request):
             
             print(f"🔍 [DOWNSTREAM_FLOW] response_data built")
             # Log response_data but truncate very large fields
-            response_data_log = response_data.copy()
+            # IMPORTANT: deep-copy so log truncation never mutates the real response/tool results.
+            # A shallow copy here would mutate `response_data["tool_calls"]` (and nested dicts),
+            # breaking downstream chunked-SSE detection that relies on `first_game_review`.
+            response_data_log = copy.deepcopy(response_data)
             if "tool_calls" in response_data_log:
                 for tc in response_data_log["tool_calls"]:
                     if "result" in tc and isinstance(tc["result"], dict):
