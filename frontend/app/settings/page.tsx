@@ -1,9 +1,9 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 
-export default function SettingsPage() {
+function SettingsPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   
@@ -39,5 +39,24 @@ export default function SettingsPage() {
     }}>
       <div>Redirecting to settings...</div>
     </div>
+  );
+}
+
+export default function SettingsPage() {
+  return (
+    <Suspense fallback={
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        height: '100vh',
+        background: 'var(--bg-primary)',
+        color: 'var(--text-primary)'
+      }}>
+        <div>Loading...</div>
+      </div>
+    }>
+      <SettingsPageContent />
+    </Suspense>
   );
 }
