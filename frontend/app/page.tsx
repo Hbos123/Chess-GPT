@@ -10018,7 +10018,6 @@ We are in a guided chess walkthrough.
 
 Context:
 - Review subject: ${reviewSubject || 'unknown'} (focus_color=${focusColor || 'unknown'}, player_color=${playerColor || 'unknown'})
-- Narrative focus: ${narrativeFocus || 'N/A'}
 - Step type: ${stepType}
 - Mover: ${moverLabel} (${moverColor})
 - Move: ${moveNumber ? `Move ${moveNumber}: ${moveSan}` : moveSan}
@@ -10030,8 +10029,8 @@ Context:
 Write 1–2 sentences of pre-analysis coach commentary that:
 - Explains why this moment matters / what to watch for
 - Does NOT reveal the best move or suggest any specific move
-- If Retry allowed, end with a short invitation like “Try to find a better continuation” (no move names)
-- Avoid “10. Qb3” formatting; if you mention move number, use “Move 10: …”
+- If Retry allowed, end with a short invitation like "Try to find a better continuation" (no move names)
+- Avoid "10. Qb3" formatting; if you mention move number, use "Move 10: …"
 `;
 
     try {
