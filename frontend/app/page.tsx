@@ -3345,6 +3345,9 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
     graphData?: any
   }> {
     return new Promise((resolve, reject) => {
+      // Capture abortSignal in outer scope for use in promise chain
+      const signal = abortSignal;
+      
       // Per-request run id to avoid cross-run status mixing in the UI.
       const streamRunId = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
       const isVerboseAI =
@@ -3503,7 +3506,7 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
         method: "POST",
             headers: { "Content-Type": "application/json", ...headers },
         body: requestBody,
-        signal: abortSignal
+        signal: signal
           }).then(async (response) => ({ response, interactionId }));
         })
         .then(async ({ response, interactionId }) => {
