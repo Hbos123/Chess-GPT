@@ -5045,39 +5045,56 @@ async def llm_chat_stream(request: LLMRequest, http_request: Request):
             # ============================================================
             
             # Check if we have game review data that needs chunking
-            # Use the flag we set during pre-execution (most reliable)
-            # Fallback to direct check if flag wasn't set (backwards compatibility)
+            # Check pre_executed_tool_calls FIRST (before stripping) - most reliable
+            # Then fallback to tool_calls_made (after stripping)
             has_game_review = False
             game_review_data = None
-            print(f"   🔍 Checking {len(tool_calls_made)} tool calls for game review data...")
+            print(f"   🔍 Checking for game review data...")
             
-            for tc in tool_calls_made:
+            # First, check pre_executed_tool_calls (original, before stripping)
+            # This is where we set the flag, so it should definitely be here
+            for tc in pre_executed_tool_calls:
                 result = tc.get("result")
-                tool_name = tc.get("tool", "")
+                tool_name = tc.get("name", "")
                 
-                # Primary check: Look for the flag we set during pre-execution
-                if result and isinstance(result, dict) and result.get("_needs_chunked_sse"):
-                    has_game_review = True
-                    game_review_data = result
-                    print(f"   ✅ Found game review data (flagged during pre-exec): games_analyzed={result.get('games_analyzed', 0)}")
-                    break
-                
-                # Fallback check: Direct inspection (for backwards compatibility or if flag wasn't set)
                 if (tool_name == "fetch_and_review_games" and 
                     isinstance(result, dict) and 
-                    result.get("success") == True):
+                    result.get("_needs_chunked_sse")):
+                    has_game_review = True
+                    game_review_data = result
+                    print(f"   ✅ Found game review data (from pre_executed): games_analyzed={result.get('games_analyzed', 0)}")
+                    break
+            
+            # Fallback: Check tool_calls_made (after stripping) if not found above
+            if not has_game_review:
+                print(f"   🔍 Checking {len(tool_calls_made)} tool calls for game review data...")
+                for tc in tool_calls_made:
+                    result = tc.get("result")
+                    tool_name = tc.get("tool", "")
                     
-                    has_review_data = (
-                        result.get("first_game_review") is not None or
-                        result.get("first_game") is not None or
-                        result.get("games_analyzed", 0) > 0
-                    )
-                    
-                    if has_review_data:
+                    # Primary check: Look for the flag we set during pre-execution
+                    if result and isinstance(result, dict) and result.get("_needs_chunked_sse"):
                         has_game_review = True
                         game_review_data = result
-                        print(f"   ✅ Found game review data (direct check): games_analyzed={result.get('games_analyzed', 0)}")
+                        print(f"   ✅ Found game review data (flagged during pre-exec): games_analyzed={result.get('games_analyzed', 0)}")
                         break
+                    
+                    # Fallback check: Direct inspection (for backwards compatibility or if flag wasn't set)
+                    if (tool_name == "fetch_and_review_games" and 
+                        isinstance(result, dict) and 
+                        result.get("success") == True):
+                        
+                        has_review_data = (
+                            result.get("first_game_review") is not None or
+                            result.get("first_game") is not None or
+                            result.get("games_analyzed", 0) > 0
+                        )
+                        
+                        if has_review_data:
+                            has_game_review = True
+                            game_review_data = result
+                            print(f"   ✅ Found game review data (direct check): games_analyzed={result.get('games_analyzed', 0)}")
+                            break
             
             if has_game_review and game_review_data:
                 print(f"   📦 Using chunked SSE for game review data...")
