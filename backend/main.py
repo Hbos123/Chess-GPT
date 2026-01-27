@@ -15,7 +15,6 @@ import tempfile
 import tarfile
 import zipfile
 from datetime import datetime
-import copy
 
 from fastapi import FastAPI, HTTPException, Query, UploadFile, File, Form, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -5015,10 +5014,7 @@ async def llm_chat_stream(request: LLMRequest, http_request: Request):
             
             print(f"🔍 [DOWNSTREAM_FLOW] response_data built")
             # Log response_data but truncate very large fields
-            # IMPORTANT: deep-copy so log truncation never mutates the real response/tool results.
-            # A shallow copy here would mutate `response_data["tool_calls"]` (and nested dicts),
-            # breaking downstream chunked-SSE detection that relies on `first_game_review`.
-            response_data_log = copy.deepcopy(response_data)
+            response_data_log = response_data.copy()
             if "tool_calls" in response_data_log:
                 for tc in response_data_log["tool_calls"]:
                     if "result" in tc and isinstance(tc["result"], dict):
@@ -5034,13 +5030,31 @@ async def llm_chat_stream(request: LLMRequest, http_request: Request):
             # ============================================================
             
             # Check if we have game review data that needs chunking
+            # This works for both single game reviews and multiple game reviews
             has_game_review = False
             game_review_data = None
             for tc in tool_calls_made:
-                if isinstance(tc.get("result"), dict) and tc["result"].get("first_game_review"):
-                    has_game_review = True
-                    game_review_data = tc["result"]
-                    break
+                result = tc.get("result")
+                tool_name = tc.get("tool", "")
+                
+                # Check for fetch_and_review_games tool with successful result
+                # Look for game review indicators: first_game_review, first_game, or analyzed_games
+                if (tool_name == "fetch_and_review_games" and 
+                    isinstance(result, dict) and 
+                    result.get("success") == True):
+                    
+                    # Check if we have any game review data (works for single or multiple games)
+                    has_review_data = (
+                        result.get("first_game_review") is not None or  # Single game review
+                        result.get("first_game") is not None or  # Game data available
+                        result.get("games_analyzed", 0) > 0  # Multiple games analyzed
+                    )
+                    
+                    if has_review_data:
+                        has_game_review = True
+                        game_review_data = result
+                        print(f"   ✅ Found game review data in {tool_name}: games_analyzed={result.get('games_analyzed', 0)}")
+                        break
             
             if has_game_review and game_review_data:
                 print(f"   📦 Using chunked SSE for game review data...")
