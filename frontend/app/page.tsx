@@ -9958,20 +9958,26 @@ Write 1–2 sentences of pre-analysis coach commentary that:
 `;
 
     try {
-      const { content } = await callLLM(
-        [
-          {
-            role: "system",
-            content:
-              "You are a concise chess coach. Write 1–2 sentences. No move spoilers. Never name the best move. Never output SAN suggestions. Avoid lists."
-          },
-          { role: "user", content: prompt }
-        ],
-        0.6,
-        "gpt-4o-mini",
-        false
-      );
-      return (content || "").trim();
+      // Show loading indicator while generating commentary
+      const loadingId = addLoadingMessage('llm', 'Generating walkthrough commentary...');
+      try {
+        const { content } = await callLLM(
+          [
+            {
+              role: "system",
+              content:
+                "You are a concise chess coach. Write 1–2 sentences. No move spoilers. Never name the best move. Never output SAN suggestions. Avoid lists."
+            },
+            { role: "user", content: prompt }
+          ],
+          0.6,
+          "gpt-4o-mini",
+          false
+        );
+        return (content || "").trim();
+      } finally {
+        removeLoadingMessage(loadingId);
+      }
     } catch (e) {
       if (allowRetry) return "This is a key turning point—see if you can find a cleaner continuation from here.";
       return "This is a key moment—let’s see what it changed in the position.";
