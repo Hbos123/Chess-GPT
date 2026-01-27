@@ -159,14 +159,29 @@ export default function Chat({
     cleaned = cleaned.replace(/^###\s+(.+?)$/gm, '**$1**\n');
     
     // Normalize whitespace around bold text to prevent unwanted line breaks
-    // Remove line breaks immediately before bold text (unless preceded by a paragraph break or punctuation)
-    // Handle various patterns: space+newline, newline+space, multiple spaces, etc.
-    cleaned = cleaned.replace(/([^\n\s])\s+\n\s*\*\*/g, '$1 **'); // Remove space+newline before bold
-    cleaned = cleaned.replace(/([^\n\s])\n\s*\*\*/g, '$1 **'); // Remove single line break before bold
-    cleaned = cleaned.replace(/\n\s*\*\*([^*]+?)\*\*\s*\n([^\n])/g, ' **$1** $2'); // Remove line breaks around bold when followed by text
-    cleaned = cleaned.replace(/([^\n])\n\s*\*\*([^*]+?)\*\*/g, '$1 **$2**'); // Remove line break before bold when preceded by text
-    // Handle cases where bold is on its own line with spaces
-    cleaned = cleaned.replace(/\n\s+\*\*([^*]+?)\*\*\s+/g, ' **$1** '); // Remove newline+spaces before bold on its own line
+    // CRITICAL FIX: Remove ALL line breaks immediately before bold text
+    // The backend often sends \n\n**bold** or text\n**bold**, which causes unwanted line breaks
+    // We need to catch ALL cases, not just those with preceding non-whitespace characters
+    
+    // Step 1: Remove double newlines before bold (most common from backend like "\n\n**Time Management**")
+    cleaned = cleaned.replace(/\n\s*\n\s*\*\*/g, ' **');
+    
+    // Step 2: Remove single newline before bold when preceded by any character (including spaces)
+    // This catches: "text\n**bold**" and "text \n**bold**"
+    cleaned = cleaned.replace(/([^\n])\s*\n\s*\*\*/g, '$1 **');
+    
+    // Step 3: Handle newline at the very start of string/line before bold
+    cleaned = cleaned.replace(/^\s*\n\s*\*\*/gm, '**');
+    
+    // Step 4: Handle newline before bold when bold is on its own line with spaces
+    cleaned = cleaned.replace(/\n\s+\*\*([^*]+?)\*\*\s*\n/g, ' **$1** ');
+    
+    // Step 5: Handle newline before bold when followed by text on same line
+    cleaned = cleaned.replace(/\n\s*\*\*([^*]+?)\*\*\s+([^\n])/g, ' **$1** $2');
+    
+    // Step 6: Final catch-all - remove any remaining newlines before bold
+    // This ensures we catch any edge cases we missed
+    cleaned = cleaned.replace(/\n\s*\*\*/g, ' **');
     
     // Process markdown bold text first (**text** or *text*)
     const processBoldText = (text: string): (string | JSX.Element)[] => {
