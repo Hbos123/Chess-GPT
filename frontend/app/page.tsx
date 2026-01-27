@@ -10152,7 +10152,7 @@ Write 1–2 sentences of pre-analysis coach commentary that:
         }]);
         
         // Analyze immediately
-        await analyzeMoveAtPosition(move);
+        await analyzeMoveAtPosition(move, true);
         
         if (allowRetry) {
           // Store retry data and add retry button
@@ -10199,7 +10199,7 @@ Write 1–2 sentences of pre-analysis coach commentary that:
         }]);
         
         // Analyze immediately
-        await analyzeMoveAtPosition(move);
+        await analyzeMoveAtPosition(move, true);
         setMessages(prev => [...prev, {
           role: 'button',
           content: '',
@@ -10224,7 +10224,7 @@ Write 1–2 sentences of pre-analysis coach commentary that:
         }]);
         
         // Analyze immediately
-        await analyzeMoveAtPosition(move);
+        await analyzeMoveAtPosition(move, true);
         setMessages(prev => [...prev, {
           role: 'button',
           content: '',
@@ -10253,7 +10253,7 @@ Write 1–2 sentences of pre-analysis coach commentary that:
         }]);
         
         // Analyze immediately
-        await analyzeMoveAtPosition(move);
+        await analyzeMoveAtPosition(move, true);
         
         // Add next button
         setMessages(prev => [...prev, {
@@ -10277,7 +10277,7 @@ Write 1–2 sentences of pre-analysis coach commentary that:
           timestamp: new Date()
         }]);
         
-        await analyzeMoveAtPosition(move);
+        await analyzeMoveAtPosition(move, true);
         setMessages(prev => [...prev, {
           role: 'button',
           content: '',
@@ -10599,7 +10599,7 @@ Be conversational and educational. Avoid restating move lists; focus on ideas.`;
     return `**Final Position (Move ${move.moveNumber})**\n\n${result} with a final evaluation of ${finalEvalStr}.\n\n**Overall Accuracy (side to move):** ${averageDisplay}%\n**Endgame Accuracy:** ${endgameDisplay}%\n**Game Tags:** ${tags}\n\nLet me summarise the decisive elements of this endgame.`;
   }
 
-  async function analyzeMoveAtPosition(move: any) {
+  async function analyzeMoveAtPosition(move: any, skipLLMGeneration: boolean = false) {
     const fenBefore = move.fenBefore || move.fen_before || move._fullRecord?.fen_before;
     const fenAfter = move.fen;
     if (!fenBefore) {
@@ -10640,9 +10640,9 @@ Be conversational and educational. Avoid restating move lists; focus on ideas.`;
       console.error("Failed to set board position:", error);
     }
 
-    // SKIP LLM generation if we're in a walkthrough context (commentary is pre-generated)
+    // SKIP LLM generation if explicitly told to (called from walkthrough) or if walkthrough is active
     // This prevents duplicate messages during game review walkthroughs
-    if (walkthroughActive) {
+    if (skipLLMGeneration || walkthroughActive) {
       console.log('[Walkthrough] Skipping on-the-spot LLM commentary - using pre-generated commentary instead');
       return; // Exit early - board is set up, but no LLM call needed
     }
