@@ -10120,7 +10120,7 @@ Write 1–2 sentences of pre-analysis coach commentary that:
         }]);
         
         // Analyze immediately
-        await analyzeMoveAtPosition(move);
+        await analyzeMoveAtPosition(move, true);
         
         // Return early to skip the normal message handling
         setMessages(prev => [...prev, {
@@ -10379,7 +10379,7 @@ Write 1–2 sentences of pre-analysis coach commentary that:
           timestamp: new Date()
         }]);
         
-        await analyzeMoveAtPosition(move);
+        await analyzeMoveAtPosition(move, true);
         
         // Offer retry if significant loss
         if (cpLoss > 100) {
