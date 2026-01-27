@@ -9743,6 +9743,9 @@ ${formatAnalysisCard(analysis.bestMoveReport.analysisAfter)}
         return;
       }
       
+      // Extract queryIntent early so it's available throughout the function
+      const queryIntent = data.queryIntent || 'general';
+      
       // Use pre-built sequence if available (from batch commentary generation)
       let sequence: any[] = data.sequence || [];
       
@@ -9750,7 +9753,6 @@ ${formatAnalysisCard(analysis.bestMoveReport.analysisAfter)}
       if (sequence.length === 0) {
         const moves = Array.isArray(data.moves) ? data.moves : [];
         const selectedKeyMoments = Array.isArray(data.selectedKeyMoments) ? data.selectedKeyMoments : [];
-        const queryIntent = data.queryIntent || 'general';
         const leftTheoryMove = data.leftTheoryMove || null;
         
         console.log('🔄 [continueWalkthroughWithData] Extracted data - moves count:', moves.length, 'selectedKeyMoments:', selectedKeyMoments.length, 'queryIntent:', queryIntent);
