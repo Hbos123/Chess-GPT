@@ -3826,10 +3826,13 @@ Write your response now based on the game data provided."""
         user_id = context.get("user_id") if context else None
         if not user_id:
             return {"error": "user_id required in context"}
+        supabase_client = self.supabase_client or self.supabase
+        if not supabase_client:
+            return {"error": "Database client not available"}
         
         # Get habits data
         from personal_stats_manager import PersonalStatsManager
-        stats_manager = PersonalStatsManager(self.supabase)
+        stats_manager = PersonalStatsManager(supabase_client)
         habits_data = stats_manager.get_habits_for_frontend(user_id)
         
         habits = habits_data.get("habits", [])
@@ -3844,7 +3847,7 @@ Write your response now based on the game data provided."""
         top_habits = habits_sorted[:top_n]
         
         # Get recent games for win rate
-        games = self.supabase.get_active_reviewed_games(user_id, limit=30)
+        games = supabase_client.get_active_reviewed_games(user_id, limit=30)
         if not games:
             return {"error": "No games available"}
         
