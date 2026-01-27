@@ -3120,9 +3120,10 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
           }
           
           // Display narrative if available
+          // NOTE: Narrative is handled in handleLLMResponse to avoid duplicates
+          // Don't add it here to prevent duplicate messages
           if (result.narrative) {
-            console.log('📊 [Personal Review] Displaying narrative and charts');
-            addAssistantMessage(result.narrative);
+            console.log('📊 [Personal Review] Narrative available, will be displayed in handleLLMResponse');
           }
           
           // Auto-load first game into tab (ALWAYS create new tab since user asked for their Chess.com game)
@@ -6396,7 +6397,7 @@ If they ask about the game, refer to this data.
                 role: 'button',
                 content: '',
                 buttonAction: 'START_WALKTHROUGH',
-                buttonLabel: '🎓 Start Guided Walkthrough',
+                buttonLabel: 'Start Guided Walkthrough',
                 timestamp: new Date()
               }]);
             }, 100);
@@ -6408,8 +6409,9 @@ If they ask about the game, refer to this data.
           }
         }
 
-        // Always show the backend's LLM message if present (even if tab/walkthrough fails or is skipped).
-        if (typeof result.content === "string" && result.content.trim()) {
+        // Don't show result.content if we already showed the narrative (to avoid duplicates)
+        // The narrative contains the same information as result.content
+        if (!reviewResult.narrative && typeof result.content === "string" && result.content.trim()) {
           addAssistantMessage(result.content, undefined, result.graphData);
         } else if (!reviewResult.narrative) {
           addAssistantMessage("I fetched your game review data, but couldn't render the walkthrough. You can ask about specific moves or moments and I'll answer from the review.", undefined, result.graphData);
@@ -10584,7 +10586,8 @@ Be conversational and educational. Avoid restating move lists; focus on ideas.`;
           { role: "user", content: prompt },
         ],
         0.6,
-        "gpt-4o-mini"
+        "gpt-4o-mini",
+        false  // Disable tools to prevent setup_position error (we just need a coach note, not tool calls)
       );
 
       const llmContent = (llmResponse?.content || "").trim();
@@ -11669,7 +11672,7 @@ Be conversational and natural. Don't use bullet points. Don't ask questions at t
           role: 'button',
           content: '',
           buttonAction: 'START_WALKTHROUGH',
-          buttonLabel: '🎓 Start Guided Walkthrough'
+          buttonLabel: 'Start Guided Walkthrough'
         }]);
         
         setTimeout(() => {
@@ -12826,6 +12829,15 @@ Provide 2-3 sentences of natural language commentary explaining why this deviati
       addSystemMessage("Walkthrough cannot start yet: no review data.");
       return;
     }
+    
+    // Open board automatically (like lessons do)
+    if (!boardDockOpen) {
+      setBoardDockOpen(true);
+    }
+    
+    // Show loading state
+    setIsProcessingStep(true);
+    
     // Now actually start the walkthrough (not just setup)
     console.log('🎬 [startWalkthrough] Setting active and step 0');
     setWalkthroughActive(true);
@@ -12838,6 +12850,8 @@ Provide 2-3 sentences of natural language commentary explaining why this deviati
     } catch (err) {
       console.error('❌ [startWalkthrough] continueWalkthroughWithData threw:', err);
       addSystemMessage(`Walkthrough failed to start: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setIsProcessingStep(false);
     }
   }
 

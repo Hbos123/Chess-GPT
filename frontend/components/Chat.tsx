@@ -158,6 +158,12 @@ export default function Chat({
     cleaned = cleaned.replace(/([^\n])###\s+(.+?)$/gm, '$1\n\n**$2**\n');
     cleaned = cleaned.replace(/^###\s+(.+?)$/gm, '**$1**\n');
     
+    // Normalize whitespace around bold text to prevent unwanted line breaks
+    // Remove line breaks immediately before bold text (unless preceded by a paragraph break or punctuation)
+    cleaned = cleaned.replace(/([^\n\s])\n\s*\*\*/g, '$1 **'); // Remove single line break before bold
+    cleaned = cleaned.replace(/\n\s*\*\*([^*]+?)\*\*\s*\n([^\n])/g, ' **$1** $2'); // Remove line breaks around bold when followed by text
+    cleaned = cleaned.replace(/([^\n])\n\s*\*\*([^*]+?)\*\*/g, '$1 **$2**'); // Remove line break before bold when preceded by text
+    
     // Process markdown bold text first (**text** or *text*)
     const processBoldText = (text: string): (string | JSX.Element)[] => {
       const parts: (string | JSX.Element)[] = [];

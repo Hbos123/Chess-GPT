@@ -251,10 +251,15 @@ html, body {
   border: 1px solid var(--border-color);
   border-radius: 12px;
   box-shadow: 0 10px 30px var(--shadow);
-  display: flex;
+  display: none;
   flex-direction: column;
   min-width: 200px;
   overflow: hidden;
+}
+
+.user-menu:hover .user-dropdown,
+.user-menu:focus-within .user-dropdown {
+  display: flex;
 }
 
 .user-dropdown button {
@@ -6030,8 +6035,6 @@ html, body {
   }
 }
 
-
-
 /* ========================================
    STRIPE PRICING TABLE STYLING
    ======================================== */
@@ -6042,17 +6045,33 @@ html, body {
   min-height: 400px;
 }
 
-/* Stripe pricing table uses Shadow DOM, so we style via CSS custom properties */
+/* Override Stripe's default styles to match dark theme */
 stripe-pricing-table {
   display: block;
   width: 100%;
-  /* These CSS variables are passed to Stripe's Shadow DOM */
-  --pricing-table-background: var(--bg-primary);
-  --pricing-table-text: var(--text-primary);
-  --pricing-table-border: var(--border-color);
-  --pricing-table-button-background: var(--accent-primary);
-  --pricing-table-button-text: var(--bg-primary);
-  --pricing-table-button-hover: var(--accent-hover);
+}
+
+/* Use CSS custom properties to theme the pricing table */
+stripe-pricing-table::part(card) {
+  background: var(--bg-secondary) !important;
+  border: 1px solid var(--border-color) !important;
+  color: var(--text-primary) !important;
+}
+
+stripe-pricing-table::part(button) {
+  background: var(--accent-primary) !important;
+  color: var(--bg-primary) !important;
+  border: none !important;
+  border-radius: var(--radius-md) !important;
+}
+
+stripe-pricing-table::part(button):hover {
+  background: var(--accent-hover) !important;
+}
+
+/* Global styles for Stripe pricing table elements */
+stripe-pricing-table * {
+  color: var(--text-primary) !important;
 }
 
 /* Mobile responsive */
@@ -6062,32 +6081,3 @@ stripe-pricing-table {
     min-height: 300px;
   }
 }
-
-.tool-suggestions-popup {
-  position: fixed;
-  background: var(--bg-primary);
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-  z-index: 1000;
-  max-height: 200px;
-  overflow-y: auto;
-  min-width: 280px;
-  max-width: 400px;
-}
-
-.tool-suggestions-popup > div {
-  padding: 10px 12px;
-  cursor: pointer;
-  border-radius: 4px;
-  margin-bottom: 4px;
-  background: transparent;
-  transition: background 0.2s, border-color 0.2s;
-  border: 1px solid transparent;
-}
-
-.tool-suggestions-popup > div:hover {
-  background: var(--bg-secondary);
-  border-color: var(--accent-primary);
-}
-
