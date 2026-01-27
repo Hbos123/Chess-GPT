@@ -34,8 +34,21 @@ export const AVAILABLE_TOOLS: ToolDefinition[] = [
     ]
   },
   {
+    name: "fetch_games",
+    description: "Fetch games from Chess.com/Lichess (no analysis, fast)",
+    args: [
+      { name: "username", type: "string", required: true, description: "Username" },
+      { name: "platform", type: "string", required: true, description: "'chess.com' or 'lichess'" },
+      { name: "max_games", type: "integer", required: false, description: "Number to fetch (default 3)" },
+      { name: "time_control", type: "string", required: false, description: "rapid/blitz/bullet/all" },
+      { name: "result", type: "string", required: false, description: "win/loss/draw/all" },
+      { name: "color", type: "string", required: false, description: "white/black (both if omitted)" },
+      { name: "months_back", type: "integer", required: false, description: "How far back to search (default 6)" }
+    ]
+  },
+  {
     name: "fetch_and_review_games",
-    description: "Fetch and review games from Chess.com or Lichess",
+    description: "Fetch and analyze games with Stockfish (slower but complete)",
     args: [
       { name: "username", type: "string", required: true, description: "Chess.com or Lichess username" },
       { name: "platform", type: "string", required: true, description: "'chess.com' or 'lichess'" },
@@ -61,6 +74,25 @@ export const AVAILABLE_TOOLS: ToolDefinition[] = [
       { name: "fen", type: "string", required: false, description: "FEN string of position" },
       { name: "pgn", type: "string", required: false, description: "PGN string of game" },
       { name: "orientation", type: "string", required: false, description: "Board orientation: 'white' or 'black' (default 'white')" }
+    ]
+  },
+  {
+    name: "generate_graph",
+    description: "Generate performance graph from analyzed games",
+    args: [
+      { name: "graph_type", type: "string", required: true, description: "accuracy_trend/rating_progression/opening_success" },
+      { name: "data_type", type: "string", required: false, description: "overall_accuracy/piece_accuracy/time_accuracy" },
+      { name: "grouping", type: "string", required: false, description: "game/day/batch5 (default: game)" },
+      { name: "limit", type: "integer", required: false, description: "Number of games to include (default 20)" }
+    ]
+  },
+  {
+    name: "generate_table",
+    description: "Generate comparison table from games data",
+    args: [
+      { name: "table_type", type: "string", required: true, description: "opening_comparison/time_control_stats/color_comparison" },
+      { name: "games", type: "array", required: true, description: "Array of game data" },
+      { name: "filters", type: "object", required: false, description: "Additional filters" }
     ]
   }
 ];
