@@ -3695,6 +3695,10 @@ Write your response now based on the game data provided."""
         
         # Get tool arguments
         data_type = args.get("data_type")
+
+        # Special handling for recent performance with habits
+        if data_type == "recent_performance_with_habits":
+            return await self._build_performance_with_habits_graph(args, context)
         series_name = args.get("series_name", "Series")
         params = args.get("params", {})
         grouping = args.get("grouping", "game")
