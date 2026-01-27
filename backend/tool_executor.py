@@ -1259,7 +1259,7 @@ class ToolExecutor:
                     player_color
                 )
             
-            await emit_status(f"Selecting key moments...", 0.95, replace=True)
+            await emit_status(f"Selecting key moments from game analysis...", 0.95, replace=True)
             await asyncio.sleep(0)
             
             # Extract ply_records for query interpretation
@@ -1284,16 +1284,10 @@ class ToolExecutor:
                 selection_rationale.setdefault("review_subject", review_subject)
                 selection_rationale.setdefault("focus_color", player_color)
 
-            # Pre-generate walkthrough pre-commentary in background (non-blocking)
-            # Start it as a task but don't wait - we'll try to get it with timeout before returning
-            pre_commentary_task = asyncio.create_task(
-                self._generate_walkthrough_pre_commentary_by_ply(
-                    selected_moments=selected_moments,
-                    ply_records=first_game_ply_records,
-                    selection_rationale=selection_rationale,
-                    game_metadata=first_game_meta
-                )
-            )
+            # Skip pre-commentary generation - it's redundant since we generate commentary
+            # on-demand during walkthrough steps. This saves time during review generation.
+            # Pre-commentary will be generated dynamically when each walkthrough step executes.
+            pre_commentary_by_ply = {}
             
             # Loss diagnosis is now included in selection_rationale if applicable
             loss_diagnosis = selection_rationale.get("loss_diagnosis")
@@ -1320,19 +1314,6 @@ class ToolExecutor:
             )
             
             await emit_status(f"Preparing results...", 0.99, replace=True)
-            
-            # Try to get pre-commentary with a short timeout (5 seconds)
-            # If it's not ready, return empty dict - review can proceed without it
-            pre_commentary_by_ply = {}
-            try:
-                pre_commentary_by_ply = await asyncio.wait_for(pre_commentary_task, timeout=5.0)
-                print(f"   ✅ Pre-commentary completed: {len(pre_commentary_by_ply)} entries")
-            except asyncio.TimeoutError:
-                print(f"   ⏱️ Pre-commentary timeout - returning review without it (will continue in background)")
-                # Task continues in background but won't block response
-            except Exception as e:
-                print(f"   ⚠️ Pre-commentary error: {e}")
-                # Continue without pre-commentary
             
             return {
                 "success": True,

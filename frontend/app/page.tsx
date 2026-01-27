@@ -6375,9 +6375,10 @@ If they ask about the game, refer to this data.
           }
           
           // Automatically open PersonalReview component for profile reviews
-          // Check if we have stats/charts (profile review) vs just game review
+          // Only open for multi-game reviews (profile reviews), not single game reviews
           const hasProfileData = reviewResult.stats || reviewResult.charts || reviewResult.phase_stats;
-          if (hasProfileData) {
+          const isMultiGameReview = (reviewResult.games_analyzed || 0) > 1;
+          if (hasProfileData && isMultiGameReview) {
             console.log('🎯 [Personal Review] Opening PersonalReview component with profile data');
             setTimeout(() => {
               setShowPersonalReview(true);
