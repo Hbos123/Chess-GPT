@@ -208,6 +208,36 @@ def build_series(
             instances_by_point.append(sum(item.get("weight", 0) for item in items))
             continue
         
+        if kind == "habit_accuracy":
+            # Graph habit accuracy over time from habit history
+            # params: habit_name (required), or will use top habits by extremeness
+            habit_name = params.get("habit_name")
+            if habit_name:
+                # Single habit - extract from games' habit data
+                items = []
+                for g in games:
+                    # Games should have habit data attached
+                    habits = g.get("habits", [])
+                    for habit in habits:
+                        if habit.get("name") == habit_name:
+                            # Find history entry for this game's date
+                            game_date = g.get("game_date")
+                            if game_date:
+                                history = habit.get("history", [])
+                                for entry in history:
+                                    if entry.get("game_date") == game_date:
+                                        acc = entry.get("accuracy")
+                                        count = entry.get("count", 0)
+                                        items.append({"value": acc, "weight": count})
+                                        break
+                raw_values.append(weighted_mean(items))
+                instances_by_point.append(sum(item.get("weight", 0) for item in items))
+            else:
+                # No specific habit - this should be handled by caller
+                raw_values.append(None)
+                instances_by_point.append(0)
+            continue
+        
         # Unknown kind
         raw_values.append(None)
         instances_by_point.append(0)
