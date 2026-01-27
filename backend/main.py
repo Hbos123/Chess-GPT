@@ -5033,28 +5033,49 @@ async def llm_chat_stream(request: LLMRequest, http_request: Request):
             # This works for both single game reviews and multiple game reviews
             has_game_review = False
             game_review_data = None
+            print(f"   🔍 Checking {len(tool_calls_made)} tool calls for game review data...")
             for tc in tool_calls_made:
                 result = tc.get("result")
                 tool_name = tc.get("tool", "")
                 
+                print(f"   🔍 Tool: {tool_name}, has_result: {result is not None}, result_type: {type(result)}")
+                if isinstance(result, dict):
+                    result_keys = list(result.keys())[:10]  # First 10 keys
+                    print(f"   🔍 Result keys: {result_keys}...")
+                    print(f"   🔍 success: {result.get('success')}, type: {type(result.get('success'))}")
+                    print(f"   🔍 games_analyzed: {result.get('games_analyzed')}")
+                    print(f"   🔍 has first_game: {result.get('first_game') is not None}")
+                    print(f"   🔍 has first_game_review: {result.get('first_game_review') is not None}")
+                    print(f"   🔍 is_truncated: {result.get('_truncated')}")
+                
                 # Check for fetch_and_review_games tool with successful result
                 # Look for game review indicators: first_game_review, first_game, or analyzed_games
                 if (tool_name == "fetch_and_review_games" and 
-                    isinstance(result, dict) and 
-                    result.get("success") == True):
+                    isinstance(result, dict)):
                     
-                    # Check if we have any game review data (works for single or multiple games)
-                    has_review_data = (
-                        result.get("first_game_review") is not None or  # Single game review
-                        result.get("first_game") is not None or  # Game data available
-                        result.get("games_analyzed", 0) > 0  # Multiple games analyzed
-                    )
+                    # Check success - handle both True and truthy values
+                    success_value = result.get("success")
+                    is_successful = success_value is True or success_value == True
                     
-                    if has_review_data:
-                        has_game_review = True
-                        game_review_data = result
-                        print(f"   ✅ Found game review data in {tool_name}: games_analyzed={result.get('games_analyzed', 0)}")
-                        break
+                    print(f"   🔍 Checking {tool_name}: is_successful={is_successful}, success_value={success_value}")
+                    
+                    if is_successful:
+                        # Check if we have any game review data (works for single or multiple games)
+                        has_review_data = (
+                            result.get("first_game_review") is not None or  # Single game review
+                            result.get("first_game") is not None or  # Game data available
+                            result.get("games_analyzed", 0) > 0  # Multiple games analyzed
+                        )
+                        
+                        print(f"   🔍 has_review_data: {has_review_data}")
+                        
+                        if has_review_data:
+                            has_game_review = True
+                            game_review_data = result
+                            print(f"   ✅ Found game review data in {tool_name}: games_analyzed={result.get('games_analyzed', 0)}")
+                            break
+                    else:
+                        print(f"   ⚠️ Tool {tool_name} result not successful: success={success_value}")
             
             if has_game_review and game_review_data:
                 print(f"   📦 Using chunked SSE for game review data...")

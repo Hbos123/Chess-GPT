@@ -692,13 +692,14 @@ Examples:
 """
     
     try:
+        # gpt-5-mini doesn't support custom temperature - use None (defaults to 1)
         if llm_router:
             result = llm_router.complete_json(
                 session_id="default",
                 stage="key_moment_selector",
                 system_prompt="You are a chess game analyzer. Select the most relevant moves to show based on the user's query. Return only valid JSON.",
                 user_text=prompt,
-                temperature=0.3,
+                # Don't pass temperature for gpt-5 models - they only support default (1)
                 model="gpt-5-mini",
             )
         else:
@@ -710,8 +711,8 @@ Examples:
                     messages=[
                         {"role": "system", "content": "You are a chess game analyzer. Select the most relevant moves to show based on the user's query. Return only valid JSON."},
                         {"role": "user", "content": prompt}
-                    ],
-                    temperature=0.3
+                    ]
+                    # Don't pass temperature for gpt-5 models - they only support default (1)
                 )
             
             with concurrent.futures.ThreadPoolExecutor() as pool:
