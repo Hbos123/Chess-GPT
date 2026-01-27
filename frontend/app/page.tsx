@@ -3819,11 +3819,27 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
                     });
                   }
                   
-                  if (chunkedGameData || chunkedStatsData || chunkedNarrativeData || chunkedWalkthroughData) {
-                    console.log("📦 Merging chunked data into result...");
+                  // Check if we need to merge chunked data
+                  // Run merge if: (1) chunked data exists, OR (2) result is marked as chunked/truncated
+                  const hasChunkedData = chunkedGameData || chunkedStatsData || chunkedNarrativeData || chunkedWalkthroughData;
+                  const hasChunkedFlag = mergedToolCalls.some((tc: any) => 
+                    tc.tool === "fetch_and_review_games" && 
+                    (tc.result?._chunked === true || tc.result?._truncated === true)
+                  );
+                  const needsChunkedMerge = hasChunkedData || hasChunkedFlag;
+                  
+                  if (needsChunkedMerge) {
+                    console.log("📦 Merging chunked data into result...", {
+                      hasChunkedData,
+                      hasChunkedFlag,
+                      chunkedGameData: !!chunkedGameData,
+                      chunkedStatsData: !!chunkedStatsData,
+                      chunkedNarrativeData: !!chunkedNarrativeData,
+                      chunkedWalkthroughData: !!chunkedWalkthroughData
+                    });
                     // Find the game review tool call and enhance it
                     mergedToolCalls = mergedToolCalls.map((tc: any) => {
-                      if (tc.tool === "fetch_and_review_games" || tc.result?._chunked || tc.result?._chunked === true) {
+                      if (tc.tool === "fetch_and_review_games" || tc.result?._chunked === true || tc.result?._truncated === true) {
                         // Check if result is truncated or chunked - if so, build from chunked data
                         const isTruncated = tc.result?._truncated === true;
                         const isChunked = tc.result?._chunked === true;
