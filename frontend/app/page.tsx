@@ -10301,7 +10301,7 @@ Write 1–2 sentences of pre-analysis coach commentary that:
           timestamp: new Date()
         }]);
         
-        await analyzeMoveAtPosition(move);
+        await analyzeMoveAtPosition(move, true);
         
         // If it's a missed tactic, offer retry
         if (cpLoss > 50) {
@@ -10343,7 +10343,7 @@ Write 1–2 sentences of pre-analysis coach commentary that:
           timestamp: new Date()
         }]);
         
-        await analyzeMoveAtPosition(move);
+        await analyzeMoveAtPosition(move, true);
         setMessages(prev => [...prev, {
           role: 'button',
           content: '',
