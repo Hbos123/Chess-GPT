@@ -3327,7 +3327,8 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
     temperature: number = 0.7, 
     model: string = "gpt-4o-mini",
     useTools: boolean = true,
-    onStatus: (status: { phase: string; message: string; tool?: string; timestamp: number; replace?: boolean; progress?: number }) => void
+    onStatus: (status: { phase: string; message: string; tool?: string; timestamp: number; replace?: boolean; progress?: number }) => void,
+    abortSignal?: AbortSignal
   ): Promise<{
     content: string, 
     tool_calls?: any[], 
