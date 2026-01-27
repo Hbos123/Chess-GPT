@@ -854,7 +854,6 @@ class ToolExecutor:
             "unmet": sel.get("unmet", []),
         }
     
-    async def _fetch_and_review_games(self, args: Dict, status_callback = None, context: Dict = None) -> Dict:
     async def _fetch_games(self, args: Dict, status_callback = None, context: Dict = None) -> Dict:
         """
         Fetch games from Chess.com/Lichess WITHOUT Stockfish analysis.
