@@ -3902,11 +3902,17 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
                       return tc;
                     });
                   } else {
-                    // Even if no chunked data, check if result is truncated and log warning
+                    // Even if no chunked data, check if result is truncated/chunked and log warning
                     mergedToolCalls.forEach((tc: any) => {
-                      if (tc.tool === "fetch_and_review_games" && tc.result?._truncated === true) {
-                        console.warn('⚠️ [Chunked Merge] Result is truncated but no chunked data received! Size:', tc.result._size);
-                        console.warn('⚠️ [Chunked Merge] This may indicate chunked data events arrived after complete event');
+                      if (tc.tool === "fetch_and_review_games") {
+                        if (tc.result?._truncated === true) {
+                          console.warn('⚠️ [Chunked Merge] Result is truncated but no chunked data received! Size:', tc.result._size);
+                          console.warn('⚠️ [Chunked Merge] This may indicate chunked data events arrived after complete event');
+                        }
+                        if (tc.result?._chunked === true && !hasChunkedData) {
+                          console.warn('⚠️ [Chunked Merge] Result is marked as chunked but no chunked data received!');
+                          console.warn('⚠️ [Chunked Merge] Chunked events may have been lost or arrived out of order');
+                        }
                       }
                     });
                   }
