@@ -960,6 +960,7 @@ class ToolExecutor:
             "message": f"Fetched {len(formatted_games)} games from {platform}"
         }
 
+    async def _fetch_and_review_games(self, args: Dict, status_callback = None, context: Dict = None) -> Dict:
         """Workflow: Fetch + analyze games"""
         import asyncio
         
