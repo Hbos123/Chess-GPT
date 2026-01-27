@@ -877,7 +877,7 @@ class ToolExecutor:
                     print(f"   📎 Auto-injected from context.connected_accounts: {username} on {platform}")
         
         # Support both 'count' and 'max_games' as parameters
-        max_games = args.get("count") or args.get("max_games", 5)  # Default to 5 games
+        max_games = args.get("count") or args.get("max_games", 1)  # Default to 1 game
         games_to_analyze = args.get("games_to_analyze", max_games)  # Analyze all fetched by default
         depth = args.get("depth", 14)  # Fast for overview - deep analysis on-demand
         query = args.get("query", "")

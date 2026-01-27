@@ -39,7 +39,7 @@ export const AVAILABLE_TOOLS: ToolDefinition[] = [
     args: [
       { name: "username", type: "string", required: true, description: "Chess.com or Lichess username" },
       { name: "platform", type: "string", required: true, description: "'chess.com' or 'lichess'" },
-      { name: "max_games", type: "integer", required: false, description: "Number of games to fetch (default 5)" },
+      { name: "max_games", type: "integer", required: false, description: "Number of games to fetch (default 1)" },
       { name: "games_to_analyze", type: "integer", required: false, description: "Games to analyze (default: max_games)" },
       { name: "depth", type: "integer", required: false, description: "Analysis depth (default 15)" }
     ]
