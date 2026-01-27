@@ -2246,14 +2246,24 @@ Write your response now based on the game data provided."""
             from concurrent.futures import ThreadPoolExecutor
             
             if self.llm_router:
-                return self.llm_router.complete(
-                    session_id="default",
-                    stage="review_narrative",
-                    system_prompt=system_prompt,
-                    user_text=context,
-                    temperature=0.7,
-                    model="gpt-5",
-                ).strip()
+                # Wrap sync call in executor to avoid blocking async context
+                loop = asyncio.get_event_loop()
+                with ThreadPoolExecutor() as executor:
+                    narrative = await asyncio.wait_for(
+                        loop.run_in_executor(
+                            executor,
+                            lambda: self.llm_router.complete(
+                                session_id="default",
+                                stage="review_narrative",
+                                system_prompt=system_prompt,
+                                user_text=context,
+                                temperature=0.7,
+                                model="gpt-5",
+                            )
+                        ),
+                        timeout=20.0
+                    )
+                return narrative.strip()
             
             loop = asyncio.get_event_loop()
             with ThreadPoolExecutor() as executor:
@@ -2274,7 +2284,14 @@ Write your response now based on the game data provided."""
             
         except Exception as e:
             # No synthetic fallback narrative: avoid crashing the tool call.
-            print(f"⚠️ LLM narrative generation failed: {e}")
+            import traceback
+            error_type = type(e).__name__
+            error_msg = str(e) if e else "Unknown error (empty exception)"
+            error_tb = traceback.format_exc()
+            print(f"⚠️ LLM narrative generation failed: {error_type}: {error_msg}")
+            print(f"   Traceback (first 500 chars): {error_tb[:500]}")
+            if hasattr(e, '__dict__'):
+                print(f"   Exception details: {e.__dict__}")
             return ""
     
     def _generate_review_narrative_with_context(
@@ -2350,7 +2367,14 @@ Write your response now based on the game data provided."""
                         )
                     )
             except Exception as e:
-                print(f"⚠️ Failed to generate LLM narrative: {e}")
+                import traceback
+                error_type = type(e).__name__
+                error_msg = str(e) if e else "Unknown error (empty exception)"
+                error_tb = traceback.format_exc()
+                print(f"⚠️ Failed to generate LLM narrative: {error_type}: {error_msg}")
+                print(f"   Traceback (first 500 chars): {error_tb[:500]}")
+                if hasattr(e, '__dict__'):
+                    print(f"   Exception details: {e.__dict__}")
                 # Fall through to template-based generation
         
         avg_accuracy = _safe_float(summary.get('avg_accuracy'), 0.0)

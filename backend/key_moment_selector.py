@@ -694,14 +694,23 @@ Examples:
     try:
         # gpt-5-mini doesn't support custom temperature - use None (defaults to 1)
         if llm_router:
-            result = llm_router.complete_json(
-                session_id="default",
-                stage="key_moment_selector",
-                system_prompt="You are a chess game analyzer. Select the most relevant moves to show based on the user's query. Return only valid JSON.",
-                user_text=prompt,
-                # Don't pass temperature for gpt-5 models - they only support default (1)
-                model="gpt-5-mini",
-            )
+            # Wrap sync call in executor to avoid blocking async context
+            loop = asyncio.get_event_loop()
+            with concurrent.futures.ThreadPoolExecutor() as pool:
+                result = await asyncio.wait_for(
+                    loop.run_in_executor(
+                        pool,
+                        lambda: llm_router.complete_json(
+                            session_id="default",
+                            stage="key_moment_selector",
+                            system_prompt="You are a chess game analyzer. Select the most relevant moves to show based on the user's query. Return only valid JSON.",
+                            user_text=prompt,
+                            # Don't pass temperature for gpt-5 models - they only support default (1)
+                            model="gpt-5-mini",
+                        )
+                    ),
+                    timeout=8.0
+                )
         else:
             loop = asyncio.get_event_loop()
             
@@ -753,13 +762,20 @@ Examples:
         return result
         
     except Exception as e:
-        print(f"⚠️ LLM moment selection failed: {e}")
+        import traceback
+        error_type = type(e).__name__
+        error_msg = str(e) if e else "Unknown error (empty exception)"
+        error_tb = traceback.format_exc()
+        print(f"⚠️ LLM moment selection failed: {error_type}: {error_msg}")
+        print(f"   Traceback (first 500 chars): {error_tb[:500]}")
+        if hasattr(e, '__dict__'):
+            print(f"   Exception details: {e.__dict__}")
         # Return empty selection, will fallback to statistics-based
         return {
             "selected_plies": [],
             "narrative_focus": interpreter_intent or "Game review",
             "query_intent": "general",
-            "selection_rationale": f"LLM selection failed: {e}"
+            "selection_rationale": f"LLM selection failed: {error_type}: {error_msg}"
         }
 
 

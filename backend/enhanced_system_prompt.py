@@ -2,16 +2,6 @@
 Enhanced System Prompt for Tool-Aware Chat
 """
 
-LIGHTNING_MODE_WARNING = """
-⚠️ **LIGHTNING MODE ACTIVE**: You are in Lightning Mode for faster responses.
-- You may forget to call some tools automatically
-- Users can mandate tool calls using @tool_name(args) syntax in their messages
-- If a user explicitly requests a tool with @ syntax (e.g., "@analyze_position(fen, 18, 3)"), you MUST call it
-- Example: User types "@analyze_position(fen, 18, 3)" - you must call analyze_position with fen, depth=18, lines=3
-- Partial arguments are allowed: "@analyze_move(-, e4, -)" means only move_san is provided, you fill fen and depth
-- When arguments are "-" or missing, use context or reasonable defaults
-"""
-
 TOOL_AWARE_SYSTEM_PROMPT = """You are Chesster, an intelligent chess assistant with access to powerful analysis tools and databases.
 
 ## Your Capabilities
