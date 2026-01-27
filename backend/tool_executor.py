@@ -1284,12 +1284,15 @@ class ToolExecutor:
                 selection_rationale.setdefault("review_subject", review_subject)
                 selection_rationale.setdefault("focus_color", player_color)
 
-            # Pre-generate walkthrough pre-commentary immediately after key moments are selected
-            pre_commentary_by_ply = await self._generate_walkthrough_pre_commentary_by_ply(
-                selected_moments=selected_moments,
-                ply_records=first_game_ply_records,
-                selection_rationale=selection_rationale,
-                game_metadata=first_game_meta
+            # Pre-generate walkthrough pre-commentary in background (non-blocking)
+            # Start it as a task but don't wait - we'll try to get it with timeout before returning
+            pre_commentary_task = asyncio.create_task(
+                self._generate_walkthrough_pre_commentary_by_ply(
+                    selected_moments=selected_moments,
+                    ply_records=first_game_ply_records,
+                    selection_rationale=selection_rationale,
+                    game_metadata=first_game_meta
+                )
             )
             
             # Loss diagnosis is now included in selection_rationale if applicable
@@ -1318,6 +1321,19 @@ class ToolExecutor:
             
             await emit_status(f"Preparing results...", 0.99, replace=True)
             
+            # Try to get pre-commentary with a short timeout (5 seconds)
+            # If it's not ready, return empty dict - review can proceed without it
+            pre_commentary_by_ply = {}
+            try:
+                pre_commentary_by_ply = await asyncio.wait_for(pre_commentary_task, timeout=5.0)
+                print(f"   ✅ Pre-commentary completed: {len(pre_commentary_by_ply)} entries")
+            except asyncio.TimeoutError:
+                print(f"   ⏱️ Pre-commentary timeout - returning review without it (will continue in background)")
+                # Task continues in background but won't block response
+            except Exception as e:
+                print(f"   ⚠️ Pre-commentary error: {e}")
+                # Continue without pre-commentary
+            
             return {
                 "success": True,
                 "username": username,
@@ -1345,6 +1361,7 @@ class ToolExecutor:
                 "selection_rationale": selection_rationale,
                 "loss_diagnosis": loss_diagnosis,
                 # NEW: Batch pre-commentary for walkthrough steps (keyed by ply as string)
+                # May be empty if generation is still in progress
                 "pre_commentary_by_ply": pre_commentary_by_ply,
                 "charts": {
                     "accuracy_by_phase": aggregated.get("phase_stats", {}),
@@ -1462,21 +1479,34 @@ Return ONLY valid JSON in this exact format:
                     temperature=0.4,
                 )
 
+            # Add timeout to prevent hanging (20 seconds max)
             if self.llm_router:
-                parsed = self.llm_router.complete_json(
-                    session_id="default",
-                    stage="walkthrough_preanalysis",
-                    system_prompt="Return only valid JSON. No markdown. Follow constraints strictly.",
-                    user_text=prompt,
-                    temperature=0.4,
-                    model="gpt-5",
-                )
+                def call_llm_router():
+                    return self.llm_router.complete_json(
+                        session_id="default",
+                        stage="walkthrough_preanalysis",
+                        system_prompt="Return only valid JSON. No markdown. Follow constraints strictly.",
+                        user_text=prompt,
+                        temperature=0.4,
+                        model="gpt-5",
+                    )
+                
+                loop = asyncio.get_event_loop()
+                import concurrent.futures as _cf
+                with _cf.ThreadPoolExecutor(max_workers=1) as pool:
+                    parsed = await asyncio.wait_for(
+                        loop.run_in_executor(pool, call_llm_router),
+                        timeout=20.0
+                    )
                 content = json.dumps(parsed, ensure_ascii=False)
             else:
                 loop = asyncio.get_event_loop()
                 import concurrent.futures as _cf
                 with _cf.ThreadPoolExecutor(max_workers=1) as pool:
-                    response = await loop.run_in_executor(pool, call_openai)
+                    response = await asyncio.wait_for(
+                        loop.run_in_executor(pool, call_openai),
+                        timeout=20.0
+                    )
 
                 content = (response.choices[0].message.content or "").strip()
 
@@ -1503,8 +1533,13 @@ Return ONLY valid JSON in this exact format:
 
             return out
 
+        except asyncio.TimeoutError:
+            print(f"⚠️ Pre-commentary generation timed out after 20 seconds")
+            return {}
         except Exception as e:
             print(f"⚠️ Pre-commentary generation failed: {e}")
+            import traceback
+            traceback.print_exc()
             return {}
     
     async def _generate_training_session(self, args: Dict) -> Dict:
