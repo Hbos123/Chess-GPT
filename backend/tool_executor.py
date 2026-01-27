@@ -3815,3 +3815,131 @@ Write your response now based on the game data provided."""
             traceback.print_exc()
             return {"error": f"Failed to build graph: {str(e)}"}
 
+    async def _build_performance_with_habits_graph(self, args: Dict, context: Dict) -> Dict:
+        """
+        Build a graph showing recent performance (win rate) with top habits by extremeness.
+        Uses absolute value of significance (extremeness) to select top habits.
+        """
+        import uuid
+        from profile_analytics.graph_utils import group_by_game, group_by_day, group_by_batch5, assign_color
+        
+        user_id = context.get("user_id") if context else None
+        if not user_id:
+            return {"error": "user_id required in context"}
+        
+        # Get habits data
+        from personal_stats_manager import PersonalStatsManager
+        stats_manager = PersonalStatsManager(self.supabase)
+        habits_data = stats_manager.get_habits_for_frontend(user_id)
+        
+        habits = habits_data.get("habits", [])
+        if not habits:
+            return {"error": "No habits data available"}
+        
+        # Sort by extremeness (absolute significance) - highest first
+        habits_sorted = sorted(habits, key=lambda h: abs(h.get("extremeness", 0)), reverse=True)
+        
+        # Get top N habits (default 3, max 5)
+        top_n = min(args.get("top_habits", 3), 5)
+        top_habits = habits_sorted[:top_n]
+        
+        # Get recent games for win rate
+        games = self.supabase.get_active_reviewed_games(user_id, limit=30)
+        if not games:
+            return {"error": "No games available"}
+        
+        # Group games
+        grouping = args.get("grouping", "game")
+        if grouping == "day":
+            from profile_analytics.graph_utils import group_by_day
+            time_points = group_by_day(games)
+        elif grouping == "batch5":
+            from profile_analytics.graph_utils import group_by_batch5
+            time_points = group_by_batch5(games)
+        else:
+            from profile_analytics.graph_utils import group_by_game
+            time_points = group_by_game(games)
+        
+        # Build series for win rate
+        series_list = []
+        
+        # Win rate series
+        win_rate_values = []
+        for point in time_points:
+            point_games = point.get("games", [])
+            total = len(point_games)
+            wins = sum(1 for g in point_games if str(g.get("result", "")).lower() == "win")
+            win_rate_values.append((wins / total * 100) if total > 0 else None)
+        
+        series_list.append({
+            "id": str(uuid.uuid4()),
+            "name": "Win Rate",
+            "color": "#3b82f6",  # Blue
+            "rawValues": win_rate_values,
+            "normalizedValues": win_rate_values,  # Already 0-100
+        })
+        
+        # Build series for each top habit
+        # Collect all unique dates from games
+        all_dates = set()
+        for game in games:
+            game_date = game.get("game_date") or ""
+            if isinstance(game_date, str) and len(game_date) > 10:
+                game_date = game_date[:10]
+            if game_date:
+                all_dates.add(game_date)
+        
+        sorted_dates = sorted(all_dates)
+        
+        # For each habit, build accuracy series over time
+        colors = ["#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#06b6d4"]  # Green, amber, red, purple, cyan
+        
+        for idx, habit in enumerate(top_habits):
+            habit_name = habit.get("display_name", habit.get("name", "Unknown"))
+            habit_key = habit.get("name", "")
+            history = habit.get("history", [])
+            
+            # Create map of date -> accuracy
+            history_map = {entry.get("game_date", ""): entry.get("accuracy") for entry in history}
+            
+            # Build values for each time point
+            habit_values = []
+            for point in time_points:
+                point_games = point.get("games", [])
+                # Find games in this point that match habit's history dates
+                point_accuracies = []
+                for game in point_games:
+                    game_date = game.get("game_date") or ""
+                    if isinstance(game_date, str) and len(game_date) > 10:
+                        game_date = game_date[:10]
+                    if game_date in history_map:
+                        acc = history_map[game_date]
+                        if acc is not None:
+                            point_accuracies.append(acc)
+                
+                if point_accuracies:
+                    habit_values.append(sum(point_accuracies) / len(point_accuracies))
+                else:
+                    habit_values.append(None)
+            
+            series_list.append({
+                "id": str(uuid.uuid4()),
+                "name": habit_name,
+                "color": colors[idx % len(colors)],
+                "rawValues": habit_values,
+                "normalizedValues": habit_values,  # Accuracy is already 0-100
+            })
+        
+        # Build x labels
+        x_labels = [p.get("label", "") for p in time_points]
+        
+        graph_id = str(uuid.uuid4())
+        return {
+            "graph_id": graph_id,
+            "series": series_list,
+            "xLabels": x_labels,
+            "grouping": grouping,
+            "title": f"Recent Performance with Top {len(top_habits)} Habits",
+        }
+
+
