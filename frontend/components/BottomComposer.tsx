@@ -27,6 +27,9 @@ export default function BottomComposer({
   const [toolSuggestions, setToolSuggestions] = useState<ToolDefinition[]>([]);
   const [suggestionPosition, setSuggestionPosition] = useState({ top: 0, left: 0 });
   const [cursorPosition, setCursorPosition] = useState(0);
+  const [showArgHints, setShowArgHints] = useState(false);
+  const [currentTool, setCurrentTool] = useState<ToolDefinition | null>(null);
+  const [argHintsPosition, setArgHintsPosition] = useState({ top: 0, left: 0 });
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const warmUpTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const hasWarmedUpRef = useRef(false);
@@ -61,11 +64,59 @@ export default function BottomComposer({
     };
   }, [input]);
 
+  // Check if cursor is inside parentheses and show argument hints
+  const checkForArgHints = (value: string, cursorPos: number) => {
+    const textBeforeCursor = value.substring(0, cursorPos);
+    const lastAtIndex = textBeforeCursor.lastIndexOf('@');
+    
+    if (lastAtIndex === -1) {
+      setShowArgHints(false);
+      setCurrentTool(null);
+      return;
+    }
+    
+    const textAfterAt = textBeforeCursor.substring(lastAtIndex + 1);
+    const openParenIndex = textAfterAt.indexOf('(');
+    const closeParenIndex = textAfterAt.indexOf(')');
+    
+    // Check if cursor is inside parentheses
+    if (openParenIndex !== -1 && (closeParenIndex === -1 || closeParenIndex > openParenIndex)) {
+      // Cursor is inside parentheses - find the tool
+      const toolName = textAfterAt.substring(0, openParenIndex).trim();
+      const tool = AVAILABLE_TOOLS.find(t => t.name === toolName);
+      
+      if (tool) {
+        setCurrentTool(tool);
+        setShowArgHints(true);
+        
+        // Position arg hints popup above cursor
+        if (textareaRef.current) {
+          const rect = textareaRef.current.getBoundingClientRect();
+          const lineHeight = 24;
+          const lines = textBeforeCursor.split('\n').length;
+          setArgHintsPosition({
+            top: rect.top + (lines * lineHeight) - 200,
+            left: rect.left + 10
+          });
+        }
+      } else {
+        setShowArgHints(false);
+        setCurrentTool(null);
+      }
+    } else {
+      setShowArgHints(false);
+      setCurrentTool(null);
+    }
+  };
+
   const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const value = e.target.value;
     const cursorPos = e.target.selectionStart;
     setInput(value);
     setCursorPosition(cursorPos);
+    
+    // Check for argument hints first
+    checkForArgHints(value, cursorPos);
     
     // Check for @ symbol for tool suggestions
     const textBeforeCursor = value.substring(0, cursorPos);
@@ -77,7 +128,8 @@ export default function BottomComposer({
       const openParenIndex = textAfterAt.indexOf('(');
       const closeParenIndex = textAfterAt.indexOf(')');
       
-      if (openParenIndex === -1 || (openParenIndex !== -1 && (closeParenIndex === -1 || closeParenIndex > openParenIndex))) {
+      // Only show tool suggestions if we're NOT inside parentheses
+      if (openParenIndex === -1 || (openParenIndex !== -1 && closeParenIndex !== -1 && closeParenIndex < openParenIndex)) {
         // Show suggestions
         const searchTerm = textAfterAt.split('(')[0].trim();
         const filtered = AVAILABLE_TOOLS.filter(tool => 
@@ -104,11 +156,65 @@ export default function BottomComposer({
     }
   };
 
+  // Auto-complete tool call when Enter is pressed
+  const autoCompleteToolCall = (): boolean => {
+    const textBeforeCursor = input.substring(0, cursorPosition);
+    const textAfterCursor = input.substring(cursorPosition);
+    const lastAtIndex = textBeforeCursor.lastIndexOf('@');
+    
+    if (lastAtIndex === -1) return false;
+    
+    const textAfterAt = textBeforeCursor.substring(lastAtIndex + 1);
+    const openParenIndex = textAfterAt.indexOf('(');
+    
+    // If we're typing a tool name (before opening paren or no paren yet)
+    if (openParenIndex === -1) {
+      const searchTerm = textAfterAt.trim();
+      if (searchTerm.length === 0) return false;
+      
+      // Find exact match or best match
+      const exactMatch = AVAILABLE_TOOLS.find(t => t.name.toLowerCase() === searchTerm.toLowerCase());
+      const bestMatch = AVAILABLE_TOOLS.find(t => 
+        t.name.toLowerCase().startsWith(searchTerm.toLowerCase())
+      );
+      
+      const tool = exactMatch || bestMatch;
+      if (tool) {
+        // Complete the tool call
+        const argTemplate = tool.args
+          .map(arg => arg.required ? `-` : `-`)
+          .join(',');
+        
+        const toolCall = `@${tool.name}(${argTemplate})`;
+        const newText = 
+          input.substring(0, lastAtIndex + 1) + 
+          toolCall + 
+          textAfterCursor;
+        
+        setInput(newText);
+        setShowToolSuggestions(false);
+        
+        // Position cursor after @tool_name(
+        setTimeout(() => {
+          const newCursorPos = lastAtIndex + 1 + tool.name.length + 2;
+          textareaRef.current?.setSelectionRange(newCursorPos, newCursorPos);
+          textareaRef.current?.focus();
+        }, 0);
+        
+        return true; // Indicate we handled the Enter key
+      }
+    }
+    
+    return false;
+  };
+
   const handleSend = () => {
     if (input.trim() && !disabled) {
       onSend(input);
       setInput('');
       setShowToolSuggestions(false);
+      setShowArgHints(false);
+      setCurrentTool(null);
       hasWarmedUpRef.current = false; // Reset for next message
     }
   };
@@ -121,10 +227,18 @@ export default function BottomComposer({
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
+      // Try to auto-complete tool call first
+      if (autoCompleteToolCall()) {
+        e.preventDefault();
+        return;
+      }
+      
+      // Otherwise, send message
       e.preventDefault();
       handleSend();
     } else if (e.key === 'Escape') {
       setShowToolSuggestions(false);
+      setShowArgHints(false);
     } else if (e.key === 'ArrowDown' && showToolSuggestions && toolSuggestions.length > 0) {
       e.preventDefault();
       // Could implement keyboard navigation here
@@ -136,6 +250,43 @@ export default function BottomComposer({
     const textAfterCursor = input.substring(cursorPosition);
     const lastAtIndex = textBeforeCursor.lastIndexOf('@');
     
+    if (lastAtIndex === -1) {
+      // No @ found, just insert at cursor
+      const argTemplate = tool.args
+        .map(arg => arg.required ? `-` : `-`)
+        .join(',');
+      
+      const toolCall = `@${tool.name}(${argTemplate})`;
+      const newText = textBeforeCursor + toolCall + textAfterCursor;
+      
+      setInput(newText);
+      setShowToolSuggestions(false);
+      
+      setTimeout(() => {
+        const newCursorPos = textBeforeCursor.length + tool.name.length + 3; // After @tool_name(
+        textareaRef.current?.setSelectionRange(newCursorPos, newCursorPos);
+        textareaRef.current?.focus();
+      }, 0);
+      return;
+    }
+    
+    // Replace the partial tool call
+    const textAfterAt = textBeforeCursor.substring(lastAtIndex + 1);
+    const openParenIndex = textAfterAt.indexOf('(');
+    
+    let replacementStart: number;
+    let replacementEnd: number;
+    
+    if (openParenIndex === -1) {
+      // No opening paren yet - replace from @ to cursor
+      replacementStart = lastAtIndex;
+      replacementEnd = cursorPosition;
+    } else {
+      // Opening paren exists - replace from @ to cursor
+      replacementStart = lastAtIndex;
+      replacementEnd = cursorPosition;
+    }
+    
     // Build argument template with placeholders
     const argTemplate = tool.args
       .map(arg => arg.required ? `-` : `-`)
@@ -143,16 +294,16 @@ export default function BottomComposer({
     
     const toolCall = `@${tool.name}(${argTemplate})`;
     const newText = 
-      input.substring(0, lastAtIndex + 1) + 
+      input.substring(0, replacementStart) + 
       toolCall + 
-      textAfterCursor;
+      input.substring(replacementEnd);
     
     setInput(newText);
     setShowToolSuggestions(false);
     
     // Focus back on textarea and position cursor after @tool_name(
     setTimeout(() => {
-      const newCursorPos = lastAtIndex + 1 + tool.name.length + 2; // After @tool_name(
+      const newCursorPos = replacementStart + tool.name.length + 3; // After @tool_name(
       textareaRef.current?.setSelectionRange(newCursorPos, newCursorPos);
       textareaRef.current?.focus();
     }, 0);
@@ -245,14 +396,60 @@ export default function BottomComposer({
               <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '6px', lineHeight: '1.4' }}>
                 {tool.description}
               </div>
-              <div style={{ fontSize: '11px', color: 'var(--text-secondary)', fontFamily: 'monospace', opacity: 0.8 }}>
+              <div style={{ fontSize: '11px', color: 'var(--text-secondary)', fontFamily: 'monospace', opacity: '0.8' }}>
                 ({tool.args.map(a => `${a.name}${a.required ? '' : '?'}`).join(', ')})
               </div>
             </div>
           ))}
         </div>
       )}
+
+      {/* Argument Hints Popup - shows when cursor is inside parentheses */}
+      {showArgHints && currentTool && (
+        <div 
+          className="arg-hints-popup"
+          style={{
+            position: 'fixed',
+            top: argHintsPosition.top,
+            left: argHintsPosition.left,
+            background: 'var(--bg-primary)',
+            border: '1px solid var(--border-color)',
+            borderRadius: '8px',
+            padding: '12px',
+            maxWidth: '350px',
+            zIndex: 1001,
+            boxShadow: '0 4px 12px rgba(0,0,0,0.15)'
+          }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div style={{ fontWeight: '600', fontSize: '13px', color: 'var(--accent-primary)', marginBottom: '8px' }}>
+            @{currentTool.name} Arguments:
+          </div>
+          <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
+            {currentTool.args.map((arg, idx) => (
+              <div 
+                key={idx}
+                style={{ 
+                  marginBottom: '6px',
+                  paddingLeft: '8px',
+                  borderLeft: `2px solid ${arg.required ? 'var(--error-color)' : 'var(--border-color)'}`
+                }}
+              >
+                <div style={{ fontWeight: '500', color: 'var(--text-primary)', marginBottom: '2px' }}>
+                  {arg.name}
+                  {arg.required && <span style={{ color: 'var(--error-color)', marginLeft: '4px' }}>*</span>}
+                  <span style={{ fontSize: '11px', color: 'var(--text-secondary)', marginLeft: '6px', fontFamily: 'monospace' }}>
+                    ({arg.type})
+                  </span>
+                </div>
+                <div style={{ fontSize: '11px', color: 'var(--text-secondary)', lineHeight: '1.4' }}>
+                  {arg.description}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
-
