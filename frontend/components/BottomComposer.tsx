@@ -8,6 +8,8 @@ interface BottomComposerProps {
   onOpenOptions?: () => void;
   optionsDisabled?: boolean;
   lightningMode?: boolean;
+  isProcessing?: boolean;
+  onCancel?: () => void;
 }
 
 export default function BottomComposer({ 
@@ -17,6 +19,8 @@ export default function BottomComposer({
   onOpenOptions,
   optionsDisabled,
   lightningMode = false,
+  isProcessing = false,
+  onCancel,
 }: BottomComposerProps) {
   const [input, setInput] = useState('');
   const [showToolSuggestions, setShowToolSuggestions] = useState(false);
@@ -109,6 +113,12 @@ export default function BottomComposer({
     }
   };
 
+  const handleCancel = () => {
+    if (onCancel) {
+      onCancel();
+    }
+  };
+
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
@@ -177,10 +187,11 @@ export default function BottomComposer({
           )}
           <button 
             className="send-button"
-            onClick={handleSend}
-            disabled={!input.trim() || disabled}
+            onClick={isProcessing ? handleCancel : handleSend}
+            disabled={!isProcessing && (!input.trim() || disabled)}
+            style={isProcessing ? { backgroundColor: 'var(--error-color)', color: 'white' } : {}}
           >
-            {disabled ? 'Analyzing...' : 'Send'}
+            {isProcessing ? 'Stop' : (disabled ? 'Analyzing...' : 'Send')}
           </button>
         </div>
       </div>

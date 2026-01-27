@@ -318,6 +318,19 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
   const [inlineContexts, setInlineContexts] = useState<{id: string, fen: string, pgn?: string, orientation?: 'white' | 'black'}[]>([]);
   const [showDevTools, setShowDevTools] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [abortController, setAbortController] = useState<AbortController | null>(null);
+
+  // Cancel processing function
+  function cancelProcessing() {
+    if (abortController) {
+      abortController.abort();
+      setAbortController(null);
+    }
+    setIsAnalyzing(false);
+    setIsProcessingStep(false);
+    setIsGeneratingLesson(false);
+    addSystemMessage("Processing cancelled.");
+  }
   type LoaderEntry = {
     id: string;
     type: 'stockfish' | 'llm' | 'game_review' | 'training' | 'general';
@@ -3489,7 +3502,8 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
           return fetch(`${getBackendBase()}/llm_chat_stream`, {
         method: "POST",
             headers: { "Content-Type": "application/json", ...headers },
-        body: requestBody
+        body: requestBody,
+        signal: abortSignal
           }).then(async (response) => ({ response, interactionId }));
         })
         .then(async ({ response, interactionId }) => {
@@ -4127,7 +4141,14 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
             break;
           }
         }
-      }).catch(reject);
+      }).catch((error) => {
+        // Handle abort errors gracefully
+        if (error.name === 'AbortError' || (abortSignal && abortSignal.aborted)) {
+          reject(new Error('Request cancelled'));
+        } else {
+          reject(error);
+        }
+      });
     });
   }
 
@@ -6204,7 +6225,8 @@ If they ask about the game, refer to this data.
             }
             return [...prev, enrichedStatus];
           });
-        }
+        },
+        abortController?.signal
       );
       
       // ===== HANDLE PERSONAL REVIEW (fetch_and_review_games) =====
@@ -8077,7 +8099,8 @@ Instructions: Respond naturally and conversationally. Use themes to justify any 
             }
             return [...prev, enrichedStatus];
           });
-        }
+        },
+        abortController?.signal
       );
       
       const meta = { 
@@ -8742,6 +8765,11 @@ ${formatAnalysisCard(analysis.bestMoveReport.analysisAfter)}
       addUserMessage(message);
     }
 
+    // Create abort controller for this request BEFORE processing
+    const controller = new AbortController();
+    setAbortController(controller);
+    setIsAnalyzing(true);
+
     let lower = message.toLowerCase().trim();
     
     // Create context early for use throughout function
@@ -8758,8 +8786,22 @@ ${formatAnalysisCard(analysis.bestMoveReport.analysisAfter)}
     // The LLM interpreter handles all intent detection intelligently
     // No more frontend pattern matching
     // ============================================================
-    console.log('🤖 Routing to LLM interpreter');
-    await handleGeneralChat(message);
+    try {
+      console.log('🤖 Routing to LLM interpreter');
+      await handleGeneralChat(message);
+    } catch (err: any) {
+      // Handle abort errors gracefully
+      if (err.message === 'Request cancelled' || err.name === 'AbortError') {
+        console.log('Request cancelled by user');
+        addSystemMessage("Request cancelled.");
+      } else {
+        console.error('Error in handleGeneralChat:', err);
+        addSystemMessage(`Error: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    } finally {
+      setIsAnalyzing(false);
+      setAbortController(null);
+    }
     return;
     
     // Old intent detection code has been completely removed
@@ -9697,23 +9739,28 @@ ${formatAnalysisCard(analysis.bestMoveReport.analysisAfter)}
         return;
       }
       
-      const moves = Array.isArray(data.moves) ? data.moves : [];
-      const selectedKeyMoments = Array.isArray(data.selectedKeyMoments) ? data.selectedKeyMoments : [];
-      const queryIntent = data.queryIntent || 'general';
-      const leftTheoryMove = data.leftTheoryMove || null;
+      // Use pre-built sequence if available (from batch commentary generation)
+      let sequence: any[] = data.sequence || [];
       
-      console.log('🔄 [continueWalkthroughWithData] Extracted data - moves count:', moves.length, 'selectedKeyMoments:', selectedKeyMoments.length, 'queryIntent:', queryIntent);
-      if (moves.length === 0) {
-        console.warn('⚠️ [continueWalkthroughWithData] No moves available in walkthrough data.');
-        addSystemMessage("Unable to start walkthrough: review returned no moves.");
-        setWalkthroughActive(false);
-        return;
-      }
-    
-    const sequence: any[] = [];
-    
-    // ========== USE LLM-SELECTED MOMENTS IF AVAILABLE ==========
-    if (selectedKeyMoments.length > 0) {
+      // If no pre-built sequence, build it now (fallback for old code paths)
+      if (sequence.length === 0) {
+        const moves = Array.isArray(data.moves) ? data.moves : [];
+        const selectedKeyMoments = Array.isArray(data.selectedKeyMoments) ? data.selectedKeyMoments : [];
+        const queryIntent = data.queryIntent || 'general';
+        const leftTheoryMove = data.leftTheoryMove || null;
+        
+        console.log('🔄 [continueWalkthroughWithData] Extracted data - moves count:', moves.length, 'selectedKeyMoments:', selectedKeyMoments.length, 'queryIntent:', queryIntent);
+        if (moves.length === 0) {
+          console.warn('⚠️ [continueWalkthroughWithData] No moves available in walkthrough data.');
+          addSystemMessage("Unable to start walkthrough: review returned no moves.");
+          setWalkthroughActive(false);
+          return;
+        }
+        
+        sequence = [];
+        
+        // ========== USE LLM-SELECTED MOMENTS IF AVAILABLE ==========
+        if (selectedKeyMoments.length > 0) {
       console.log('🎯 [Walkthrough] Using LLM-selected key moments:', {
         count: selectedKeyMoments.length,
         queryIntent: queryIntent,
@@ -9777,77 +9824,78 @@ ${formatAnalysisCard(analysis.bestMoveReport.analysisAfter)}
         console.log(`   ✅ Adding final position at ply ${finalMove.ply}`);
       }
       
-      console.log('🎯 [Walkthrough] LLM-driven sequence built:', {
-        steps: sequence.length,
-        queryIntent: queryIntent,
-        types: sequence.map((s: any) => s.type)
-      });
+          console.log('🎯 [Walkthrough] LLM-driven sequence built:', {
+            steps: sequence.length,
+            queryIntent: queryIntent,
+            types: sequence.map((s: any) => s.type)
+          });
+          
+        } else {
+          // ========== FALLBACK: Original error-based selection ==========
+          console.log('⚠️ [Walkthrough] No LLM-selected moments, using fallback error-based selection');
       
-    } else {
-      // ========== FALLBACK: Original error-based selection ==========
-      console.log('⚠️ [Walkthrough] No LLM-selected moments, using fallback error-based selection');
-      
-      const crossed200 = Array.isArray(data.crossed200) ? data.crossed200 : [];
-      const crossed300 = Array.isArray(data.crossed300) ? data.crossed300 : [];
-      
-      // Collect error candidates
-      const candidates: any[] = [];
-      moves.forEach((m: any) => {
-        if (m.quality === 'blunder') {
-          candidates.push({ move: m, type: 'blunder', cpLoss: m.cpLoss || 0 });
-        } else if (m.quality === 'mistake') {
-          candidates.push({ move: m, type: 'mistake', cpLoss: m.cpLoss || 0 });
-        } else if (m.quality === 'inaccuracy' && (m.cpLoss || 0) >= 50) {
-          candidates.push({ move: m, type: 'inaccuracy', cpLoss: m.cpLoss || 0 });
+          const crossed200 = Array.isArray(data.crossed200) ? data.crossed200 : [];
+          const crossed300 = Array.isArray(data.crossed300) ? data.crossed300 : [];
+          
+          // Collect error candidates
+          const candidates: any[] = [];
+          moves.forEach((m: any) => {
+            if (m.quality === 'blunder') {
+              candidates.push({ move: m, type: 'blunder', cpLoss: m.cpLoss || 0 });
+            } else if (m.quality === 'mistake') {
+              candidates.push({ move: m, type: 'mistake', cpLoss: m.cpLoss || 0 });
+            } else if (m.quality === 'inaccuracy' && (m.cpLoss || 0) >= 50) {
+              candidates.push({ move: m, type: 'inaccuracy', cpLoss: m.cpLoss || 0 });
+            }
+          });
+          
+          // Sort by CP loss, take top 10
+          candidates.sort((a, b) => b.cpLoss - a.cpLoss);
+          const selectedErrors = candidates.slice(0, 10);
+          const errorPlies = new Set(selectedErrors.map(e => e.move.ply));
+          
+          // Add opening if exists
+          const lastTheoryMoveFound = moves.filter((m: any) => m.isTheoryMove).pop();
+          if (lastTheoryMoveFound) {
+            sequence.push({ type: 'opening', move: lastTheoryMoveFound });
+          }
+          
+          // Add left theory
+          if (leftTheoryMove) {
+            sequence.push({ type: 'left_theory', move: leftTheoryMove });
+          }
+          
+          // Add errors chronologically
+          selectedErrors.sort((a, b) => a.move.ply - b.move.ply);
+          selectedErrors.forEach(err => {
+            sequence.push({ type: err.type, move: err.move });
+          });
+          
+          // Add advantage shifts not already in errors
+          const allShifts = [
+            ...crossed200.map((m: any) => ({ ...m, threshold: 200 })),
+            ...crossed300.map((m: any) => ({ ...m, threshold: 300 }))
+          ];
+          allShifts.sort((a, b) => a.ply - b.ply);
+          allShifts.slice(0, 5).forEach((shift: any) => {
+            if (!errorPlies.has(shift.ply)) {
+              sequence.push({ type: 'advantage_shift', move: shift });
+            }
+          });
+          
+          // Final position
+          const finalMove = moves[moves.length - 1];
+          if (finalMove) {
+            sequence.push({ type: 'final', move: finalMove });
+          }
+          
+          console.log('🎯 [Walkthrough] Fallback sequence built:', {
+            steps: sequence.length,
+            errors: selectedErrors.length,
+            types: sequence.map((s: any) => s.type)
+          });
         }
-      });
-      
-      // Sort by CP loss, take top 10
-      candidates.sort((a, b) => b.cpLoss - a.cpLoss);
-      const selectedErrors = candidates.slice(0, 10);
-      const errorPlies = new Set(selectedErrors.map(e => e.move.ply));
-      
-      // Add opening if exists
-      const lastTheoryMoveFound = moves.filter((m: any) => m.isTheoryMove).pop();
-      if (lastTheoryMoveFound) {
-        sequence.push({ type: 'opening', move: lastTheoryMoveFound });
       }
-      
-      // Add left theory
-      if (leftTheoryMove) {
-        sequence.push({ type: 'left_theory', move: leftTheoryMove });
-      }
-      
-      // Add errors chronologically
-      selectedErrors.sort((a, b) => a.move.ply - b.move.ply);
-      selectedErrors.forEach(err => {
-        sequence.push({ type: err.type, move: err.move });
-      });
-      
-      // Add advantage shifts not already in errors
-      const allShifts = [
-        ...crossed200.map((m: any) => ({ ...m, threshold: 200 })),
-        ...crossed300.map((m: any) => ({ ...m, threshold: 300 }))
-      ];
-      allShifts.sort((a, b) => a.ply - b.ply);
-      allShifts.slice(0, 5).forEach((shift: any) => {
-        if (!errorPlies.has(shift.ply)) {
-          sequence.push({ type: 'advantage_shift', move: shift });
-        }
-      });
-      
-      // Final position
-      const finalMove = moves[moves.length - 1];
-      if (finalMove) {
-        sequence.push({ type: 'final', move: finalMove });
-      }
-      
-      console.log('🎯 [Walkthrough] Fallback sequence built:', {
-        steps: sequence.length,
-        errors: selectedErrors.length,
-        types: sequence.map((s: any) => s.type)
-      });
-    }
     
     // Check if we're done
     if (step >= sequence.length) {
@@ -9875,7 +9923,7 @@ ${formatAnalysisCard(analysis.bestMoveReport.analysisAfter)}
     
       const current = sequence[step];
       console.log('▶️ [continueWalkthroughWithData] Executing step', step + 1, 'of', sequence.length, 'type:', current?.type);
-      await executeWalkthroughStep(current, step + 1, sequence.length, data);
+      await executeWalkthroughStep(current, step + 1, sequence.length, data, step); // Pass step index for commentary lookup
     
     setWalkthroughStep(step + 1);
     } catch (err) {
@@ -9905,7 +9953,9 @@ ${formatAnalysisCard(analysis.bestMoveReport.analysisAfter)}
     stepType: string,
     move: any,
     walkData: any,
-    allowRetry: boolean
+    allowRetry: boolean,
+    skipLoadingIndicator: boolean = false,
+    stepIndex?: number
   ): Promise<string> {
     const meta = (walkData?.game_metadata || walkData?.gameMetadata || {}) as any;
     const rationale = (walkData?.selectionRationale || walkData?.selection_rationale || {}) as any;
@@ -9928,6 +9978,27 @@ ${formatAnalysisCard(analysis.bestMoveReport.analysisAfter)}
     const evalBefore = typeof move?.evalBefore === 'number' ? move.evalBefore : null;
     const evalAfter = typeof move?.evalAfter === 'number' ? move.evalAfter : null;
 
+    // Check for pre-generated commentary first (from batch generation)
+    // Use stepIndex if provided (most reliable), otherwise find by matching step
+    if (walkData.preGeneratedCommentary) {
+      let commentaryIndex: number | null = null;
+      
+      if (typeof stepIndex === 'number' && stepIndex >= 0) {
+        // Use provided step index (most reliable)
+        commentaryIndex = stepIndex;
+      } else if (walkData.sequence) {
+        // Fallback: find step in sequence
+        commentaryIndex = walkData.sequence.findIndex((s: any) => 
+          s.move?.ply === move?.ply || 
+          (s.move?.moveNumber === move?.moveNumber && s.move?.color === move?.color)
+        );
+      }
+      
+      if (commentaryIndex !== null && commentaryIndex >= 0 && walkData.preGeneratedCommentary.has(commentaryIndex)) {
+        return walkData.preGeneratedCommentary.get(commentaryIndex)!;
+      }
+    }
+    
     // If backend provided pre-commentary, use it (no per-step LLM call).
     const plyKey =
       typeof move?.ply === 'number' ? String(move.ply) :
@@ -9958,8 +10029,8 @@ Write 1–2 sentences of pre-analysis coach commentary that:
 `;
 
     try {
-      // Show loading indicator while generating commentary
-      const loadingId = addLoadingMessage('llm', 'Generating walkthrough commentary...');
+      // Show loading indicator while generating commentary (unless batch generation is handling it)
+      const loadingId = skipLoadingIndicator ? null : addLoadingMessage('llm', 'Generating walkthrough commentary...');
       try {
         const { content } = await callLLM(
           [
@@ -9976,7 +10047,7 @@ Write 1–2 sentences of pre-analysis coach commentary that:
         );
         return (content || "").trim();
       } finally {
-        removeLoadingMessage(loadingId);
+        if (loadingId) removeLoadingMessage(loadingId);
       }
     } catch (e) {
       if (allowRetry) return "This is a key turning point—see if you can find a cleaner continuation from here.";
@@ -9984,7 +10055,7 @@ Write 1–2 sentences of pre-analysis coach commentary that:
     }
   }
 
-  async function executeWalkthroughStep(step: any, stepNum: number, totalSteps: number, contextData?: any) {
+  async function executeWalkthroughStep(step: any, stepNum: number, totalSteps: number, contextData?: any, stepIndex?: number) {
     console.log('🎬 [executeWalkthroughStep] Starting step:', stepNum, 'type:', step?.type);
     
     if (!step || !step.move) {
@@ -10030,7 +10101,7 @@ Write 1–2 sentences of pre-analysis coach commentary that:
       case 'left_theory': {
         // First show the context message with review table
         const evalAtTheory = move.evalBefore ? `${move.evalBefore > 0 ? '+' : ''}${(move.evalBefore / 100).toFixed(2)}` : '0.00';
-        const pre = await generateWalkthroughPreCommentary(type, move, walkData, allowRetry);
+        const pre = await generateWalkthroughPreCommentary(type, move, walkData, allowRetry, false, stepIndex);
         // Use ":" (not ".") to avoid triggering PGN sequence parsing on messages like "10. Qb3"
         const theoryMessage = `**Move ${move.moveNumber}: ${move.move} - Left Opening Theory**\n\n${pre}\n\n${move.color === 'w' ? 'White' : 'Black'} played **${move.move}**, departing from known opening theory. The evaluation was ${evalAtTheory} before this move.`;
         
@@ -10060,7 +10131,7 @@ Write 1–2 sentences of pre-analysis coach commentary that:
         const cpLoss = Math.round(move.cpLoss || 0);
         const severity = move.quality === 'blunder' ? 'Blunder' : move.quality === 'mistake' ? 'Mistake' : 'Inaccuracy';
         const accuracyPct = typeof move.accuracy === 'number' ? (move.accuracy.toFixed ? move.accuracy.toFixed(1) : move.accuracy) : 'n/a';
-        const pre = await generateWalkthroughPreCommentary(type, move, walkData, allowRetry);
+        const pre = await generateWalkthroughPreCommentary(type, move, walkData, allowRetry, false, stepIndex);
         
         // Don't spoil the best move - just describe the position and loss
         // Use ":" (not ".") to avoid triggering PGN sequence parsing on messages like "10. Qb3"
@@ -10110,7 +10181,7 @@ Write 1–2 sentences of pre-analysis coach commentary that:
         const actualMove = move.move || move.san;
         const gapToSecond = move.gapToSecondBest != null ? Math.round(move.gapToSecondBest) : null;
         const gapText = gapToSecond != null ? ` (only ${gapToSecond}cp better than the alternatives)` : '';
-        const pre = await generateWalkthroughPreCommentary(type, move, walkData, allowRetry);
+        const pre = await generateWalkthroughPreCommentary(type, move, walkData, allowRetry, false, stepIndex);
         const criticalMessage = `**Move ${move.moveNumber}: ${actualMove} – Critical Move!**\n\n${pre}\n\n${side} found **${actualMove}**, the lone move that held the evaluation${gapText}.`;
         
         const tableDataCritical = contextData ? generateReviewTableData(contextData) : ((window as any).__walkthroughTableData || null);
@@ -10134,7 +10205,7 @@ Write 1–2 sentences of pre-analysis coach commentary that:
       case 'missed_win': {
         const evalBefore = move.evalBefore || 0;
         const missedGap = move.gapToSecondBest || 0;
-        const pre = await generateWalkthroughPreCommentary(type, move, walkData, allowRetry);
+        const pre = await generateWalkthroughPreCommentary(type, move, walkData, allowRetry, false, stepIndex);
         // Use ":" (not ".") to avoid triggering PGN sequence parsing on messages like "10. Qb3"
         const missedWinMessage = `**Move ${move.moveNumber}: ${move.move} - Missed Win**\n\n${pre}\n\n${move.color === 'w' ? 'White' : 'Black'} played **${move.move}** in a winning position (${(evalBefore / 100).toFixed(2)}), but missed a stronger continuation.`;
         
@@ -10162,7 +10233,7 @@ Write 1–2 sentences of pre-analysis coach commentary that:
           move.crossed300 ? '±300cp (decisive)' :
           move.crossed200 ? '±200cp (clear advantage)' :
           move.crossed100 ? '±100cp (slight advantage)' : 'significant';
-        const pre = await generateWalkthroughPreCommentary(type, move, walkData, allowRetry);
+        const pre = await generateWalkthroughPreCommentary(type, move, walkData, allowRetry, false, stepIndex);
         // Use ":" (not ".") to avoid triggering PGN sequence parsing on messages like "10. Qb3"
         const shiftSummary = `**Move ${move.moveNumber}: ${move.move} – Advantage Shift**\n\n${pre}\n\n${side} played **${move.move}**, crossing the ${crossedThreshold} threshold. The evaluation shifted from ${(move.evalBefore / 100).toFixed(2)} to ${(move.evalAfter / 100).toFixed(2)} (${evalChange > 0 ? '+' : ''}${(evalChange / 100).toFixed(2)}).`;
         
@@ -10189,7 +10260,7 @@ Write 1–2 sentences of pre-analysis coach commentary that:
       case 'best_move': {
         const actualMove = move.move || move.san;
         const evalBefore = move.evalBefore ? `${move.evalBefore > 0 ? '+' : ''}${(move.evalBefore / 100).toFixed(2)}` : '0.00';
-        const pre = await generateWalkthroughPreCommentary(type, move, walkData, allowRetry);
+        const pre = await generateWalkthroughPreCommentary(type, move, walkData, allowRetry, false, stepIndex);
         const bestMoveMessage = `**Move ${move.moveNumber}: ${actualMove} – Excellent Move!**\n\n${pre}\n\n${side} found **${actualMove}**, the best move in the position (eval ${evalBefore}).`;
         
         const tableDataBest = contextData ? generateReviewTableData(contextData) : ((window as any).__walkthroughTableData || null);
@@ -10563,7 +10634,15 @@ Be conversational and educational. Avoid restating move lists; focus on ideas.`;
       console.error("Failed to set board position:", error);
     }
 
+    // SKIP LLM generation if we're in a walkthrough context (commentary is pre-generated)
+    // This prevents duplicate messages during game review walkthroughs
+    if (walkthroughActive) {
+      console.log('[Walkthrough] Skipping on-the-spot LLM commentary - using pre-generated commentary instead');
+      return; // Exit early - board is set up, but no LLM call needed
+    }
+
     // Route straight to LLM for a natural coach note (skip analyze_move + structured templates)
+    // This only runs when NOT in walkthrough context
     try {
       const side = move.color === 'w' ? 'White' : move.color === 'b' ? 'Black' : 'Side';
       const moveSan = move.move || move.san || '?';
@@ -12829,6 +12908,68 @@ Provide 2-3 sentences of natural language commentary explaining why this deviati
     }
   };
 
+  async function generateBatchWalkthroughCommentary(sequence: any[], walkData: any): Promise<Map<number, string>> {
+    console.log('📝 [Batch Commentary] Generating commentary for', sequence.length, 'steps');
+    const commentaryMap = new Map<number, string>();
+    
+    // Filter out steps that don't need commentary (opening has its own analysis, final doesn't need commentary)
+    const stepsNeedingCommentary = sequence
+      .map((step, index) => ({ step, index }))
+      .filter(({ step }) => step.type !== 'opening' && step.type !== 'final');
+    
+    if (stepsNeedingCommentary.length === 0) {
+      console.log('📝 [Batch Commentary] No steps need commentary');
+      return commentaryMap;
+    }
+    
+    addSystemMessage(`Generating commentary for ${stepsNeedingCommentary.length} key moments...`);
+    
+    // Generate all commentary in parallel with progress updates
+    const commentaryPromises = stepsNeedingCommentary.map(async ({ step, index }) => {
+      const move = step.move;
+      const meta = (walkData?.game_metadata || walkData?.gameMetadata || {}) as any;
+      const playerColor: 'white' | 'black' | null = meta.player_color || null;
+      const focusColor: 'white' | 'black' | 'both' | null = meta.focus_color || meta.focusColor || null;
+      const reviewSubject: 'player' | 'opponent' | 'both' | null = meta.review_subject || meta.reviewSubject || null;
+      const moveColor: 'white' | 'black' = move?.color === 'w' ? 'white' : 'black';
+      const allowRetry = !!playerColor && (focusColor ? focusColor === playerColor : reviewSubject !== 'opponent') && moveColor === playerColor;
+      
+      const moveNumber = move?.moveNumber || '?';
+      const moveSan = move?.move || move?.san || '?';
+      
+      // Update status for this specific move
+      addSystemMessage(`Generating commentary for Move ${moveNumber}: ${moveSan}...`);
+      
+      try {
+        const commentary = await generateWalkthroughPreCommentary(
+          step.type,
+          move,
+          walkData,
+          allowRetry,
+          true, // skipLoadingIndicator = true (we're showing batch progress instead)
+          index // Pass step index for lookup
+        );
+        return { index, commentary };
+      } catch (err) {
+        console.error(`❌ [Batch Commentary] Failed for step ${index}:`, err);
+        // Fallback commentary
+        const fallback = allowRetry 
+          ? "This is a key turning point—see if you can find a cleaner continuation from here."
+          : "This is a key moment—let's see what it changed in the position.";
+        return { index, commentary: fallback };
+      }
+    });
+    
+    // Wait for all to complete
+    const results = await Promise.all(commentaryPromises);
+    results.forEach(({ index, commentary }) => {
+      commentaryMap.set(index, commentary);
+    });
+    
+    addSystemMessage(`✅ Commentary generation complete for ${results.length} moves`);
+    return commentaryMap;
+  }
+
   async function startWalkthrough() {
     console.log('🎬 [startWalkthrough] Wrapper invoked');
     if (!walkthroughData) {
@@ -12845,17 +12986,85 @@ Provide 2-3 sentences of natural language commentary explaining why this deviati
     // Show loading state
     setIsProcessingStep(true);
     
-    // Now actually start the walkthrough (not just setup)
-    console.log('🎬 [startWalkthrough] Setting active and step 0');
-    setWalkthroughActive(true);
-    setWalkthroughStep(0);
-    
-    // Start with first step immediately
-    console.log('🎬 [startWalkthrough] Starting continueWalkthroughWithData immediately');
     try {
+      // Build sequence first to determine what needs commentary
+      const moves = Array.isArray(walkthroughData.moves) ? walkthroughData.moves : [];
+      const selectedKeyMoments = Array.isArray(walkthroughData.selectedKeyMoments) ? walkthroughData.selectedKeyMoments : [];
+      const queryIntent = walkthroughData.queryIntent || 'general';
+      const leftTheoryMove = walkthroughData.leftTheoryMove || null;
+      
+      const sequence: any[] = [];
+      
+      // Build sequence (same logic as continueWalkthroughWithData)
+      if (selectedKeyMoments.length > 0) {
+        selectedKeyMoments.forEach((moment: any) => {
+          const ply = moment.ply;
+          const moveData = moves.find((m: any) => m.ply === ply);
+          if (!moveData) return;
+          
+          const labels = moment.labels || [];
+          const primaryLabel = moment.primary_label || moveData.quality || '';
+          const category = moveData.category || primaryLabel;
+          
+          let stepType = 'highlight';
+          if (category === 'blunder' || labels.includes('blunder')) stepType = 'blunder';
+          else if (category === 'mistake' || labels.includes('mistake')) stepType = 'mistake';
+          else if (category === 'inaccuracy' || labels.includes('inaccuracy')) stepType = 'inaccuracy';
+          else if (labels.includes('advantage_shift')) stepType = 'advantage_shift';
+          else if (labels.includes('missed_critical_win') || labels.includes('missed_win')) stepType = 'missed_win';
+          else if (category === 'critical_best' || labels.includes('critical_best')) stepType = 'critical';
+          else if (category === 'best' || labels.includes('best')) stepType = 'best_move';
+          else if (labels.includes('tactical_opportunity')) stepType = 'tactical';
+          else if (labels.includes('phase_transition')) stepType = 'phase_transition';
+          
+          sequence.push({ type: stepType, move: moveData, moment: moment, queryIntent: queryIntent });
+        });
+        
+        const finalMove = moves[moves.length - 1];
+        if (finalMove && selectedKeyMoments[selectedKeyMoments.length - 1]?.ply !== finalMove.ply) {
+          sequence.push({ type: 'final', move: finalMove });
+        }
+      } else {
+        // Fallback sequence building
+        const lastTheoryMoveFound = moves.filter((m: any) => m.isTheoryMove).pop();
+        if (lastTheoryMoveFound) sequence.push({ type: 'opening', move: lastTheoryMoveFound });
+        if (leftTheoryMove) sequence.push({ type: 'left_theory', move: leftTheoryMove });
+        
+        const candidates: any[] = [];
+        moves.forEach((m: any) => {
+          if (m.quality === 'blunder') candidates.push({ move: m, type: 'blunder', cpLoss: m.cpLoss || 0 });
+          else if (m.quality === 'mistake') candidates.push({ move: m, type: 'mistake', cpLoss: m.cpLoss || 0 });
+          else if (m.quality === 'inaccuracy' && (m.cpLoss || 0) >= 50) {
+            candidates.push({ move: m, type: 'inaccuracy', cpLoss: m.cpLoss || 0 });
+          }
+        });
+        candidates.sort((a, b) => b.cpLoss - a.cpLoss);
+        candidates.slice(0, 10).sort((a, b) => a.move.ply - b.move.ply).forEach(err => {
+          sequence.push({ type: err.type, move: err.move });
+        });
+        
+        const finalMove = moves[moves.length - 1];
+        if (finalMove) sequence.push({ type: 'final', move: finalMove });
+      }
+      
+      // Generate all commentary in parallel BEFORE starting walkthrough
+      console.log('📝 [startWalkthrough] Generating batch commentary for', sequence.length, 'steps');
+      const commentaryMap = await generateBatchWalkthroughCommentary(sequence, walkthroughData);
+      
+      // Store commentary map in walkthroughData for use during execution
+      walkthroughData.preGeneratedCommentary = commentaryMap;
+      walkthroughData.sequence = sequence; // Store sequence too
+      
+      // Now actually start the walkthrough
+      console.log('🎬 [startWalkthrough] Setting active and step 0');
+      setWalkthroughActive(true);
+      setWalkthroughStep(0);
+      
+      // Start with first step immediately
+      console.log('🎬 [startWalkthrough] Starting continueWalkthroughWithData immediately');
       await continueWalkthroughWithData(walkthroughData, 0);
     } catch (err) {
-      console.error('❌ [startWalkthrough] continueWalkthroughWithData threw:', err);
+      console.error('❌ [startWalkthrough] Error:', err);
       addSystemMessage(`Walkthrough failed to start: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setIsProcessingStep(false);
@@ -13510,7 +13719,9 @@ Provide 2-3 sentences of natural language commentary explaining why this deviati
           {!(activeTab?.tabType === 'training' && activeTab?.trainingSession) && (
             <BottomComposer
               onSend={handleSendMessage}
-              disabled={isAnalyzing}
+              disabled={isAnalyzing || isProcessingStep || isGeneratingLesson}
+              isProcessing={isAnalyzing || isProcessingStep || isGeneratingLesson}
+              onCancel={cancelProcessing}
               placeholder={isAnalyzing ? "Analyzing position..." : lightningMode ? "Ask or use @tool_name(args)..." : "Ask about the position..."}
               onOpenOptions={() => setShowRequestOptions(true)}
               optionsDisabled={isAnalyzing || isLegacyReviewing || isGeneratingLesson}
