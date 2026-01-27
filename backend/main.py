@@ -4397,6 +4397,21 @@ async def llm_chat_stream(request: LLMRequest, http_request: Request):
                         if len(result_preview) > 2000:
                             result_preview = result_preview[:2000] + f"... (truncated, total {len(result_preview)} chars)"
                         print(f"   result (full): {result_preview}")
+                        
+                        # Check for game review data IMMEDIATELY after pre-execution (before any stripping)
+                        # This ensures we catch it when data is guaranteed to be full
+                        if tool_name == "fetch_and_review_games" and isinstance(tool_result["result"], dict):
+                            result = tool_result["result"]
+                            has_review_data = (
+                                result.get("first_game_review") is not None or
+                                result.get("first_game") is not None or
+                                result.get("games_analyzed", 0) > 0
+                            )
+                            if has_review_data:
+                                # Set flag for chunked SSE - this will persist through stripping
+                                result["_needs_chunked_sse"] = True
+                                print(f"   ✅ Marked {tool_name} for chunked SSE: games_analyzed={result.get('games_analyzed', 0)}")
+                        
                         pre_executed_results[tool_name] = tool_result["result"]
                         pre_executed_tool_calls.append({
                             "name": tool_name,
@@ -5030,52 +5045,39 @@ async def llm_chat_stream(request: LLMRequest, http_request: Request):
             # ============================================================
             
             # Check if we have game review data that needs chunking
-            # This works for both single game reviews and multiple game reviews
+            # Use the flag we set during pre-execution (most reliable)
+            # Fallback to direct check if flag wasn't set (backwards compatibility)
             has_game_review = False
             game_review_data = None
             print(f"   🔍 Checking {len(tool_calls_made)} tool calls for game review data...")
+            
             for tc in tool_calls_made:
                 result = tc.get("result")
                 tool_name = tc.get("tool", "")
                 
-                print(f"   🔍 Tool: {tool_name}, has_result: {result is not None}, result_type: {type(result)}")
-                if isinstance(result, dict):
-                    result_keys = list(result.keys())[:10]  # First 10 keys
-                    print(f"   🔍 Result keys: {result_keys}...")
-                    print(f"   🔍 success: {result.get('success')}, type: {type(result.get('success'))}")
-                    print(f"   🔍 games_analyzed: {result.get('games_analyzed')}")
-                    print(f"   🔍 has first_game: {result.get('first_game') is not None}")
-                    print(f"   🔍 has first_game_review: {result.get('first_game_review') is not None}")
-                    print(f"   🔍 is_truncated: {result.get('_truncated')}")
+                # Primary check: Look for the flag we set during pre-execution
+                if result and isinstance(result, dict) and result.get("_needs_chunked_sse"):
+                    has_game_review = True
+                    game_review_data = result
+                    print(f"   ✅ Found game review data (flagged during pre-exec): games_analyzed={result.get('games_analyzed', 0)}")
+                    break
                 
-                # Check for fetch_and_review_games tool with successful result
-                # Look for game review indicators: first_game_review, first_game, or analyzed_games
+                # Fallback check: Direct inspection (for backwards compatibility or if flag wasn't set)
                 if (tool_name == "fetch_and_review_games" and 
-                    isinstance(result, dict)):
+                    isinstance(result, dict) and 
+                    result.get("success") == True):
                     
-                    # Check success - handle both True and truthy values
-                    success_value = result.get("success")
-                    is_successful = success_value is True or success_value == True
+                    has_review_data = (
+                        result.get("first_game_review") is not None or
+                        result.get("first_game") is not None or
+                        result.get("games_analyzed", 0) > 0
+                    )
                     
-                    print(f"   🔍 Checking {tool_name}: is_successful={is_successful}, success_value={success_value}")
-                    
-                    if is_successful:
-                        # Check if we have any game review data (works for single or multiple games)
-                        has_review_data = (
-                            result.get("first_game_review") is not None or  # Single game review
-                            result.get("first_game") is not None or  # Game data available
-                            result.get("games_analyzed", 0) > 0  # Multiple games analyzed
-                        )
-                        
-                        print(f"   🔍 has_review_data: {has_review_data}")
-                        
-                        if has_review_data:
-                            has_game_review = True
-                            game_review_data = result
-                            print(f"   ✅ Found game review data in {tool_name}: games_analyzed={result.get('games_analyzed', 0)}")
-                            break
-                    else:
-                        print(f"   ⚠️ Tool {tool_name} result not successful: success={success_value}")
+                    if has_review_data:
+                        has_game_review = True
+                        game_review_data = result
+                        print(f"   ✅ Found game review data (direct check): games_analyzed={result.get('games_analyzed', 0)}")
+                        break
             
             if has_game_review and game_review_data:
                 print(f"   📦 Using chunked SSE for game review data...")
