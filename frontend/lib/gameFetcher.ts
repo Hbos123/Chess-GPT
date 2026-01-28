@@ -90,8 +90,14 @@ function parseChessComGame(
 
     // Parse PGN to extract metadata
     const chess = new Chess();
-    const pgn = chess.pgn({ pgn: pgnText });
-    if (!pgn) return null;
+    // NOTE: chess.pgn() exports PGN; to load, use loadPgn().
+    try {
+      const ok = chess.loadPgn(pgnText);
+      // chess.js versions differ: some return boolean, some throw on failure
+      if (ok === false) return null;
+    } catch {
+      return null;
+    }
 
     // Parse headers from PGN
     const headers: Record<string, string> = {};
