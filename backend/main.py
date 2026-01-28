@@ -4285,7 +4285,7 @@ async def llm_chat_stream(request: LLMRequest, http_request: Request):
                 interpreter_time = time.time() - interpreter_start
                 print(f"🔍 [PERFORMANCE] Interpreter took {interpreter_time:.2f}s")
                 
-                # Note: Lightning mode suggestion removed - handled by frontend system message
+                # Note: Lightning mode suggestion removed - handled by frontend system message when user enables it
                 
                 # Handle forced tool calls from @ syntax
                 if request.forced_tool_calls and orchestration_plan:
