@@ -982,6 +982,21 @@ class ToolExecutor:
         
         print(f"   🔄 WORKFLOW: Fetch and review games for {username}")
         print(f"      Fetching {max_games} games, analyzing {games_to_analyze} at depth {depth}")
+        print(f"      Prefer frontend: {prefer_frontend}")
+        
+        # If frontend is preferred, return early - frontend will handle everything
+        if prefer_frontend:
+            await emit_status("Frontend will handle game review...", 0.1)
+            return {
+                "success": True,
+                "frontend_review": True,
+                "message": "Games will be reviewed on the frontend. Use /get_games_to_analyze endpoint.",
+                "username": username,
+                "platform": platform,
+                "max_games": max_games,
+            }
+        
+        # Step 1: Fetch games (backend fallback)
         
         # Step 1: Fetch games
         await emit_status(f"Fetching games from {platform}...", 0.0)
