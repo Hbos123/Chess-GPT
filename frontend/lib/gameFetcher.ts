@@ -17,9 +17,12 @@ async function fetchChessComGames(
   const maxGames = options.max_games || 100;
   const monthsBack = options.months_back || 6;
 
+  console.log(`[GameFetcher] Fetching Chess.com games for ${username}, max: ${maxGames}, months: ${monthsBack}`);
+  
   try {
     // Get archives list
     const archivesUrl = `https://api.chess.com/pub/player/${username}/games/archives`;
+    console.log(`[GameFetcher] Requesting archives from: ${archivesUrl}`);
     const archivesResponse = await fetch(archivesUrl);
 
     if (!archivesResponse.ok) {
@@ -28,12 +31,14 @@ async function fetchChessComGames(
 
     const archivesData = await archivesResponse.json();
     const archives = archivesData.archives || [];
+    console.log(`[GameFetcher] Found ${archives.length} archive(s)`);
 
     // Only fetch recent months
     const recentArchives =
       archives.length > monthsBack
         ? archives.slice(-monthsBack)
         : archives;
+    console.log(`[GameFetcher] Fetching from ${recentArchives.length} recent archive(s)`);
 
     // Fetch games from each archive (most recent first)
     for (const archiveUrl of recentArchives.reverse()) {
@@ -56,15 +61,19 @@ async function fetchChessComGames(
           // Apply filters
           if (matchesFilters(game, options)) {
             games.push(game);
+            console.log(`[GameFetcher] Added game ${game.game_id} (${game.date})`);
+          } else {
+            console.log(`[GameFetcher] Filtered out game ${game.game_id}`);
           }
         }
       }
     }
   } catch (error) {
-    console.error("Error fetching Chess.com games:", error);
+    console.error("[GameFetcher] Error fetching Chess.com games:", error);
     throw error;
   }
 
+  console.log(`[GameFetcher] Successfully fetched ${games.length} Chess.com game(s)`);
   return games;
 }
 
@@ -208,6 +217,8 @@ async function fetchLichessGames(
   const maxGames = options.max_games || 100;
   const monthsBack = options.months_back || 6;
 
+  console.log(`[GameFetcher] Fetching Lichess games for ${username}, max: ${maxGames}, months: ${monthsBack}`);
+
   try {
     // Calculate since timestamp
     const sinceDate = new Date();
@@ -246,16 +257,20 @@ async function fetchLichessGames(
         const game = parseLichessGame(gameData, username);
         if (game && matchesFilters(game, options)) {
           games.push(game);
+          console.log(`[GameFetcher] Added Lichess game ${game.game_id} (${game.date})`);
+        } else if (game) {
+          console.log(`[GameFetcher] Filtered out Lichess game ${game.game_id}`);
         }
       } catch (e) {
-        console.warn("Failed to parse Lichess game line:", e);
+        console.warn("[GameFetcher] Failed to parse Lichess game line:", e);
       }
     }
   } catch (error) {
-    console.error("Error fetching Lichess games:", error);
+    console.error("[GameFetcher] Error fetching Lichess games:", error);
     throw error;
   }
 
+  console.log(`[GameFetcher] Successfully fetched ${games.length} Lichess game(s)`);
   return games;
 }
 

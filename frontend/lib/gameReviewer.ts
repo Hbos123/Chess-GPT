@@ -28,6 +28,8 @@ export async function reviewGame(
     review_subject = "player",
   } = options;
 
+  console.log(`[GameReviewer] Starting review for game ${game.game_id} (${game.platform}), depth: ${depth}, focus: ${focus_color || game.player_color}`);
+
   const pgn = game.pgn;
   if (!pgn) {
     throw new Error("Game PGN is required");
@@ -80,6 +82,7 @@ export async function reviewGame(
     }
 
     const fenBefore = currentBoard.fen();
+    console.log(`[GameReviewer] Analyzing move ${moveIndex}/${totalMoves}: ${move.san} (ply ${ply})`);
 
     // Analyze position before move
     try {
@@ -144,18 +147,23 @@ export async function reviewGame(
       };
 
       plyRecords.push(plyRecord);
+      console.log(`[GameReviewer] Move ${moveIndex}: ${move.san}, CP loss: ${cpLoss.toFixed(1)}, blunder: ${isBlunder}, mistake: ${isMistake}`);
     } catch (error) {
-      console.error(`Error analyzing move ${moveIndex}:`, error);
+      console.error(`[GameReviewer] Error analyzing move ${moveIndex}:`, error);
       // Continue with next move
       currentBoard.move(move);
     }
   }
 
+  console.log(`[GameReviewer] Completed review: ${plyRecords.length} moves analyzed`);
+
   // Calculate statistics
   const stats = calculateStats(plyRecords, playerColor);
+  console.log(`[GameReviewer] Stats calculated: accuracy=${stats.overall_accuracy.toFixed(1)}%, blunders=${stats.blunders}, mistakes=${stats.mistakes}`);
 
   // Determine opening
   const opening = determineOpening(chess, plyRecords);
+  console.log(`[GameReviewer] Opening: ${opening.name_final || 'Unknown'}, ECO: ${opening.eco_final || 'N/A'}`);
 
   // Build review object
   const review: GameReview = {

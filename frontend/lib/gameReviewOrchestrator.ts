@@ -45,6 +45,8 @@ export async function fetchAndReviewGamesFrontend(
     ...fetchOptions
   } = options;
 
+  console.log(`[GameReviewOrchestrator] Starting frontend review for ${username} on ${platform}, max_games: ${max_games}, depth: ${depth}`);
+
   const result: ReviewResult = {
     success: false,
     games_fetched: 0,
@@ -60,12 +62,14 @@ export async function fetchAndReviewGamesFrontend(
       progressCallback("fetching", "Getting games to analyze...", 0.05);
     }
 
+    console.log(`[GameReviewOrchestrator] Requesting games to analyze from backend...`);
     const gamesToAnalyze = await getGamesToAnalyze(
       userId,
       username,
       platform,
       fetchOptions
     );
+    console.log(`[GameReviewOrchestrator] Received ${gamesToAnalyze.length} game(s) to analyze`);
 
     if (!gamesToAnalyze || gamesToAnalyze.length === 0) {
       result.success = true;
@@ -92,6 +96,8 @@ export async function fetchAndReviewGamesFrontend(
       const nextGameProgress = 0.1 + (0.7 * (i + 1)) / gamesToAnalyze.length;
 
       try {
+        console.log(`[GameReviewOrchestrator] Starting review for game ${i + 1}/${gamesToAnalyze.length}: ${game.game_id}`);
+        
         if (progressCallback) {
           progressCallback(
             "analyzing",
@@ -114,6 +120,7 @@ export async function fetchAndReviewGamesFrontend(
           }
         );
 
+        console.log(`[GameReviewOrchestrator] Review completed for game ${i + 1}, accuracy: ${review.stats.overall_accuracy.toFixed(1)}%`);
         reviews.push(review);
 
         // Step 3: Save immediately after each game review
@@ -126,14 +133,17 @@ export async function fetchAndReviewGamesFrontend(
         }
 
         try {
+          console.log(`[GameReviewOrchestrator] Saving game ${i + 1} to Supabase...`);
           const gameId = await saveGameReview(userId, game, review);
           if (gameId) {
             result.games_saved++;
+            console.log(`[GameReviewOrchestrator] Game ${i + 1} saved successfully, ID: ${gameId}`);
           } else {
+            console.warn(`[GameReviewOrchestrator] Failed to save game ${i + 1}: no game ID returned`);
             errors.push(`Failed to save game ${i + 1}`);
           }
         } catch (saveError: any) {
-          console.error(`Error saving game ${i + 1}:`, saveError);
+          console.error(`[GameReviewOrchestrator] Error saving game ${i + 1}:`, saveError);
           errors.push(`Failed to save game ${i + 1}: ${saveError.message}`);
           // Continue with next game
         }
@@ -157,6 +167,8 @@ export async function fetchAndReviewGamesFrontend(
     result.reviews = reviews;
     result.errors = errors;
     result.success = result.games_analyzed > 0;
+    
+    console.log(`[GameReviewOrchestrator] Review complete: ${result.games_analyzed} analyzed, ${result.games_saved} saved, ${errors.length} errors`);
 
     // Set first game and review
     if (gamesToAnalyze.length > 0) {
@@ -192,6 +204,8 @@ async function getGamesToAnalyze(
   platform: string,
   options: Partial<GameFetchOptions>
 ): Promise<GameMetadata[]> {
+  console.log(`[GameReviewOrchestrator] Requesting games to analyze: ${username} on ${platform}`);
+  
   try {
     const response = await fetch(`${getBackendBase()}/get_games_to_analyze`, {
       method: "POST",
@@ -224,9 +238,10 @@ async function getGamesToAnalyze(
     }
 
     const data = await response.json();
+    console.log(`[GameReviewOrchestrator] Backend response: ${data.needs_analysis || 0} games need analysis, ${data.already_reviewed || 0} already reviewed`);
     return data.games_to_analyze || [];
   } catch (error: any) {
-    console.error("Error getting games to analyze:", error);
+    console.error("[GameReviewOrchestrator] Error getting games to analyze:", error);
     // Fallback: try fetching directly (will need to filter duplicates client-side)
     try {
       const games = await fetchGames({

@@ -14,6 +14,8 @@ export async function saveGameReview(
   game: GameMetadata,
   review: GameReview
 ): Promise<string | null> {
+  console.log(`[GameSync] Saving game review for game ${game.game_id} (${game.platform})`);
+  
   if (!supabase) {
     throw new Error("Supabase client not initialized");
   }
@@ -55,6 +57,7 @@ export async function saveGameReview(
     };
 
     // Insert game into reviewed_games table
+    console.log(`[GameSync] Inserting game into reviewed_games table...`);
     const { data, error } = await supabase
       .from("reviewed_games")
       .insert(gameData)
@@ -65,7 +68,7 @@ export async function saveGameReview(
       // Check if it's a duplicate (unique constraint violation)
       if (error.code === "23505") {
         console.log(
-          `Game ${game.game_id} already exists, updating instead...`
+          `[GameSync] Game ${game.game_id} already exists, updating instead...`
         );
         // Update existing game
         const { data: updateData, error: updateError } = await supabase
@@ -78,23 +81,29 @@ export async function saveGameReview(
           .single();
 
         if (updateError) {
+          console.error(`[GameSync] Error updating game:`, updateError);
           throw updateError;
         }
+        console.log(`[GameSync] Game updated successfully, ID: ${updateData?.id}`);
         return updateData?.id || null;
       }
+      console.error(`[GameSync] Error inserting game:`, error);
       throw error;
     }
 
     const gameId = data?.id;
+    console.log(`[GameSync] Game saved successfully, ID: ${gameId}`);
 
     // Save moves to normalized tables if game was saved successfully
     if (gameId && review.ply_records.length > 0) {
-      await saveMoves(gameId, userId, review.ply_records);
+      console.log(`[GameSync] Saving ${review.ply_records.length} moves to normalized tables...`);
+      const movesSaved = await saveMoves(gameId, userId, review.ply_records);
+      console.log(`[GameSync] Saved ${movesSaved} moves successfully`);
     }
 
     return gameId;
   } catch (error) {
-    console.error("Error saving game review:", error);
+    console.error("[GameSync] Error saving game review:", error);
     throw error;
   }
 }
@@ -107,6 +116,8 @@ async function saveMoves(
   userId: string,
   plyRecords: any[]
 ): Promise<number> {
+  console.log(`[GameSync] Saving moves for game ${gameId}, ${plyRecords.length} ply records`);
+  
   if (!supabase) {
     throw new Error("Supabase client not initialized");
   }
@@ -141,16 +152,18 @@ async function saveMoves(
       const { error } = await supabase.from("game_moves").insert(batch);
 
       if (error) {
-        console.error(`Error saving moves batch ${i}-${i + batch.length}:`, error);
+        console.error(`[GameSync] Error saving moves batch ${i}-${i + batch.length}:`, error);
         // Continue with next batch
       } else {
         savedCount += batch.length;
+        console.log(`[GameSync] Saved batch ${i}-${i + batch.length} (${savedCount}/${plyRecords.length} total)`);
       }
     }
 
+    console.log(`[GameSync] Successfully saved ${savedCount}/${plyRecords.length} moves`);
     return savedCount;
   } catch (error) {
-    console.error("Error saving moves:", error);
+    console.error("[GameSync] Error saving moves:", error);
     return 0;
   }
 }
