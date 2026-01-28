@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import DailyUsageDisplay from "./DailyUsageDisplay";
 
 interface TopBarProps {
   onToggleHistory: () => void;
@@ -97,6 +98,7 @@ export default function TopBar({
                   <div className="user-dropdown-name">{greetingName}</div>
                   <div className="user-email-label">{userEmail}</div>
                 </div>
+                <DailyUsageDisplay compact={true} />
                 <button
                   type="button"
                   onClick={async () => {

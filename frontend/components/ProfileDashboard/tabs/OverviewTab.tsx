@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import DailyUsageDisplay from "@/components/DailyUsageDisplay";
 
 interface OverviewTabProps {
   data: any;
@@ -294,6 +295,9 @@ export default function OverviewTab({ data, profileStatus, onOpenPersonalReview,
           )}
         </div>
       </div>
+
+      {/* Daily Usage Section */}
+      <DailyUsageDisplay />
 
       {/* Linked Accounts Section */}
       <div style={{ 
