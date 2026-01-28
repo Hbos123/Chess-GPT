@@ -2156,12 +2156,54 @@ Return ONLY valid JSON in this exact format:
             context = f"""Game Review Data:
 - Player: {username} on {platform}
 - User's question: "{user_query}"
+- Total games analyzed: {total_games}
 - Game result: {game_result}
 - Termination: {termination}
 - Time control: {time_control}
 - Opening: {opening_name}
 - Overall accuracy: {avg_accuracy:.1f}%
-- Average centipawn loss: {avg_cp_loss:.1f}
+- Average centipawn loss: {avg_cp_loss:.1f}"""
+            
+            # Add win/loss stats if multi-game or available
+            if total_games > 1 or wins or losses or draws:
+                context += f"""
+- Win rate: {win_rate_pct:.1f}%
+- Wins: {wins}
+- Losses: {losses}
+- Draws: {draws}"""
+            
+            # Add color performance if available
+            if white_acc is not None or black_acc is not None:
+                context += "
+
+Performance by Color:"
+                if white_acc is not None:
+                    context += f"
+- White: {_safe_float(white_acc, 0.0):.1f}% accuracy ({white_games} games)"
+                if black_acc is not None:
+                    context += f"
+- Black: {_safe_float(black_acc, 0.0):.1f}% accuracy ({black_games} games)"
+            
+            # Add opening performance if available
+            if opening_performance_data:
+                context += "
+
+Opening Performance:"
+                for i, opening in enumerate(opening_performance_data[:5], 1):  # Top 5 openings
+                    name = opening.get("opening", opening.get("name", "Unknown"))
+                    games = opening.get("games", opening.get("game_count", 0))
+                    opening_wins = opening.get("wins", 0)
+                    opening_losses = opening.get("losses", 0)
+                    opening_draws = opening.get("draws", 0)
+                    accuracy = opening.get("accuracy", opening.get("avg_accuracy", 0))
+                    opening_win_rate = opening.get("win_rate", 0)
+                    if isinstance(opening_win_rate, (int, float)) and opening_win_rate <= 1.0:
+                        opening_win_rate = opening_win_rate * 100
+                    
+                    context += f"
+{i}. {name}: {_safe_float(accuracy, 0.0):.1f}% accuracy, {_safe_float(opening_win_rate, 0.0):.1f}% win rate ({games} games: {opening_wins}W/{opening_losses}L/{opening_draws}D)"
+            
+            context += "
 
 Phase Accuracy (only phases with moves shown):"""
             
@@ -2298,35 +2340,15 @@ Key Moments Found:
                     time_str = f", {time_spent_f:.1f}s" if time_spent_f > 0 else ""
                     context += f"\n{i}. Move {ply} ({move_san}): {category}, {_safe_float(cp_loss, 0.0):.0f}cp loss, {phase}{time_str}"
             
-            system_prompt = """You are a chess coach providing game feedback. Write a brief, conversational response to the user's question about their game.
+            system_prompt = """You are a chess coach providing game feedback. Answer the user's question directly and naturally.
 
-Guidelines:
-- Be direct and answer their specific question first
-- Use natural, conversational language (not robotic or template-like)
-- Reference specific statistics and moments to support your points
-- Keep it concise - 2-4 sentences for the main answer
-- Don't list moves unless specifically asked - instead, summarize patterns
-- If they asked "how did I play", give an honest assessment
-- If they asked "why did I lose", explain the key reason
-- Be encouraging but honest about areas to improve
-- Don't use headers like "## Performance" - just write naturally
-- Don't include a bullet list of all blunders - that's shown separately
+Your goal: Provide a helpful, personalized response that directly addresses what they asked.
 
-Time analysis insights (use when relevant):
-- If errors happened mostly on fast moves (<5s), suggest "slowing down a bit"
-- If errors happened on slow moves (>30s), they might be "overthinking"
-- If time pressure caused errors, mention time management
-- Compare accuracy across phases - if one phase is notably weaker, mention it
-- If they spent way more time in one phase, it might indicate difficulty
+Available data: You have access to comprehensive game statistics including win rates, accuracy, performance by color, opening statistics, phase breakdowns, and key moments. Use this data flexibly - include what's relevant to their question, skip what isn't.
 
-Example good responses:
-- "You played really well! 95% accuracy is excellent, and you only had one small inaccuracy in the middlegame."
-- "This was a tough loss. You were playing well until move 33 when a tactical oversight shifted the advantage. The game was close until then."
-- "Solid game overall at 78% accuracy. Your opening was strong, but the middlegame had a few imprecise moments that let your opponent equalize."
-- "Time pressure hurt you here - your accuracy dropped to 60% on moves under 5 seconds. The early middlegame ate up a lot of your clock."
-- "Interestingly, your quick moves were actually more accurate than when you took your time. Sometimes trusting your instincts works!"
+Formatting: Write naturally. There's no required structure or template. If they asked a specific question, answer it directly. If they asked for a general review, provide a thoughtful summary. Use statistics when they add value, but don't force them in.
 
-Write your response now based on the game data provided."""
+Be conversational, honest, and helpful. Let the data guide your insights, but don't be constrained by it. Vary your response style based on the question and data - don't use the same format every time."""
 
             # Call OpenAI
             import asyncio

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { AVAILABLE_TOOLS, type ToolDefinition } from '@/lib/toolDefinitions';
 
 interface BottomComposerProps {
@@ -33,6 +33,7 @@ export default function BottomComposer({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const warmUpTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const hasWarmedUpRef = useRef(false);
+  const argHintsDebounceRef = useRef<NodeJS.Timeout | null>(null);
 
   // Warm up interpreter API when user starts typing
   useEffect(() => {
@@ -64,50 +65,127 @@ export default function BottomComposer({
     };
   }, [input]);
 
-  // Check if cursor is inside parentheses and show argument hints
-  const checkForArgHints = (value: string, cursorPos: number) => {
-    const textBeforeCursor = value.substring(0, cursorPos);
-    const lastAtIndex = textBeforeCursor.lastIndexOf('@');
+  // Enhanced function to update argument hints position based on cursor
+  const updateArgHintsPosition = useCallback((cursorPos: number) => {
+    if (!textareaRef.current) return;
     
-    if (lastAtIndex === -1) {
-      setShowArgHints(false);
-      setCurrentTool(null);
-      return;
+    const textBeforeCursor = input.substring(0, cursorPos);
+    const rect = textareaRef.current.getBoundingClientRect();
+    const style = window.getComputedStyle(textareaRef.current);
+    const lineHeight = parseInt(style.lineHeight) || 24;
+    const paddingLeft = parseInt(style.paddingLeft) || 8;
+    const paddingTop = parseInt(style.paddingTop) || 8;
+    
+    // Calculate line and column
+    const lines = textBeforeCursor.split('\n');
+    const currentLine = lines.length - 1;
+    const currentColumn = lines[currentLine].length;
+    
+    // Estimate character width (approximate for monospace-like fonts)
+    const charWidth = 7.5;
+    const x = paddingLeft + (currentColumn * charWidth);
+    const y = paddingTop + (currentLine * lineHeight);
+    
+    // Position popup above and to the right of cursor
+    setArgHintsPosition({
+      top: rect.top + y - 220, // Position above cursor
+      left: Math.min(rect.left + x + 20, window.innerWidth - 370) // Keep within viewport
+    });
+  }, [input]);
+
+  // Enhanced check if cursor is inside parentheses and show argument hints
+  const checkForArgHints = useCallback((value: string, cursorPos: number) => {
+    // Clear any existing debounce
+    if (argHintsDebounceRef.current) {
+      clearTimeout(argHintsDebounceRef.current);
     }
     
-    const textAfterAt = textBeforeCursor.substring(lastAtIndex + 1);
-    const openParenIndex = textAfterAt.indexOf('(');
-    const closeParenIndex = textAfterAt.indexOf(')');
-    
-    // Check if cursor is inside parentheses
-    if (openParenIndex !== -1 && (closeParenIndex === -1 || closeParenIndex > openParenIndex)) {
-      // Cursor is inside parentheses - find the tool
-      const toolName = textAfterAt.substring(0, openParenIndex).trim();
-      const tool = AVAILABLE_TOOLS.find(t => t.name === toolName);
+    // Debounce to prevent flickering on rapid cursor movement
+    argHintsDebounceRef.current = setTimeout(() => {
+      const textBeforeCursor = value.substring(0, cursorPos);
+      const textAfterCursor = value.substring(cursorPos);
       
-      if (tool) {
+      // Find the most recent @ symbol before cursor
+      const lastAtIndex = textBeforeCursor.lastIndexOf('@');
+      
+      if (lastAtIndex === -1) {
+        setShowArgHints(false);
+        setCurrentTool(null);
+        return;
+      }
+      
+      const textAfterAt = textBeforeCursor.substring(lastAtIndex + 1);
+      const openParenIndex = textAfterAt.indexOf('(');
+      
+      // No opening paren yet - don't show hints
+      if (openParenIndex === -1) {
+        setShowArgHints(false);
+        setCurrentTool(null);
+        return;
+      }
+      
+      // Extract tool name (everything between @ and opening paren)
+      const toolName = textAfterAt.substring(0, openParenIndex).trim();
+      
+      // Find matching tool (case-insensitive)
+      const tool = AVAILABLE_TOOLS.find(t => 
+        t.name.toLowerCase() === toolName.toLowerCase()
+      );
+      
+      if (!tool) {
+        setShowArgHints(false);
+        setCurrentTool(null);
+        return;
+      }
+      
+      // Now check if cursor is actually inside the parentheses
+      // Get text from opening paren to cursor
+      const textInParens = textAfterAt.substring(openParenIndex + 1);
+      
+      // Count parentheses depth to handle nested cases
+      let parenDepth = 1;
+      let foundClosingParen = false;
+      
+      // Check text before cursor (within the parentheses)
+      for (let i = 0; i < textInParens.length; i++) {
+        if (textInParens[i] === '(') {
+          parenDepth++;
+        } else if (textInParens[i] === ')') {
+          parenDepth--;
+          if (parenDepth === 0) {
+            foundClosingParen = true;
+            // Cursor is at or after closing paren - not inside
+            if (i < textInParens.length - 1 || textAfterCursor.trim().length > 0) {
+              setShowArgHints(false);
+              setCurrentTool(null);
+              return;
+            }
+            break;
+          }
+        }
+      }
+      
+      // If we haven't found a closing paren or depth > 0, cursor is inside
+      const isInsideParens = !foundClosingParen || parenDepth > 0;
+      
+      if (isInsideParens) {
         setCurrentTool(tool);
         setShowArgHints(true);
-        
-        // Position arg hints popup above cursor
-        if (textareaRef.current) {
-          const rect = textareaRef.current.getBoundingClientRect();
-          const lineHeight = 24;
-          const lines = textBeforeCursor.split('\n').length;
-          setArgHintsPosition({
-            top: rect.top + (lines * lineHeight) - 200,
-            left: rect.left + 10
-          });
-        }
+        updateArgHintsPosition(cursorPos);
       } else {
         setShowArgHints(false);
         setCurrentTool(null);
       }
-    } else {
-      setShowArgHints(false);
-      setCurrentTool(null);
-    }
-  };
+    }, 50); // 50ms debounce
+  }, [updateArgHintsPosition]);
+
+  // Handler for cursor position changes (used by onClick and arrow keys)
+  const handleCursorChange = useCallback(() => {
+    if (!textareaRef.current) return;
+    const cursorPos = textareaRef.current.selectionStart;
+    setCursorPosition(cursorPos);
+    checkForArgHints(input, cursorPos);
+  }, [input, checkForArgHints]);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const value = e.target.value;
@@ -115,7 +193,7 @@ export default function BottomComposer({
     setInput(value);
     setCursorPosition(cursorPos);
     
-    // Check for argument hints first
+    // Check for argument hints
     checkForArgHints(value, cursorPos);
     
     // Check for @ symbol for tool suggestions
@@ -216,8 +294,23 @@ export default function BottomComposer({
       setShowArgHints(false);
       setCurrentTool(null);
       hasWarmedUpRef.current = false; // Reset for next message
+      
+      // Clear debounce timeout
+      if (argHintsDebounceRef.current) {
+        clearTimeout(argHintsDebounceRef.current);
+        argHintsDebounceRef.current = null;
+      }
     }
   };
+  
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (argHintsDebounceRef.current) {
+        clearTimeout(argHintsDebounceRef.current);
+      }
+    };
+  }, []);
 
   const handleCancel = () => {
     if (onCancel) {
@@ -239,9 +332,15 @@ export default function BottomComposer({
     } else if (e.key === 'Escape') {
       setShowToolSuggestions(false);
       setShowArgHints(false);
+      setCurrentTool(null);
     } else if (e.key === 'ArrowDown' && showToolSuggestions && toolSuggestions.length > 0) {
       e.preventDefault();
       // Could implement keyboard navigation here
+    } else if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) {
+      // Check cursor position after arrow key movement
+      setTimeout(() => {
+        handleCursorChange();
+      }, 0);
     }
   };
 
@@ -318,7 +417,13 @@ export default function BottomComposer({
           ref={textareaRef}
           value={input}
           onChange={handleInputChange}
+          onClick={handleCursorChange}
           onKeyDown={handleKeyDown}
+          onBlur={() => {
+            // Optionally hide hints on blur, or keep them visible
+            // Uncomment the next line if you want hints to disappear when clicking away
+            // setShowArgHints(false);
+          }}
           placeholder={placeholder}
           className="bottom-input"
           rows={1}
