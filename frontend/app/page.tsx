@@ -352,6 +352,9 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
     setIsAnalyzing(false);
     setIsProcessingStep(false);
     setIsGeneratingLesson(false);
+    setIsLLMProcessing(false);
+    setAnalysisInProgress(false);
+    setLiveStatusMessages([]);
     addSystemMessage("Processing cancelled.");
   }
   type LoaderEntry = {
@@ -4135,7 +4138,21 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
         };
         
         while (true) {
+          // Check if request was cancelled
+          if (signal?.aborted) {
+            reader.cancel();
+            reject(new Error('Request cancelled'));
+            return;
+          }
+          
           const { done, value } = await reader.read();
+          
+          // Check again after read
+          if (signal?.aborted) {
+            reader.cancel();
+            reject(new Error('Request cancelled'));
+            return;
+          }
           
           if (value) {
             buffer += decoder.decode(value, { stream: true });
@@ -14010,17 +14027,24 @@ Provide 2-3 sentences of natural language commentary explaining why this deviati
                   <button
                     type="button"
                     onClick={() => {
-                      setLightningMode(!lightningMode);
+                      const newMode = !lightningMode;
+                      setLightningMode(newMode);
                       setShowRequestOptions(false);
+                      // Add system message when mode changes
+                      if (newMode) {
+                        addSystemMessage("Lightning Mode enabled. Fast responses with gpt-4o-mini.");
+                      } else {
+                        addSystemMessage("Deep Thought Mode active. Consider lightning mode for faster responses.");
+                      }
                     }}
                     style={{
                       background: lightningMode ? 'var(--accent-primary)' : 'transparent',
                       color: lightningMode ? 'var(--bg-primary)' : 'var(--text-primary)',
                       border: '1px solid var(--border-color)',
                     }}
-                    title={lightningMode ? "Lightning Mode: Fast responses with gpt-4o-mini. Click to switch to Deep Thought mode." : "Lightning Mode: Fast responses but may forget tool calls. Use @tool_name(args) to mandate tools."}
+                    title={lightningMode ? "Lightning Mode: Fast responses with gpt-4o-mini. Click to switch to Deep Thought mode." : "Deep Thought Mode: More thorough analysis. Click to switch to Lightning Mode for faster responses."}
                   >
-                    {lightningMode ? '⚡ Lightning Mode ON' : '⚡ Lightning Mode'}
+                    {lightningMode ? 'Switch to Deep Thought' : 'Switch to Lightning Mode'}
                   </button>
                   <button 
                     type="button"

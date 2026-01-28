@@ -4285,15 +4285,7 @@ async def llm_chat_stream(request: LLMRequest, http_request: Request):
                 interpreter_time = time.time() - interpreter_start
                 print(f"🔍 [PERFORMANCE] Interpreter took {interpreter_time:.2f}s")
                 
-                # Suggest lightning mode if deep mode is slow
-                if interpreter_time > 10.0 and not request.lightning_mode:
-                    async for event in send_status_event_flushed("status", {
-                        "phase": "interpreting",
-                        "message": "💡 For faster responses, try Lightning Mode (⚡ button in Options)",
-                        "timestamp": _time.time(),
-                        "suggest_lightning_mode": True
-                    }):
-                        yield event
+                # Note: Lightning mode suggestion removed - handled by frontend system message
                 
                 # Handle forced tool calls from @ syntax
                 if request.forced_tool_calls and orchestration_plan:
