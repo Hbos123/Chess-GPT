@@ -1974,7 +1974,7 @@ Return ONLY valid JSON in this exact format:
                     if isinstance(opening_win_rate, (int, float)) and opening_win_rate <= 1.0:
                         opening_win_rate = opening_win_rate * 100
                     context += f"\n{i}. {name}: {_safe_float(accuracy, 0.0):.1f}% accuracy, {_safe_float(opening_win_rate, 0.0):.1f}% win rate ({games} games: {opening_wins}W/{opening_losses}L/{opening_draws}D)"
-            context += "
+            context += """
 
 Phase Accuracy (only phases with moves shown):"""
             # Only include phases that have data
