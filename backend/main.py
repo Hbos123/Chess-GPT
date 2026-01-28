@@ -3366,6 +3366,8 @@ class LLMRequest(BaseModel):
     interpreter_model: Optional[str] = None  # Override interpreter model
     lightning_mode: bool = False  # Lightning mode: fast responses with gpt-4o-mini
     forced_tool_calls: Optional[List[Dict[str, Any]]] = None  # Tool calls from @ syntax
+    user_id: Optional[str] = None  # User ID for limit checking
+    ip_address: Optional[str] = None  # IP address for limit checking
 
 
 class CheckLimitsRequest(BaseModel):
@@ -3435,12 +3437,54 @@ async def check_limits(request: CheckLimitsRequest, req: Request):
                 }
             )
         
+        # Get game review and lesson availability
+        game_review_info = {}
+        lesson_info = {}
+        if user_id or ip_address:
+            tier_info = supabase_client.get_subscription_overview(user_id) if user_id else {
+                "tier_id": "unpaid",
+                "tier": {
+                    "max_game_reviews_per_day": 0,
+                    "max_lessons_per_day": 0
+                }
+            }
+            
+            # Check game review availability (without incrementing)
+            today = datetime.now().date()
+            usage = supabase_client._get_daily_usage(user_id, ip_address, today)
+            tier = tier_info.get("tier", {})
+            
+            max_reviews = tier.get("max_game_reviews_per_day")
+            if max_reviews is None:
+                game_review_info = {"used": 0, "limit": "unlimited", "remaining": "unlimited"}
+            else:
+                used_reviews = usage.get("game_reviews_count", 0) if usage else 0
+                game_review_info = {
+                    "used": used_reviews,
+                    "limit": max_reviews,
+                    "remaining": max(0, max_reviews - used_reviews)
+                }
+            
+            # Check lesson availability (without incrementing)
+            max_lessons = tier.get("max_lessons_per_day")
+            if max_lessons is None:
+                lesson_info = {"used": 0, "limit": "unlimited", "remaining": "unlimited"}
+            else:
+                used_lessons = usage.get("lessons_count", 0) if usage else 0
+                lesson_info = {
+                    "used": used_lessons,
+                    "limit": max_lessons,
+                    "remaining": max(0, max_lessons - used_lessons)
+                }
+        
         return {
             "allowed": True,
             "message": "Limits OK",
             "info": {
                 "messages": msg_info,
-                "tokens": token_info
+                "tokens": token_info,
+                "game_reviews": game_review_info,
+                "lessons": lesson_info
             }
         }
     except Exception as e:
@@ -3452,7 +3496,7 @@ async def check_limits(request: CheckLimitsRequest, req: Request):
 
 
 @app.post("/llm_chat")
-async def llm_chat(request: LLMRequest):
+async def llm_chat(request: LLMRequest, req: Request):
     """
     Enhanced chat endpoint with OpenAI function calling support.
     LLM can call tools to analyze positions, review games, generate training, query database, etc.
@@ -3465,6 +3509,10 @@ async def llm_chat(request: LLMRequest):
     
     try:
         print(f"\n💬 LLM CHAT REQUEST (use_tools={request.use_tools})")
+        
+        # Get user_id and ip_address from request
+        user_id = request.user_id
+        ip_address = request.ip_address or req.headers.get("x-forwarded-for") or req.client.host
         
         # Build context for tool selection
         context = request.context or {}
@@ -3875,8 +3923,8 @@ async def llm_chat(request: LLMRequest):
                 
                 print(f"      Executing: {tool_name} with args: {final_tool_args}")
                 
-                # Execute tool with merged arguments
-                result = await tool_executor.execute_tool(tool_name, final_tool_args, context)
+                # Execute tool with merged arguments (pass user_id and ip_address for limit checking)
+                result = await tool_executor.execute_tool(tool_name, final_tool_args, context, user_id=user_id, ip_address=ip_address)
                 
                 # Format for LLM
                 result_text = tool_executor.format_result_for_llm(result, tool_name)

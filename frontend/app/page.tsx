@@ -2863,7 +2863,9 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
           temperature, 
           model,
           use_tools: useTools,
-          context: context
+          context: context,
+          user_id: user?.id || null,
+          ip_address: null  // Will be set by backend from request headers
         }),
       });
       
@@ -5300,8 +5302,8 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
     }
   };
   
-  // Check token limits before sending message
-  async function checkTokenLimitsBeforeSend(message: string): Promise<boolean> {
+  // Check token limits before sending message (only tokens, not messages)
+  async function checkTokenLimitsBeforeSend(message: string, excludeFromMessageCount: boolean = false): Promise<boolean> {
     try {
       // Estimate tokens (~4 chars per token, add buffer for response)
       const estimatedTokens = Math.ceil(message.length / 4) + 5000;
@@ -5312,27 +5314,40 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
         body: JSON.stringify({
           user_id: user?.id || null,
           estimated_tokens: estimatedTokens,
-          message_count: 1
+          message_count: excludeFromMessageCount ? 0 : 1  // Don't count walkthrough/lesson messages
         })
       });
       
       if (!response.ok) {
         const error = await response.json();
-        setTokenLimitInfo({
-          type: error.type || (error.error === 'message_limit' ? 'message_limit' : 'token_limit'),
-          message: error.message || 'Daily limit exceeded',
-          info: error.info || {}
-        });
-        setShowTokenLimitModal(true);
+        // Only show modal for token limits, not message limits (since we only check tokens)
+        if (error.type === 'token_limit' || error.error === 'token_limit') {
+          setTokenLimitInfo({
+            type: 'token_limit',
+            message: error.message || 'Daily token limit exceeded',
+            info: error.info || {}
+          });
+          setShowTokenLimitModal(true);
+          return false;
+        }
+        // For message limits, just return false silently (shouldn't happen since we set message_count=0)
         return false;
       }
       
       // Store usage info for progress bar
       const data = await response.json();
       if (data.info) {
+        const messages = data.info.messages;
+        const messagesWithRemaining = messages ? {
+          ...messages,
+          remaining: messages.limit - messages.used
+        } : undefined;
+        
         setTokenUsage({
-          messages: data.info.messages,
-          tokens: data.info.tokens
+          messages: messagesWithRemaining,
+          tokens: data.info.tokens,
+          gameReviews: data.info.game_reviews,
+          lessons: data.info.lessons
         });
       }
       
@@ -8544,7 +8559,9 @@ ${formatAnalysisCard(analysis.bestMoveReport.analysisAfter)}
 
   async function handleSendMessage(message: string) {
     // Check token limits before processing
-    const canSend = await checkTokenLimitsBeforeSend(message);
+    // Exclude walkthrough/lesson messages from message counting
+    const excludeFromMessageCount = walkthroughActive || lessonMode;
+    const canSend = await checkTokenLimitsBeforeSend(message, excludeFromMessageCount);
     if (!canSend) {
       return; // Stop here if limit exceeded
     }

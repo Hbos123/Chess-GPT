@@ -11,9 +11,10 @@ interface DailyUsageDisplayProps {
 export default function DailyUsageDisplay({ compact = false }: DailyUsageDisplayProps) {
   const { user } = useAuth();
   const [usage, setUsage] = useState<{
-    messages?: { used: number; limit: number };
+    messages?: { used: number; limit: number; remaining?: number };
     tokens?: { used: number; limit: number };
-    toolCalls?: { used: number; limit: number };
+    gameReviews?: { used: number; limit: number | string; remaining?: number | string };
+    lessons?: { used: number; limit: number | string; remaining?: number | string };
   } | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -33,11 +34,17 @@ export default function DailyUsageDisplay({ compact = false }: DailyUsageDisplay
         if (response.ok) {
           const data = await response.json();
           if (data.info) {
+            const messages = data.info.messages;
+            const messagesWithRemaining = messages ? {
+              ...messages,
+              remaining: messages.limit - messages.used
+            } : undefined;
+            
             setUsage({
-              messages: data.info.messages,
+              messages: messagesWithRemaining,
               tokens: data.info.tokens,
-              // Tool calls might be in a separate field, adjust based on backend response
-              toolCalls: data.info.tool_calls || data.info.toolCalls
+              gameReviews: data.info.game_reviews,
+              lessons: data.info.lessons
             });
           }
         }
@@ -89,7 +96,7 @@ export default function DailyUsageDisplay({ compact = false }: DailyUsageDisplay
           <div style={{ marginBottom: '4px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '2px' }}>
               <span>Messages:</span>
-              <strong>{usage.messages.used}/{usage.messages.limit}</strong>
+              <strong>{usage.messages.remaining !== undefined ? usage.messages.remaining : usage.messages.limit - usage.messages.used} remaining</strong>
             </div>
             <div style={{
               width: '100%',
@@ -129,26 +136,64 @@ export default function DailyUsageDisplay({ compact = false }: DailyUsageDisplay
             </div>
           </div>
         )}
-        {usage.toolCalls && (
+        {usage.gameReviews && (
+          <div style={{ marginBottom: '4px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '2px' }}>
+              <span>Game Reviews:</span>
+              <strong>
+                {usage.gameReviews.remaining === "unlimited" 
+                  ? "Unlimited" 
+                  : typeof usage.gameReviews.remaining === "number" 
+                    ? `${usage.gameReviews.remaining} available`
+                    : `${usage.gameReviews.used}/${usage.gameReviews.limit}`}
+              </strong>
+            </div>
+            {usage.gameReviews.remaining !== "unlimited" && typeof usage.gameReviews.limit === "number" && (
+              <div style={{
+                width: '100%',
+                height: '4px',
+                backgroundColor: 'var(--bg-secondary)',
+                borderRadius: '2px',
+                overflow: 'hidden'
+              }}>
+                <div style={{
+                  height: '100%',
+                  width: `${getPercentage(usage.gameReviews.used, usage.gameReviews.limit)}%`,
+                  backgroundColor: getColor(usage.gameReviews.used, usage.gameReviews.limit),
+                  transition: 'width 0.2s ease'
+                }} />
+              </div>
+            )}
+          </div>
+        )}
+        {usage.lessons && (
           <div>
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '2px' }}>
-              <span>Tool Calls:</span>
-              <strong>{usage.toolCalls.used}/{usage.toolCalls.limit}</strong>
+              <span>Lessons:</span>
+              <strong>
+                {usage.lessons.remaining === "unlimited" 
+                  ? "Unlimited" 
+                  : typeof usage.lessons.remaining === "number" 
+                    ? `${usage.lessons.remaining} available`
+                    : `${usage.lessons.used}/${usage.lessons.limit}`}
+              </strong>
             </div>
-            <div style={{
-              width: '100%',
-              height: '4px',
-              backgroundColor: 'var(--bg-secondary)',
-              borderRadius: '2px',
-              overflow: 'hidden'
-            }}>
+            {usage.lessons.remaining !== "unlimited" && typeof usage.lessons.limit === "number" && (
               <div style={{
-                height: '100%',
-                width: `${getPercentage(usage.toolCalls.used, usage.toolCalls.limit)}%`,
-                backgroundColor: getColor(usage.toolCalls.used, usage.toolCalls.limit),
-                transition: 'width 0.2s ease'
-              }} />
-            </div>
+                width: '100%',
+                height: '4px',
+                backgroundColor: 'var(--bg-secondary)',
+                borderRadius: '2px',
+                overflow: 'hidden'
+              }}>
+                <div style={{
+                  height: '100%',
+                  width: `${getPercentage(usage.lessons.used, usage.lessons.limit)}%`,
+                  backgroundColor: getColor(usage.lessons.used, usage.lessons.limit),
+                  transition: 'width 0.2s ease'
+                }} />
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -170,7 +215,7 @@ export default function DailyUsageDisplay({ compact = false }: DailyUsageDisplay
         <div style={{ marginBottom: '12px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px', fontSize: '14px' }}>
             <span>Messages</span>
-            <strong>{usage.messages.used}/{usage.messages.limit}</strong>
+            <strong>{usage.messages.remaining !== undefined ? usage.messages.remaining : usage.messages.limit - usage.messages.used} remaining</strong>
           </div>
           <div style={{
             width: '100%',
@@ -210,26 +255,64 @@ export default function DailyUsageDisplay({ compact = false }: DailyUsageDisplay
           </div>
         </div>
       )}
-      {usage.toolCalls && (
+      {usage.gameReviews && (
+        <div style={{ marginBottom: '12px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px', fontSize: '14px' }}>
+            <span>Game Reviews</span>
+            <strong>
+              {usage.gameReviews.remaining === "unlimited" 
+                ? "Unlimited" 
+                : typeof usage.gameReviews.remaining === "number" 
+                  ? `${usage.gameReviews.remaining} available`
+                  : `${usage.gameReviews.used}/${usage.gameReviews.limit}`}
+            </strong>
+          </div>
+          {usage.gameReviews.remaining !== "unlimited" && typeof usage.gameReviews.limit === "number" && (
+            <div style={{
+              width: '100%',
+              height: '6px',
+              backgroundColor: 'var(--bg-primary)',
+              borderRadius: '3px',
+              overflow: 'hidden'
+            }}>
+              <div style={{
+                height: '100%',
+                width: `${getPercentage(usage.gameReviews.used, usage.gameReviews.limit)}%`,
+                backgroundColor: getColor(usage.gameReviews.used, usage.gameReviews.limit),
+                transition: 'width 0.2s ease'
+              }} />
+            </div>
+          )}
+        </div>
+      )}
+      {usage.lessons && (
         <div>
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px', fontSize: '14px' }}>
-            <span>Tool Calls</span>
-            <strong>{usage.toolCalls.used}/{usage.toolCalls.limit}</strong>
+            <span>Lessons</span>
+            <strong>
+              {usage.lessons.remaining === "unlimited" 
+                ? "Unlimited" 
+                : typeof usage.lessons.remaining === "number" 
+                  ? `${usage.lessons.remaining} available`
+                  : `${usage.lessons.used}/${usage.lessons.limit}`}
+            </strong>
           </div>
-          <div style={{
-            width: '100%',
-            height: '6px',
-            backgroundColor: 'var(--bg-primary)',
-            borderRadius: '3px',
-            overflow: 'hidden'
-          }}>
+          {usage.lessons.remaining !== "unlimited" && typeof usage.lessons.limit === "number" && (
             <div style={{
-              height: '100%',
-              width: `${getPercentage(usage.toolCalls.used, usage.toolCalls.limit)}%`,
-              backgroundColor: getColor(usage.toolCalls.used, usage.toolCalls.limit),
-              transition: 'width 0.2s ease'
-            }} />
-          </div>
+              width: '100%',
+              height: '6px',
+              backgroundColor: 'var(--bg-primary)',
+              borderRadius: '3px',
+              overflow: 'hidden'
+            }}>
+              <div style={{
+                height: '100%',
+                width: `${getPercentage(usage.lessons.used, usage.lessons.limit)}%`,
+                backgroundColor: getColor(usage.lessons.used, usage.lessons.limit),
+                transition: 'width 0.2s ease'
+              }} />
+            </div>
+          )}
         </div>
       )}
     </div>
