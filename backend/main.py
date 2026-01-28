@@ -8931,6 +8931,67 @@ async def get_games_to_analyze(request: GetGamesToAnalyzeRequest):
         raise HTTPException(status_code=500, detail=f"Failed to get games to analyze: {str(e)}")
 
 
+class SaveGameReviewRequest(BaseModel):
+    user_id: str
+    game: Dict[str, Any]  # GameMetadata
+    review: Dict[str, Any]  # GameReview
+
+
+@app.post("/save_game_review")
+async def save_game_review_endpoint(request: SaveGameReviewRequest):
+    """
+    Save a game review from the frontend.
+    Uses backend service role key to bypass RLS and write to correct tables.
+    """
+    if not supabase_client:
+        raise HTTPException(status_code=503, detail="Supabase client not initialized")
+    
+    try:
+        # Convert frontend format to backend format
+        game_data = {
+            "platform": request.game.get("platform"),
+            "external_id": request.game.get("game_id"),
+            "game_date": request.game.get("date"),
+            "user_color": request.game.get("player_color"),
+            "opponent_name": request.game.get("opponent_name"),
+            "user_rating": request.game.get("player_rating"),
+            "opponent_rating": request.game.get("opponent_rating"),
+            "result": request.game.get("result"),
+            "termination": request.game.get("termination", ""),
+            "time_control": request.game.get("time_control"),
+            "time_category": request.game.get("time_category"),
+            "opening_eco": request.review.get("opening", {}).get("eco_final"),
+            "opening_name": request.review.get("opening", {}).get("name_final"),
+            "theory_exit_ply": request.review.get("opening", {}).get("theory_exit_ply"),
+            "accuracy_overall": request.review.get("stats", {}).get("overall_accuracy", 0),
+            "accuracy_opening": request.review.get("stats", {}).get("opening_accuracy", 0),
+            "accuracy_middlegame": request.review.get("stats", {}).get("middlegame_accuracy", 0),
+            "accuracy_endgame": request.review.get("stats", {}).get("endgame_accuracy", 0),
+            "avg_cp_loss": request.review.get("stats", {}).get("avg_cp_loss", 0),
+            "blunders": request.review.get("stats", {}).get("blunders", 0),
+            "mistakes": request.review.get("stats", {}).get("mistakes", 0),
+            "inaccuracies": request.review.get("stats", {}).get("inaccuracies", 0),
+            "total_moves": request.review.get("stats", {}).get("total_moves", 0),
+            "game_character": request.review.get("game_metadata", {}).get("game_character"),
+            "endgame_type": request.review.get("game_metadata", {}).get("endgame_type"),
+            "pgn": request.game.get("pgn"),
+            "game_review": request.review,
+            "review_type": "full",
+        }
+        
+        game_id = supabase_client.save_game_review(request.user_id, game_data)
+        
+        if not game_id:
+            raise HTTPException(status_code=500, detail="Failed to save game review")
+        
+        return {"success": True, "game_id": game_id}
+    except Exception as e:
+        print(f"❌ Error saving game review: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Failed to save game review: {str(e)}")
+
+
 if __name__ == "__main__":
     import uvicorn
     # Use PORT environment variable (set by Render/Heroku/etc.) or default to 8000
