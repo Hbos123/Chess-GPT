@@ -14073,6 +14073,7 @@ Provide 2-3 sentences of natural language commentary explaining why this deviati
             setTokenLimitInfo(null);
           }}
           limitInfo={tokenLimitInfo}
+          isLoggedIn={!!user?.id}
           onOpenProfile={() => {
             setShowTokenLimitModal(false);
             setTokenLimitInfo(null);

@@ -15,9 +15,10 @@ interface TokenLimitModalProps {
     };
   };
   onOpenProfile?: () => void;
+  isLoggedIn?: boolean; // Whether user is logged in
 }
 
-export default function TokenLimitModal({ onClose, limitInfo, onOpenProfile }: TokenLimitModalProps) {
+export default function TokenLimitModal({ onClose, limitInfo, onOpenProfile, isLoggedIn = false }: TokenLimitModalProps) {
   const handleBackdropClick = (e: MouseEvent<HTMLDivElement>) => {
     if (e.target === e.currentTarget) {
       onClose();
@@ -26,10 +27,9 @@ export default function TokenLimitModal({ onClose, limitInfo, onOpenProfile }: T
 
   const getUpgradeMessage = () => {
     const tierId = limitInfo.info.tier_id || 'unpaid';
-    const isLoggedIn = tierId !== 'unpaid' && !limitInfo.info.next_step?.includes('sign');
     
     // Unlogged user
-    if (!isLoggedIn || tierId === 'unpaid') {
+    if (!isLoggedIn) {
       return {
         title: 'Usage Limit Hit',
         message: 'Sign in or make an account to keep on trying this out.',
