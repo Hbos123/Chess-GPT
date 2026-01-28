@@ -9,6 +9,7 @@ import Board from './Board';
 import PGNViewer from './PGNViewer';
 import StockfishAnalysis from './StockfishAnalysis';
 import EvaluationBar from './EvaluationBar';
+import TokenUsageBar from './TokenUsageBar';
 import type { AnnotationArrow, AnnotationHighlight, ChatGraphData } from '@/types';
 import type { MoveNode } from '@/lib/moveTree';
 
