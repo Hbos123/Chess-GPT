@@ -997,8 +997,6 @@ class ToolExecutor:
             }
         
         # Step 1: Fetch games (backend fallback)
-        
-        # Step 1: Fetch games
         await emit_status(f"Fetching games from {platform}...", 0.0)
         print(f"📥 Fetching games for {username} from {platform}...")
 
