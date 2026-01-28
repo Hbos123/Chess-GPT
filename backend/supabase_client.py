@@ -37,6 +37,28 @@ class SupabaseClient:
     def __init__(self, url: str, service_role_key: str):
         self.client: Client = create_client(url, service_role_key)
         print(f"✅ Supabase client initialized: {url}")
+
+    def _apply_eq(self, query, column: str, value):
+        """Apply an equality filter across PostgREST client versions.
+
+        Some deployments expose .eq() on the request builder; others only expose .filter() or .match().
+        """
+        if hasattr(query, "eq"):
+            return query.eq(column, value)
+        if hasattr(query, "filter"):
+            return query.filter(column, "eq", value)
+        if hasattr(query, "match"):
+            return query.match({column: value})
+        raise AttributeError(f"Request builder has no eq/filter/match methods (type={type(query)})")
+
+    def _apply_match(self, query, filters: dict):
+        """Apply multiple equality filters across client versions."""
+        if hasattr(query, "match"):
+            return query.match(filters)
+        # Fall back to chaining eq/filter
+        for k, v in filters.items():
+            query = self._apply_eq(query, k, v)
+        return query
     
     # ============================================================================
     # PROFILES
@@ -321,10 +343,10 @@ class SupabaseClient:
             # returned by .select()/.update()/.delete(), not on .table() directly.
             query = self.client.table("daily_usage").select("*")
             if user_id:
-                query = query.eq("user_id", user_id)
+                query = self._apply_eq(query, "user_id", user_id)
             else:
-                query = query.eq("ip_address", ip_address)
-            query = query.eq("usage_date", date.isoformat())
+                query = self._apply_eq(query, "ip_address", ip_address)
+            query = self._apply_eq(query, "usage_date", date.isoformat())
             
             result = query.execute()
             return result.data[0] if result.data else None
@@ -341,10 +363,10 @@ class SupabaseClient:
             # Try to get existing record
             query = self.client.table("daily_usage").select("*")
             if user_id:
-                query = query.eq("user_id", user_id)
+                query = self._apply_eq(query, "user_id", user_id)
             else:
-                query = query.eq("ip_address", ip_address)
-            query = query.eq("usage_date", today.isoformat())
+                query = self._apply_eq(query, "ip_address", ip_address)
+            query = self._apply_eq(query, "usage_date", today.isoformat())
             
             result = query.execute()
             
@@ -353,10 +375,10 @@ class SupabaseClient:
                 current = result.data[0].get(count_field, 0)
                 upd = self.client.table("daily_usage").update({count_field: current + 1})
                 if user_id:
-                    upd = upd.eq("user_id", user_id)
+                    upd = self._apply_eq(upd, "user_id", user_id)
                 else:
-                    upd = upd.eq("ip_address", ip_address)
-                upd = upd.eq("usage_date", today.isoformat())
+                    upd = self._apply_eq(upd, "ip_address", ip_address)
+                upd = self._apply_eq(upd, "usage_date", today.isoformat())
                 upd.execute()
             else:
                 # Create new record
@@ -519,10 +541,10 @@ class SupabaseClient:
             
             query = self.client.table("daily_usage").select("*")
             if user_id:
-                query = query.eq("user_id", user_id)
+                query = self._apply_eq(query, "user_id", user_id)
             else:
-                query = query.eq("ip_address", ip_address)
-            query = query.eq("usage_date", today.isoformat())
+                query = self._apply_eq(query, "ip_address", ip_address)
+            query = self._apply_eq(query, "usage_date", today.isoformat())
             
             result = query.execute()
             
@@ -531,10 +553,10 @@ class SupabaseClient:
                 current = result.data[0].get("messages_count", 0)
                 upd = self.client.table("daily_usage").update({"messages_count": current + 1})
                 if user_id:
-                    upd = upd.eq("user_id", user_id)
+                    upd = self._apply_eq(upd, "user_id", user_id)
                 else:
-                    upd = upd.eq("ip_address", ip_address)
-                upd = upd.eq("usage_date", today.isoformat())
+                    upd = self._apply_eq(upd, "ip_address", ip_address)
+                upd = self._apply_eq(upd, "usage_date", today.isoformat())
                 upd.execute()
             else:
                 # Create new record
@@ -559,10 +581,10 @@ class SupabaseClient:
             
             query = self.client.table("daily_usage").select("*")
             if user_id:
-                query = query.eq("user_id", user_id)
+                query = self._apply_eq(query, "user_id", user_id)
             else:
-                query = query.eq("ip_address", ip_address)
-            query = query.eq("usage_date", today.isoformat())
+                query = self._apply_eq(query, "ip_address", ip_address)
+            query = self._apply_eq(query, "usage_date", today.isoformat())
             
             result = query.execute()
             
@@ -571,10 +593,10 @@ class SupabaseClient:
                 current = result.data[0].get("tokens_used", 0)
                 upd = self.client.table("daily_usage").update({"tokens_used": current + tokens})
                 if user_id:
-                    upd = upd.eq("user_id", user_id)
+                    upd = self._apply_eq(upd, "user_id", user_id)
                 else:
-                    upd = upd.eq("ip_address", ip_address)
-                upd = upd.eq("usage_date", today.isoformat())
+                    upd = self._apply_eq(upd, "ip_address", ip_address)
+                upd = self._apply_eq(upd, "usage_date", today.isoformat())
                 upd.execute()
             else:
                 # Create new record
