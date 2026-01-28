@@ -210,7 +210,6 @@ class ProfileIndexingManager:
         self._status: Dict[str, ProfileIndexStatus] = {}
         self._games: Dict[str, List[Dict[str, Any]]] = {}
         self._tasks: Dict[str, asyncio.Task] = {}
-        self._analysis_tasks: Dict[str, asyncio.Task] = {}
         self._deep_completed: Dict[str, set] = {}
         self._background_tasks: Dict[str, asyncio.Task] = {}
         self._next_poll_timestamp: Dict[str, float] = {}
@@ -486,7 +485,6 @@ class ProfileIndexingManager:
             status.progress_percent = 100 if status.games_indexed else status.progress_percent
             status.last_updated = _utc_now()
             self._refresh_stats(user_id)
-            self._schedule_analysis(user_id)
             
             # Trigger review callback if provided (for automatic game reviews after indexing)
             # Trigger for both regular and background indexing
@@ -1372,37 +1370,6 @@ class ProfileIndexingManager:
 
         return "unknown", "Unknown"
 
-    def _schedule_analysis(self, user_id: str) -> None:
-        # TEMPORARY: Disable analysis to save PC resources
-        print(f"🚫 [SCHEDULE_ANALYSIS] Analysis disabled for user {user_id} (temporary guard)")
-        return
-        
-        if not self.review_fn:
-            print(f"⚠️ [SCHEDULE_ANALYSIS] No review_fn available for user {user_id}")
-            return
-        existing = self._analysis_tasks.get(user_id)
-        if existing and not existing.done():
-            print(f"ℹ️ [SCHEDULE_ANALYSIS] Analysis task already running for user {user_id}")
-            return
-        print(f"🚀 [SCHEDULE_ANALYSIS] Creating analysis pipeline task for user {user_id}")
-        task = asyncio.create_task(self._run_analysis_pipeline(user_id))
-        self._analysis_tasks[user_id] = task
-        print(f"✅ [SCHEDULE_ANALYSIS] Analysis pipeline task created for user {user_id}")
-
-    async def _run_analysis_pipeline(self, user_id: str) -> None:
-        """Run deep analysis pipeline - only full analysis, no light analysis"""
-        # TEMPORARY: Disable analysis to save PC resources
-        print(f"🚫 [ANALYSIS_PIPELINE] Analysis disabled for user {user_id} (temporary guard)")
-        return
-        
-        print(f"🔬 [ANALYSIS_PIPELINE] Starting analysis pipeline for user {user_id}")
-        try:
-            await self._run_deep_analysis(user_id)
-            print(f"✅ [ANALYSIS_PIPELINE] Completed analysis pipeline for user {user_id}")
-        except Exception as exc:
-            print(f"❌ [ANALYSIS_PIPELINE] Analysis pipeline error for {user_id}: {exc}")
-            import traceback
-            traceback.print_exc()
 
     def _summarize_light_result(self, review_result: Dict[str, Any], game: Dict[str, Any]) -> Dict[str, Any]:
         player_color = game.get("player_color", "white")
@@ -1685,13 +1652,6 @@ class ProfileIndexingManager:
         }
 
 
-    async def _run_deep_analysis(self, user_id: str) -> None:
-        """Run deep analysis - this is now a no-op since full analysis happens in start_indexing"""
-        # Deep analysis is now handled automatically in /profile/start_indexing
-        # which does full game reviews for the 30 most recent games
-        # This method is kept for compatibility but does nothing
-        pass
-
     async def _reanalyze_critical_move(self, fen: str) -> None:
         if not self.engine_queue:
             return
@@ -1738,7 +1698,6 @@ class ProfileIndexingManager:
         
         # Never block the event loop / request path here.
         # Schedule any heavy work in the background so endpoints like /meta and /board/tree/get stay responsive.
-        self._schedule_analysis(user_id)
         try:
             asyncio.create_task(self._maybe_schedule_background(user_id))
         except Exception:
