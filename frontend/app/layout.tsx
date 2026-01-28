@@ -7,8 +7,7 @@ export const metadata: Metadata = {
   description: "AI-powered chess analysis and training",
   icons: {
     icon: [
-      { url: "/favicon.svg", type: "image/svg+xml" },
-      { url: "/icon.svg", type: "image/svg+xml", sizes: "any" },
+      { url: "/favicon.svg", type: "image/svg+xml", sizes: "any" },
     ],
     apple: [
       { url: "/icons/icon-192.png", type: "image/png", sizes: "180x180" },
