@@ -3521,6 +3521,12 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
         lightning_mode: lightningMode,
         forced_tool_calls: parsedToolCalls.length > 0 ? parsedToolCalls : undefined
       });
+      
+      // Add system message when lightning mode is enabled (only once per request)
+      if (lightningMode) {
+        addSystemMessage("Lightning Mode enabled. Fast responses with gpt-4o-mini.");
+      }
+      
       vLog("POST /llm_chat_stream bytes", requestBody.length);
       
       // Use fetch with ReadableStream for SSE (learning-first logging headers + passive next-action flush)
