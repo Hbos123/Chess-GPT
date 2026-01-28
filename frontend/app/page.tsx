@@ -14037,6 +14037,11 @@ Provide 2-3 sentences of natural language commentary explaining why this deviati
             setTokenLimitInfo(null);
           }}
           limitInfo={tokenLimitInfo}
+          onOpenProfile={() => {
+            setShowTokenLimitModal(false);
+            setTokenLimitInfo(null);
+            setShowProfileDashboard(true);
+          }}
         />
       )}
       {user && (

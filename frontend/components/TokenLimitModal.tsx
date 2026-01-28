@@ -14,9 +14,10 @@ interface TokenLimitModalProps {
       tier_id?: string;
     };
   };
+  onOpenProfile?: () => void;
 }
 
-export default function TokenLimitModal({ onClose, limitInfo }: TokenLimitModalProps) {
+export default function TokenLimitModal({ onClose, limitInfo, onOpenProfile }: TokenLimitModalProps) {
   const handleBackdropClick = (e: MouseEvent<HTMLDivElement>) => {
     if (e.target === e.currentTarget) {
       onClose();
@@ -32,28 +33,32 @@ export default function TokenLimitModal({ onClose, limitInfo }: TokenLimitModalP
         title: 'Sign In Required',
         message: 'Sign in to get more daily messages and tokens.',
         action: 'Sign In',
-        actionUrl: '/auth'
+        actionUrl: '/auth',
+        useModal: false
       };
     } else if (nextStep === 'upgrade_lite') {
       return {
         title: 'Upgrade to Lite',
         message: 'Upgrade to Lite tier for 15 messages/day and 43k tokens/day.',
         action: 'Upgrade',
-        actionUrl: '/profile?tab=billing'
+        actionUrl: null,
+        useModal: true
       };
     } else if (nextStep === 'upgrade') {
       return {
         title: 'Upgrade Your Plan',
         message: 'Upgrade your plan to get more daily messages and tokens.',
         action: 'Upgrade',
-        actionUrl: '/profile?tab=billing'
+        actionUrl: null,
+        useModal: true
       };
     } else {
       return {
         title: 'Limit Reached',
         message: 'You\'ve reached your daily limit. Try again tomorrow or upgrade for more.',
         action: 'View Plans',
-        actionUrl: '/profile?tab=billing'
+        actionUrl: null,
+        useModal: true
       };
     }
   };
@@ -128,10 +133,17 @@ export default function TokenLimitModal({ onClose, limitInfo }: TokenLimitModalP
           >
             Close
           </button>
-          {upgradeInfo.actionUrl && (
+          {(upgradeInfo.actionUrl || upgradeInfo.useModal) && (
             <button
               onClick={() => {
-                window.location.href = upgradeInfo.actionUrl;
+                onClose();
+                if (upgradeInfo.useModal && onOpenProfile) {
+                  // Open ProfileDashboard modal
+                  onOpenProfile();
+                } else if (upgradeInfo.actionUrl) {
+                  // Navigate to URL (for sign in)
+                  window.location.href = upgradeInfo.actionUrl;
+                }
               }}
               style={{
                 padding: '10px 20px',
