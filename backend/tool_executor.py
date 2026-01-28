@@ -290,6 +290,39 @@ class ToolExecutor:
             traceback.print_exc()
             return {"error": str(e), "tool": tool_name}
     
+    def _track_tool_call(self, user_id: Optional[str], ip_address: Optional[str], tool_name: str, success: bool):
+        """Track tool call in database"""
+        if not self.supabase_client:
+            return
+        
+        try:
+            from datetime import datetime
+            today = datetime.now().date()
+            
+            # Get or create usage record
+            usage = self.supabase_client._get_daily_usage(user_id, ip_address, today)
+            
+            # Increment tool_calls_count
+            if usage:
+                current = usage.get("tool_calls_count", 0)
+                self.supabase_client.client.table("daily_usage").update({
+                    "tool_calls_count": current + 1
+                }).eq("id", usage["id"]).execute()
+            else:
+                # Create new record
+                data = {
+                    "usage_date": today.isoformat(),
+                    "tool_calls_count": 1
+                }
+                if user_id:
+                    data["user_id"] = user_id
+                else:
+                    data["ip_address"] = ip_address
+                self.supabase_client.client.table("daily_usage").insert(data).execute()
+        except Exception as e:
+            print(f"[tool_tracking] Error tracking tool call: {e}")
+            # Don't fail tool execution if tracking fails
+    
     # ========================================================================
     # HIGH-LEVEL TOOL IMPLEMENTATIONS
     # ========================================================================
