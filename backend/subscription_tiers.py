@@ -7,7 +7,8 @@ TIER_DESCRIPTIONS = {
     "unpaid": {
         "name": "Unpaid",
         "monthly_token_allowance": "450,000 tokens/month",
-        "daily_messages": "3 messages/day",
+        "daily_tokens": "15,000 tokens/day",
+        "approximate_daily_messages": "~3 messages/day",
         "tool_usage": {
             "game_reviews": "Not available",
             "lessons": "Not available",
@@ -17,8 +18,9 @@ TIER_DESCRIPTIONS = {
     },
     "lite": {
         "name": "Lite",
-        "monthly_token_allowance": "1.29M tokens/month (~$1 USD)",
-        "daily_messages": "15 messages/day",
+        "monthly_token_allowance": "1.29M tokens/month",
+        "daily_tokens": "100,000 tokens/day",
+        "approximate_daily_messages": "~20 messages/day",
         "tool_usage": {
             "game_reviews": "1 per day",
             "lessons": "1 per day",
@@ -28,8 +30,9 @@ TIER_DESCRIPTIONS = {
     },
     "starter": {
         "name": "Starter",
-        "monthly_token_allowance": "5.8M tokens/month (~$4.50 USD)",
-        "daily_messages": "65 messages/day",
+        "monthly_token_allowance": "5.8M tokens/month",
+        "daily_tokens": "500,000 tokens/day",
+        "approximate_daily_messages": "~100 messages/day",
         "tool_usage": {
             "game_reviews": "5 per day",
             "lessons": "5 per day",
@@ -39,8 +42,9 @@ TIER_DESCRIPTIONS = {
     },
     "full": {
         "name": "Full",
-        "monthly_token_allowance": "11.6M tokens/month (~$9 USD)",
-        "daily_messages": "130 messages/day",
+        "monthly_token_allowance": "11.6M tokens/month",
+        "daily_tokens": "1,000,000 tokens/day",
+        "approximate_daily_messages": "~200 messages/day",
         "tool_usage": {
             "game_reviews": "Unlimited",
             "lessons": "Unlimited",

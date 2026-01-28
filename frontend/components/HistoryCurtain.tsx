@@ -1554,7 +1554,7 @@ export default function HistoryCurtain({
                 </div>
                 <button
                   type="button"
-                  onClick={() => handleSubscribe('prod_TqH4CqNKemJjTi')}
+                  onClick={() => handleSubscribe('prod_TsQo1zbH6bGfdI')}
                   disabled={!userId || (currentTierId === 'lite' && isActive)}
                   style={{
                     width: '100%',
@@ -1621,7 +1621,7 @@ export default function HistoryCurtain({
                 </div>
                 <button
                   type="button"
-                  onClick={() => handleSubscribe('prod_TqH4m9kERqeESC')}
+                  onClick={() => handleSubscribe('prod_TsQoQi21vEIH81')}
                   disabled={!userId || (currentTierId === 'starter' && isActive)}
                   style={{
                     width: '100%',
@@ -1688,7 +1688,7 @@ export default function HistoryCurtain({
                 </div>
                 <button
                   type="button"
-                  onClick={() => handleSubscribe('prod_TqH5itxYTmQls0')}
+                  onClick={() => handleSubscribe('prod_TsQphLJLlX0wO1')}
                   disabled={!userId || (currentTierId === 'full' && isActive)}
                   style={{
                     width: '100%',

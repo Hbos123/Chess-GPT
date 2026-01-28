@@ -27,9 +27,9 @@ supabase: Client = create_client(supabase_url, supabase_key)
 
 # Product IDs provided by user
 PRODUCT_IDS = {
-    "lite": "prod_TqH4CqNKemJjTi",
-    "starter": "prod_TqH4m9kERqeESC",
-    "full": "prod_TqH5itxYTmQls0"
+    "lite": "prod_TsQo1zbH6bGfdI",
+    "starter": "prod_TsQoQi21vEIH81",
+    "full": "prod_TsQphLJLlX0wO1"
 }
 
 def get_price_id_from_product(product_id: str) -> str:

@@ -6960,9 +6960,9 @@ async def stripe_webhook(request: Request):
                 if tier_id == "unpaid" and product_id:
                     # Product ID to tier mapping
                     product_to_tier = {
-                        "prod_TqH4CqNKemJjTi": "lite",      # Lite tier
-                        "prod_TqH4m9kERqeESC": "starter",   # Starter tier
-                        "prod_TqH5itxYTmQls0": "full"       # Full tier
+                        "prod_TsQo1zbH6bGfdI": "lite",      # Lite tier
+                        "prod_TsQoQi21vEIH81": "starter",   # Starter tier
+                        "prod_TsQphLJLlX0wO1": "full"       # Full tier
                     }
                     if product_id in product_to_tier:
                         tier_id = product_to_tier[product_id]
@@ -7033,9 +7033,9 @@ async def stripe_webhook(request: Request):
             if tier_id == "unpaid" and product_id:
                 # Product ID to tier mapping
                 product_to_tier = {
-                    "prod_TqH4CqNKemJjTi": "lite",      # Lite tier
-                    "prod_TqH4m9kERqeESC": "starter",   # Starter tier
-                    "prod_TqH5itxYTmQls0": "full"       # Full tier
+                    "prod_TsQo1zbH6bGfdI": "lite",      # Lite tier
+                    "prod_TsQoQi21vEIH81": "starter",   # Starter tier
+                    "prod_TsQphLJLlX0wO1": "full"       # Full tier
                 }
                 if product_id in product_to_tier:
                     tier_id = product_to_tier[product_id]
@@ -7101,9 +7101,9 @@ async def stripe_webhook(request: Request):
             if tier_id == "unpaid" and product_id:
                 # Product ID to tier mapping
                 product_to_tier = {
-                    "prod_TqH4CqNKemJjTi": "lite",      # Lite tier
-                    "prod_TqH4m9kERqeESC": "starter",   # Starter tier
-                    "prod_TqH5itxYTmQls0": "full"       # Full tier
+                    "prod_TsQo1zbH6bGfdI": "lite",      # Lite tier
+                    "prod_TsQoQi21vEIH81": "starter",   # Starter tier
+                    "prod_TsQphLJLlX0wO1": "full"       # Full tier
                 }
                 if product_id in product_to_tier:
                     tier_id = product_to_tier[product_id]
