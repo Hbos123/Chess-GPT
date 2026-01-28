@@ -317,7 +317,9 @@ class SupabaseClient:
     def _get_daily_usage(self, user_id: Optional[str], ip_address: Optional[str], date) -> Optional[Dict]:
         """Get today's usage record"""
         try:
-            query = self.client.table("daily_usage")
+            # Supabase Python v2: filters (eq, etc.) are available on the request builder
+            # returned by .select()/.update()/.delete(), not on .table() directly.
+            query = self.client.table("daily_usage").select("*")
             if user_id:
                 query = query.eq("user_id", user_id)
             else:
@@ -337,19 +339,25 @@ class SupabaseClient:
             count_field = "game_reviews_count" if resource_type == "game_review" else "lessons_count"
             
             # Try to get existing record
-            query = self.client.table("daily_usage")
+            query = self.client.table("daily_usage").select("*")
             if user_id:
                 query = query.eq("user_id", user_id)
             else:
                 query = query.eq("ip_address", ip_address)
             query = query.eq("usage_date", today.isoformat())
             
-            result = query.select("*").execute()
+            result = query.execute()
             
             if result.data:
                 # Update existing
                 current = result.data[0].get(count_field, 0)
-                query.update({count_field: current + 1}).execute()
+                upd = self.client.table("daily_usage").update({count_field: current + 1})
+                if user_id:
+                    upd = upd.eq("user_id", user_id)
+                else:
+                    upd = upd.eq("ip_address", ip_address)
+                upd = upd.eq("usage_date", today.isoformat())
+                upd.execute()
             else:
                 # Create new record
                 data = {
@@ -509,19 +517,25 @@ class SupabaseClient:
         try:
             today = datetime.now().date()
             
-            query = self.client.table("daily_usage")
+            query = self.client.table("daily_usage").select("*")
             if user_id:
                 query = query.eq("user_id", user_id)
             else:
                 query = query.eq("ip_address", ip_address)
             query = query.eq("usage_date", today.isoformat())
             
-            result = query.select("*").execute()
+            result = query.execute()
             
             if result.data:
                 # Update existing
                 current = result.data[0].get("messages_count", 0)
-                query.update({"messages_count": current + 1}).execute()
+                upd = self.client.table("daily_usage").update({"messages_count": current + 1})
+                if user_id:
+                    upd = upd.eq("user_id", user_id)
+                else:
+                    upd = upd.eq("ip_address", ip_address)
+                upd = upd.eq("usage_date", today.isoformat())
+                upd.execute()
             else:
                 # Create new record
                 data = {
@@ -543,19 +557,25 @@ class SupabaseClient:
         try:
             today = datetime.now().date()
             
-            query = self.client.table("daily_usage")
+            query = self.client.table("daily_usage").select("*")
             if user_id:
                 query = query.eq("user_id", user_id)
             else:
                 query = query.eq("ip_address", ip_address)
             query = query.eq("usage_date", today.isoformat())
             
-            result = query.select("*").execute()
+            result = query.execute()
             
             if result.data:
                 # Update existing
                 current = result.data[0].get("tokens_used", 0)
-                query.update({"tokens_used": current + tokens}).execute()
+                upd = self.client.table("daily_usage").update({"tokens_used": current + tokens})
+                if user_id:
+                    upd = upd.eq("user_id", user_id)
+                else:
+                    upd = upd.eq("ip_address", ip_address)
+                upd = upd.eq("usage_date", today.isoformat())
+                upd.execute()
             else:
                 # Create new record
                 data = {
@@ -579,10 +599,20 @@ class SupabaseClient:
     def save_game_review(self, user_id: str, game_data: Dict) -> Optional[str]:
         """Save complete game review - direct insert instead of RPC for backend context"""
         try:
+            def _normalize_platform(p: Any) -> Optional[str]:
+                if p is None:
+                    return None
+                p2 = str(p).strip().lower()
+                if p2 in ("chesscom", "chess_com", "chess.com", "chess-com"):
+                    return "chess.com"
+                if p2 in ("lichess", "lichess.org"):
+                    return "lichess"
+                return str(p).strip()
+
             # Extract fields for direct insert (RPC has auth issues in backend context)
             insert_data = {
                 "user_id": user_id,
-                "platform": game_data.get("platform"),
+                "platform": _normalize_platform(game_data.get("platform")),
                 "external_id": game_data.get("external_id"),
                 "game_date": game_data.get("game_date"),
                 "user_color": game_data.get("user_color"),
@@ -608,10 +638,31 @@ class SupabaseClient:
                 "game_character": game_data.get("game_character"),
                 "endgame_type": game_data.get("endgame_type"),
                 "pgn": game_data.get("pgn"),
-                "game_review": game_data.get("game_review") or game_data,  # Store full review
+                # NOTE: Full game_review JSON can be very large and may trigger Postgres statement timeouts
+                # during upsert. We conditionally store it below.
+                "game_review": None,
                 "review_type": game_data.get("review_type", "full"),
                 "analyzed_at": datetime.utcnow().isoformat() + "Z"
             }
+            # Decide whether to persist full review JSON in this row (can time out for large payloads).
+            try:
+                full_review = game_data.get("game_review") or game_data
+                approx_bytes = len(json.dumps(full_review, default=str))
+                # Keep under ~150KB to avoid statement timeouts on large rows.
+                if approx_bytes <= 150_000:
+                    insert_data["game_review"] = full_review
+                else:
+                    insert_data["game_review"] = {
+                        "_stored": False,
+                        "_reason": "payload_too_large",
+                        "_approx_bytes": approx_bytes,
+                    }
+                    pgn = insert_data.get("pgn")
+                    if isinstance(pgn, str) and len(pgn) > 200_000:
+                        insert_data["pgn"] = pgn[:200_000] + "\n\n;[TRUNCATED]"
+            except Exception:
+                insert_data["game_review"] = {"_stored": False, "_reason": "size_check_failed"}
+
             
             # Debug: log platform value
             print(f"   💾 Saving game: platform={insert_data['platform']}, external_id={insert_data['external_id']}")
