@@ -10,6 +10,8 @@ from datetime import datetime
 import json
 from postgrest.exceptions import APIError
 import traceback
+import threading
+import queue
 
 
 class SupabaseClient:
@@ -535,84 +537,98 @@ class SupabaseClient:
         }
 
     def _increment_message_count(self, user_id: Optional[str], ip_address: Optional[str]):
-        """Increment daily message count"""
-        try:
-            today = datetime.now().date()
-            
-            query = self.client.table("daily_usage").select("*")
-            if user_id:
-                query = self._apply_eq(query, "user_id", user_id)
-            else:
-                query = self._apply_eq(query, "ip_address", ip_address)
-            query = self._apply_eq(query, "usage_date", today.isoformat())
-            
-            result = query.execute()
-            
-            if result.data:
-                # Update existing
-                current = result.data[0].get("messages_count", 0)
-                upd = self.client.table("daily_usage").update({"messages_count": current + 1})
-                if user_id:
-                    upd = self._apply_eq(upd, "user_id", user_id)
-                else:
-                    upd = self._apply_eq(upd, "ip_address", ip_address)
-                upd = self._apply_eq(upd, "usage_date", today.isoformat())
-                upd.execute()
-            else:
-                # Create new record
-                data = {
-                    "usage_date": today.isoformat(),
-                    "messages_count": 1
-                }
-                if user_id:
-                    data["user_id"] = user_id
-                else:
-                    data["ip_address"] = ip_address
+        """Increment daily message count (non-blocking, fire-and-forget)"""
+        def _do_increment():
+            try:
+                today = datetime.now().date()
                 
-                self.client.table("daily_usage").insert(data).execute()
-        except Exception as e:
-            print(f"[daily_usage] Error incrementing message count: {e}")
-            traceback.print_exc()
+                query = self.client.table("daily_usage").select("*")
+                if user_id:
+                    query = self._apply_eq(query, "user_id", user_id)
+                else:
+                    query = self._apply_eq(query, "ip_address", ip_address)
+                query = self._apply_eq(query, "usage_date", today.isoformat())
+                
+                result = query.execute()
+                
+                if result.data:
+                    # Update existing
+                    current = result.data[0].get("messages_count", 0)
+                    upd = self.client.table("daily_usage").update({"messages_count": current + 1})
+                    if user_id:
+                        upd = self._apply_eq(upd, "user_id", user_id)
+                    else:
+                        upd = self._apply_eq(upd, "ip_address", ip_address)
+                    upd = self._apply_eq(upd, "usage_date", today.isoformat())
+                    upd.execute()
+                else:
+                    # Create new record
+                    data = {
+                        "usage_date": today.isoformat(),
+                        "messages_count": 1
+                    }
+                    if user_id:
+                        data["user_id"] = user_id
+                    else:
+                        data["ip_address"] = ip_address
+                    
+                    self.client.table("daily_usage").insert(data).execute()
+            except Exception as e:
+                # Silently fail - don't block the main request
+                error_msg = str(e)
+                if "timeout" not in error_msg.lower() and "ReadTimeout" not in error_msg:
+                    print(f"[daily_usage] Error incrementing message count: {e}")
+        
+        # Run in background thread to avoid blocking
+        thread = threading.Thread(target=_do_increment, daemon=True)
+        thread.start()
 
     def increment_token_usage(self, user_id: Optional[str], ip_address: Optional[str], tokens: int):
-        """Increment daily token usage"""
-        try:
-            today = datetime.now().date()
-            
-            query = self.client.table("daily_usage").select("*")
-            if user_id:
-                query = self._apply_eq(query, "user_id", user_id)
-            else:
-                query = self._apply_eq(query, "ip_address", ip_address)
-            query = self._apply_eq(query, "usage_date", today.isoformat())
-            
-            result = query.execute()
-            
-            if result.data:
-                # Update existing
-                current = result.data[0].get("tokens_used", 0)
-                upd = self.client.table("daily_usage").update({"tokens_used": current + tokens})
-                if user_id:
-                    upd = self._apply_eq(upd, "user_id", user_id)
-                else:
-                    upd = self._apply_eq(upd, "ip_address", ip_address)
-                upd = self._apply_eq(upd, "usage_date", today.isoformat())
-                upd.execute()
-            else:
-                # Create new record
-                data = {
-                    "usage_date": today.isoformat(),
-                    "tokens_used": tokens
-                }
-                if user_id:
-                    data["user_id"] = user_id
-                else:
-                    data["ip_address"] = ip_address
+        """Increment daily token usage (non-blocking, fire-and-forget)"""
+        def _do_increment():
+            try:
+                today = datetime.now().date()
                 
-                self.client.table("daily_usage").insert(data).execute()
-        except Exception as e:
-            print(f"[daily_usage] Error incrementing token usage: {e}")
-            traceback.print_exc()
+                query = self.client.table("daily_usage").select("*")
+                if user_id:
+                    query = self._apply_eq(query, "user_id", user_id)
+                else:
+                    query = self._apply_eq(query, "ip_address", ip_address)
+                query = self._apply_eq(query, "usage_date", today.isoformat())
+                
+                result = query.execute()
+                
+                if result.data:
+                    # Update existing
+                    current = result.data[0].get("tokens_used", 0)
+                    upd = self.client.table("daily_usage").update({"tokens_used": current + tokens})
+                    if user_id:
+                        upd = self._apply_eq(upd, "user_id", user_id)
+                    else:
+                        upd = self._apply_eq(upd, "ip_address", ip_address)
+                    upd = self._apply_eq(upd, "usage_date", today.isoformat())
+                    upd.execute()
+                else:
+                    # Create new record
+                    data = {
+                        "usage_date": today.isoformat(),
+                        "tokens_used": tokens
+                    }
+                    if user_id:
+                        data["user_id"] = user_id
+                    else:
+                        data["ip_address"] = ip_address
+                    
+                    self.client.table("daily_usage").insert(data).execute()
+            except Exception as e:
+                # Silently fail - don't block the main request
+                error_msg = str(e)
+                if "timeout" not in error_msg.lower() and "ReadTimeout" not in error_msg:
+                    print(f"[daily_usage] Error incrementing token usage: {e}")
+        
+        # Run in background thread to avoid blocking
+        thread = threading.Thread(target=_do_increment, daemon=True)
+        thread.start()
     
     # ============================================================================
     # GAMES
