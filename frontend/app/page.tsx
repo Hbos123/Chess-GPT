@@ -13,6 +13,7 @@ import HistoryCurtain from "@/components/HistoryCurtain";
 import LoadGamePanel, { LoadedGamePayload } from "@/components/LoadGamePanel";
 import RotatingExamples, { useRotatingPlaceholder } from "@/components/RotatingExamples";
 import AuthModal from "@/components/AuthModal";
+import TokenLimitModal from "@/components/TokenLimitModal";
 import PersonalReview from "@/components/PersonalReview";
 import ProfileSetupModal, { ProfilePreferences } from "@/components/ProfileSetupModal";
 import StatusIndicator from "@/components/StatusIndicator";
@@ -319,6 +320,19 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
   const [showDevTools, setShowDevTools] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [abortController, setAbortController] = useState<AbortController | null>(null);
+  
+  // Token limit modal state
+  const [showTokenLimitModal, setShowTokenLimitModal] = useState(false);
+  const [tokenLimitInfo, setTokenLimitInfo] = useState<{
+    type: 'message_limit' | 'token_limit';
+    message: string;
+    info: {
+      used?: number;
+      limit?: number;
+      next_step?: string;
+      tier_id?: string;
+    };
+  } | null>(null);
 
   // Cancel processing function
   function cancelProcessing() {
@@ -5279,9 +5293,48 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
     }
   };
   
+  // Check token limits before sending message
+  async function checkTokenLimitsBeforeSend(message: string): Promise<boolean> {
+    try {
+      // Estimate tokens (~4 chars per token, add buffer for response)
+      const estimatedTokens = Math.ceil(message.length / 4) + 5000;
+      
+      const response = await fetch(`${getBackendBase()}/check_limits`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user_id: user?.id || null,
+          estimated_tokens: estimatedTokens,
+          message_count: 1
+        })
+      });
+      
+      if (!response.ok) {
+        const error = await response.json();
+        setTokenLimitInfo({
+          type: error.type || (error.error === 'message_limit' ? 'message_limit' : 'token_limit'),
+          message: error.message || 'Daily limit exceeded',
+          info: error.info || {}
+        });
+        setShowTokenLimitModal(true);
+        return false;
+      }
+      
+      return true;
+    } catch (err) {
+      console.error('Token limit check failed:', err);
+      // On error, allow (backend will check again)
+      return true;
+    }
+  }
+
   // Handle first message send - triggers layout transition
-  function handleFirstSend(message: string) {
+  async function handleFirstSend(message: string) {
     setIsFirstMessage(false);
+    const canSend = await checkTokenLimitsBeforeSend(message);
+    if (!canSend) {
+      return; // Stop here if limit exceeded
+    }
     handleSendMessage(message);
   }
 
@@ -6402,13 +6455,26 @@ If they ask about the game, refer to this data.
           
           // Automatically open PersonalReview component for profile reviews
           // Only open for multi-game reviews (profile reviews), not single game reviews
-          const hasProfileData = reviewResult.stats || reviewResult.charts || reviewResult.phase_stats;
+          // Check for aggregated stats that indicate multi-game review (win_rate, opening_performance, etc.)
           const isMultiGameReview = (reviewResult.games_analyzed || 0) > 1;
-          if (hasProfileData && isMultiGameReview) {
+          const hasAggregatedStats = reviewResult.stats?.win_rate !== undefined || 
+                                     reviewResult.opening_performance?.length > 0 ||
+                                     reviewResult.stats?.total_games > 1;
+          const hasProfileCharts = reviewResult.charts && Object.keys(reviewResult.charts).length > 0;
+          
+          // Only show Personal Review for true multi-game reviews with aggregated data
+          if (isMultiGameReview && (hasAggregatedStats || hasProfileCharts)) {
             console.log('🎯 [Personal Review] Opening PersonalReview component with profile data');
             setTimeout(() => {
               setShowPersonalReview(true);
             }, 500); // Small delay to let walkthrough initialize
+          } else {
+            console.log('🚫 [Personal Review] Skipping - single game review or no aggregated stats', {
+              isMultiGameReview,
+              hasAggregatedStats,
+              hasProfileCharts,
+              games_analyzed: reviewResult.games_analyzed
+            });
           }
           
           setTimeout(() => {
@@ -8461,6 +8527,12 @@ ${formatAnalysisCard(analysis.bestMoveReport.analysisAfter)}
   }
 
   async function handleSendMessage(message: string) {
+    // Check token limits before processing
+    const canSend = await checkTokenLimitsBeforeSend(message);
+    if (!canSend) {
+      return; // Stop here if limit exceeded
+    }
+    
     // Check for pending confirmations or clarifying questions first
     if (pendingConfirmation) {
       const lower = message.toLowerCase().trim();
@@ -13956,6 +14028,16 @@ Provide 2-3 sentences of natural language commentary explaining why this deviati
       />
       {showPersonalReview && (
         <PersonalReview onClose={() => setShowPersonalReview(false)} />
+      )}
+      
+      {showTokenLimitModal && tokenLimitInfo && (
+        <TokenLimitModal 
+          onClose={() => {
+            setShowTokenLimitModal(false);
+            setTokenLimitInfo(null);
+          }}
+          limitInfo={tokenLimitInfo}
+        />
       )}
       {user && (
         <ProfileSetupModal

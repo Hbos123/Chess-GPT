@@ -3368,6 +3368,89 @@ class LLMRequest(BaseModel):
     forced_tool_calls: Optional[List[Dict[str, Any]]] = None  # Tool calls from @ syntax
 
 
+class CheckLimitsRequest(BaseModel):
+    user_id: Optional[str] = None
+    estimated_tokens: int = 5000
+    message_count: int = 1
+
+
+@app.post("/check_limits")
+async def check_limits(request: CheckLimitsRequest, req: Request):
+    """
+    Check if user has remaining tokens/messages before processing.
+    Returns 200 if allowed, 429 if limit exceeded.
+    """
+    try:
+        user_id = request.user_id
+        ip_address = req.headers.get("x-forwarded-for") or req.client.host
+        
+        if not supabase_client:
+            # If no supabase, allow (for development)
+            return {"allowed": True, "message": "No rate limiting configured"}
+        
+        # Get subscription info
+        if user_id:
+            tier_info = supabase_client.get_subscription_overview(user_id)
+        else:
+            # Anonymous user - default to unpaid
+            tier_info = {
+                "tier_id": "unpaid", 
+                "tier": {
+                    "daily_messages": 1, 
+                    "daily_tokens": 15000, 
+                    "max_game_reviews_per_day": 0, 
+                    "max_lessons_per_day": 0
+                }
+            }
+        
+        # Check message limit
+        msg_allowed, msg_error, msg_info = supabase_client.check_message_limit(
+            user_id, ip_address, tier_info
+        )
+        if not msg_allowed:
+            return JSONResponse(
+                status_code=429,
+                content={
+                    "allowed": False,
+                    "error": "message_limit",
+                    "message": msg_error,
+                    "info": msg_info,
+                    "type": "message_limit"
+                }
+            )
+        
+        # Check token limit
+        token_allowed, token_error, token_info = supabase_client.check_token_limit(
+            user_id, ip_address, tier_info, estimated_tokens=request.estimated_tokens
+        )
+        if not token_allowed:
+            return JSONResponse(
+                status_code=429,
+                content={
+                    "allowed": False,
+                    "error": "token_limit",
+                    "message": token_error,
+                    "info": token_info,
+                    "type": "token_limit"
+                }
+            )
+        
+        return {
+            "allowed": True,
+            "message": "Limits OK",
+            "info": {
+                "messages": msg_info,
+                "tokens": token_info
+            }
+        }
+    except Exception as e:
+        print(f"⚠️ Limit check failed: {e}")
+        import traceback
+        traceback.print_exc()
+        # On error, allow (backend will check again)
+        return {"allowed": True, "message": "Limit check error, allowing request"}
+
+
 @app.post("/llm_chat")
 async def llm_chat(request: LLMRequest):
     """

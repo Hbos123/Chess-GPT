@@ -1441,6 +1441,23 @@ html, body {
   vertical-align: baseline;
 }
 
+/* Fix bold text (strong elements) to be inline, not block */
+.chat-container .message-text strong {
+  display: inline;
+  font-weight: 700;
+}
+
+/* Ensure pre tag doesn't break inline flow */
+.chat-container .message-text pre {
+  display: block;
+  white-space: pre-wrap;
+  margin: 0;
+}
+
+.chat-container .message-text pre > * {
+  display: inline;
+}
+
 /* Minimal markdown headings */
 .message-text .md-h1 { font-weight: 700; font-size: 1.05em; margin: 6px 0; }
 .message-text .md-h2 { font-weight: 700; font-size: 1.03em; margin: 6px 0; }
