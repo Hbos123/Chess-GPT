@@ -8811,6 +8811,126 @@ async def log_behavior(request: LogBehaviorRequest):
     return {"success": True, "message": "Behavior logged"}
 
 
+class GetGamesToAnalyzeRequest(BaseModel):
+    user_id: str
+    username: str
+    platform: str = "chess.com"
+    max_games: int = 100
+    months_back: int = 6
+    date_from: Optional[str] = None
+    date_to: Optional[str] = None
+    opponent: Optional[str] = None
+    opening_eco: Optional[str] = None
+    color: Optional[Literal["white", "black"]] = None
+    time_control: Optional[str] = None
+    result_filter: Optional[Literal["all", "win", "loss", "draw"]] = "all"
+    min_moves: Optional[int] = None
+    min_opponent_rating: Optional[int] = None
+    max_opponent_rating: Optional[int] = None
+    sort: str = "date_desc"
+    offset: int = 0
+
+
+@app.post("/get_games_to_analyze")
+async def get_games_to_analyze(request: GetGamesToAnalyzeRequest):
+    """
+    Returns list of games that need to be analyzed.
+    Checks Supabase for existing reviews and returns only games that haven't been reviewed yet.
+    Frontend will fetch and analyze these games, then save results to Supabase.
+    """
+    if not supabase_client:
+        raise HTTPException(status_code=500, detail="Supabase client not initialized")
+    
+    if not game_fetcher:
+        raise HTTPException(status_code=500, detail="Game fetcher not initialized")
+    
+    try:
+        # Fetch games from platform
+        from tools.game_filters import fetch_games_filtered
+        
+        # Normalize filters
+        tc_filter = None
+        if isinstance(request.time_control, str) and request.time_control.lower() not in ("all", ""):
+            tc_filter = request.time_control.lower()
+        
+        rf = (request.result_filter or "all").lower().strip() if isinstance(request.result_filter, str) else "all"
+        if rf in ("wins", "win"):
+            result_norm = "win"
+        elif rf in ("losses", "loss"):
+            result_norm = "loss"
+        elif rf in ("draws", "draw"):
+            result_norm = "draw"
+        else:
+            result_norm = None
+        
+        color_norm = None
+        if isinstance(request.color, str):
+            c = request.color.lower().strip()
+            if c in ("white", "black"):
+                color_norm = c
+        
+        # Fetch games
+        filtered = await fetch_games_filtered(
+            username=request.username,
+            platform=request.platform,
+            date_from=request.date_from,
+            date_to=request.date_to,
+            months_back=request.months_back,
+            opponent=request.opponent,
+            opening_eco=request.opening_eco,
+            time_control=tc_filter,
+            result=result_norm,
+            min_opponent_rating=request.min_opponent_rating,
+            max_opponent_rating=request.max_opponent_rating,
+            color=color_norm,
+            min_moves=request.min_moves,
+            max_games=request.max_games + request.offset,  # Fetch extra for offset
+        )
+        
+        games = filtered.get("games", [])
+        
+        # Apply sort and offset
+        reverse = True if request.sort != "date_asc" else False
+        games = sorted(games, key=lambda g: (g.get("date") or ""), reverse=reverse)
+        if request.offset:
+            games = games[request.offset:]
+        games = games[:request.max_games]
+        
+        # Check which games have already been reviewed
+        if games:
+            # Get existing reviewed game IDs
+            reviewed_game_ids = set()
+            try:
+                reviewed = supabase_client.client.table("reviewed_games").select("external_id").eq("user_id", request.user_id).eq("platform", request.platform).execute()
+                if reviewed.data:
+                    reviewed_game_ids = {str(g.get("external_id", "")) for g in reviewed.data}
+            except Exception as e:
+                print(f"⚠️ Error checking reviewed games: {e}")
+                # Continue anyway - will try to save and handle duplicates
+            
+            # Filter out already reviewed games
+            games_to_analyze = [
+                g for g in games
+                if str(g.get("game_id", "")) not in reviewed_game_ids
+            ]
+        else:
+            games_to_analyze = []
+        
+        return {
+            "success": True,
+            "games_to_analyze": games_to_analyze,
+            "total_fetched": len(games),
+            "already_reviewed": len(games) - len(games_to_analyze),
+            "needs_analysis": len(games_to_analyze),
+        }
+    
+    except Exception as e:
+        print(f"❌ Error in get_games_to_analyze: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Failed to get games to analyze: {str(e)}")
+
+
 if __name__ == "__main__":
     import uvicorn
     # Use PORT environment variable (set by Render/Heroku/etc.) or default to 8000
