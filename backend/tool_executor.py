@@ -2174,21 +2174,17 @@ Return ONLY valid JSON in this exact format:
             
             # Add color performance if available
             if white_acc is not None or black_acc is not None:
-                context += "
+                context += "\n\nPerformance by Color:"
 
-Performance by Color:"
                 if white_acc is not None:
-                    context += f"
-- White: {_safe_float(white_acc, 0.0):.1f}% accuracy ({white_games} games)"
+                context += f"\n- White: {_safe_float(white_acc, 0.0):.1f}% accuracy ({white_games} games)""
                 if black_acc is not None:
-                    context += f"
-- Black: {_safe_float(black_acc, 0.0):.1f}% accuracy ({black_games} games)"
+                context += f"\n- Black: {_safe_float(black_acc, 0.0):.1f}% accuracy ({black_games} games)""
             
             # Add opening performance if available
             if opening_performance_data:
-                context += "
+                context += "\n\nOpening Performance:"
 
-Opening Performance:"
                 for i, opening in enumerate(opening_performance_data[:5], 1):  # Top 5 openings
                     name = opening.get("opening", opening.get("name", "Unknown"))
                     games = opening.get("games", opening.get("game_count", 0))

@@ -421,11 +421,13 @@ export default function Chat({
                         } else {
                           return (
                             <pre key={blockIndex} className="message-text">
-                              {msg.role === "assistant" 
-                                ? formatMessageWithColors(block.content, msg.meta) 
-                                : msg.role === "system"
-                                  ? formatSystemMessage(block.content)
-                                  : block.content}
+                              <span style={{ display: 'inline' }}>
+                                {msg.role === "assistant" 
+                                  ? formatMessageWithColors(block.content, msg.meta) 
+                                  : msg.role === "system"
+                                    ? formatSystemMessage(block.content)
+                                    : block.content}
+                              </span>
                             </pre>
                           );
                         }

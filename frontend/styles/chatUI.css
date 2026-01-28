@@ -1433,17 +1433,26 @@ html, body {
   display: block;
 }
 
+/* CRITICAL: Make ALL direct children inline, including React element arrays */
+.chat-container .message-text > * {
+  display: inline !important;
+  flex-direction: unset !important;
+  justify-content: unset !important;
+  align-items: unset !important;
+  vertical-align: baseline;
+}
+
 .chat-container .message-text > span {
-  display: inline;
-  flex-direction: unset;
-  justify-content: unset;
-  align-items: unset;
+  display: inline !important;
+  flex-direction: unset !important;
+  justify-content: unset !important;
+  align-items: unset !important;
   vertical-align: baseline;
 }
 
 /* Fix bold text (strong elements) to be inline, not block */
 .chat-container .message-text strong {
-  display: inline;
+  display: inline !important;
   font-weight: 700;
 }
 
@@ -1455,7 +1464,7 @@ html, body {
 }
 
 .chat-container .message-text pre > * {
-  display: inline;
+  display: inline !important;
 }
 
 /* Minimal markdown headings */
