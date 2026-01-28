@@ -87,6 +87,10 @@ interface ConversationProps {
   onDeleteVariation?: (node: MoveNode) => void;
   onPromoteVariation?: (node: MoveNode) => void;
   onAddComment?: (node: MoveNode, comment: string) => void;
+  tokenUsage?: {
+    messages?: { used: number; limit: number };
+    tokens?: { used: number; limit: number };
+  };
 }
 
 export default function Conversation({ 
@@ -121,6 +125,7 @@ export default function Conversation({
   onDeleteVariation,
   onPromoteVariation,
   onAddComment,
+  tokenUsage,
 }: ConversationProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const [boardKey, setBoardKey] = useState(0);
@@ -165,8 +170,14 @@ export default function Conversation({
   return (
     <div className="conversation-container">
       {/* Toolbar with buttons in flow */}
-      {(onToggleBoard || onLoadGame) && (
-        <div className="conversation-toolbar">
+      {(onToggleBoard || onLoadGame || tokenUsage) && (
+        <div className="conversation-toolbar" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          {tokenUsage && (
+            <TokenUsageBar 
+              messages={tokenUsage.messages}
+              tokens={tokenUsage.tokens}
+            />
+          )}
           {onLoadGame && (
             <button className="toolbar-button" onClick={onLoadGame}>
               Load game

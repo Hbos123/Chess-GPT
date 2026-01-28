@@ -6,6 +6,7 @@ import OpenAI from "openai";
 import ChatGraph from "./ChatGraph";
 import MarkdownTable from "./MarkdownTable";
 import ExpandableTable from "./ExpandableTable";
+import TokenUsageBar from "./TokenUsageBar";
 
 interface ChatProps {
   messages: ChatMessage[];
@@ -24,6 +25,10 @@ interface ChatProps {
   isOffMainLine?: boolean;
   onReturnToMainLine?: () => void;
   isAnalyzing?: boolean;  // Block input while analyzing
+  tokenUsage?: {
+    messages?: { used: number; limit: number };
+    tokens?: { used: number; limit: number };
+  };
 }
 
 export default function Chat({
@@ -43,6 +48,7 @@ export default function Chat({
   isOffMainLine,
   onReturnToMainLine,
   isAnalyzing,
+  tokenUsage,
 }: ChatProps) {
   const [input, setInput] = useState("");
   const [showMetaModal, setShowMetaModal] = useState(false);
@@ -353,9 +359,17 @@ export default function Chat({
     <div className="chat-container">
       <div className="chat-header">
         <h2>Chat</h2>
-        <button onClick={onToggleLLM} className="toggle-llm">
-          LLM: {llmEnabled ? "ON" : "OFF"}
-        </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          {tokenUsage && (
+            <TokenUsageBar 
+              messages={tokenUsage.messages}
+              tokens={tokenUsage.tokens}
+            />
+          )}
+          <button onClick={onToggleLLM} className="toggle-llm">
+            LLM: {llmEnabled ? "ON" : "OFF"}
+          </button>
+        </div>
       </div>
 
       <div className="chat-messages">

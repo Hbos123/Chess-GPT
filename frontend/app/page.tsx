@@ -14,6 +14,7 @@ import LoadGamePanel, { LoadedGamePayload } from "@/components/LoadGamePanel";
 import RotatingExamples, { useRotatingPlaceholder } from "@/components/RotatingExamples";
 import AuthModal from "@/components/AuthModal";
 import TokenLimitModal from "@/components/TokenLimitModal";
+import TokenUsageBar from "@/components/TokenUsageBar";
 import PersonalReview from "@/components/PersonalReview";
 import ProfileSetupModal, { ProfilePreferences } from "@/components/ProfileSetupModal";
 import StatusIndicator from "@/components/StatusIndicator";
@@ -333,6 +334,12 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
       tier_id?: string;
     };
   } | null>(null);
+  
+  // Token usage state for progress bar
+  const [tokenUsage, setTokenUsage] = useState<{
+    messages?: { used: number; limit: number };
+    tokens?: { used: number; limit: number };
+  } | undefined>(undefined);
 
   // Cancel processing function
   function cancelProcessing() {
@@ -5318,6 +5325,15 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
         });
         setShowTokenLimitModal(true);
         return false;
+      }
+      
+      // Store usage info for progress bar
+      const data = await response.json();
+      if (data.info) {
+        setTokenUsage({
+          messages: data.info.messages,
+          tokens: data.info.tokens
+        });
       }
       
       return true;
@@ -13721,6 +13737,7 @@ Provide 2-3 sentences of natural language commentary explaining why this deviati
                   moveTree={moveTree}
                   currentNode={moveTree.currentNode}
                   rootNode={moveTree.root}
+                  tokenUsage={tokenUsage}
                   onMoveClick={handleMoveClick}
                   onDeleteMove={handleDeleteMove}
                   onDeleteVariation={handleDeleteVariation}
