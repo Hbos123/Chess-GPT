@@ -237,7 +237,15 @@ class ToolExecutor:
             elif tool_name == "review_full_game":
                 return await self._review_full_game(arguments, status_callback, context)
             elif tool_name == "fetch_and_review_games":
-                return await self._fetch_and_review_games(arguments, status_callback, context)
+                # Prefer frontend review if available (has Stockfish workers)
+                # Frontend will handle fetching, analyzing, and saving to Supabase
+                # Backend provides /get_games_to_analyze endpoint for game list
+                # If frontend fails, backend handles as fallback
+                try:
+                    return await self._fetch_and_review_games(arguments, status_callback, context, prefer_frontend=True)
+                except Exception as e:
+                    print(f"   ⚠️ Frontend review failed, falling back to backend: {e}")
+                    return await self._fetch_and_review_games(arguments, status_callback, context, prefer_frontend=False)
             elif tool_name == "select_games":
                 return await self._select_games(arguments, context)
             elif tool_name == "generate_training_session":
@@ -887,7 +895,7 @@ class ToolExecutor:
             "unmet": sel.get("unmet", []),
         }
     
-    async def _fetch_and_review_games(self, args: Dict, status_callback = None, context: Dict = None) -> Dict:
+    async def _fetch_and_review_games(self, args: Dict, status_callback = None, context: Dict = None, prefer_frontend: bool = False) -> Dict:
         """Workflow: Fetch + analyze games"""
         import asyncio
         
