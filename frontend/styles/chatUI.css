@@ -1426,6 +1426,21 @@ html, body {
   line-height: 1.5;
 }
 
+/* Chat-only override:
+   In the chat box, message text should flow inline (not as flex column blocks),
+   otherwise each chunk (including **bold** tokens) appears on its own line. */
+.chat-container .message-text {
+  display: block;
+}
+
+.chat-container .message-text > span {
+  display: inline;
+  flex-direction: unset;
+  justify-content: unset;
+  align-items: unset;
+  vertical-align: baseline;
+}
+
 /* Minimal markdown headings */
 .message-text .md-h1 { font-weight: 700; font-size: 1.05em; margin: 6px 0; }
 .message-text .md-h2 { font-weight: 700; font-size: 1.03em; margin: 6px 0; }
