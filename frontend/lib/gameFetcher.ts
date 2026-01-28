@@ -92,9 +92,9 @@ function parseChessComGame(
     const chess = new Chess();
     // NOTE: chess.pgn() exports PGN; to load, use loadPgn().
     try {
-      const ok = chess.loadPgn(pgnText);
-      // chess.js versions differ: some return boolean, some throw on failure
-      if (ok === false) return null;
+      // chess.js versions differ: some return void, some return boolean, some throw on failure.
+      // We rely on exceptions for invalid PGN; no return-value checks to keep TS happy.
+      chess.loadPgn(pgnText);
     } catch {
       return null;
     }
