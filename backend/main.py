@@ -71,6 +71,22 @@ from board_tree_store import BoardTreeStore, BoardTree, BoardTreeNode, new_node_
 
 load_dotenv()
 
+# ============================================================
+# Minimal shared-secret gate to stop direct-to-backend bot abuse
+# ============================================================
+_BACKEND_SHARED_SECRET = os.getenv("BACKEND_SHARED_SECRET", "").strip()
+
+def _require_shared_secret(req: Request) -> None:
+    """
+    If BACKEND_SHARED_SECRET is set, require clients to send X-CHESSTER-SECRET.
+    This is intended to be added by the Vercel proxy (server-to-server).
+    """
+    if not _BACKEND_SHARED_SECRET:
+        return
+    got = (req.headers.get("x-chesster-secret") or "").strip()
+    if not got or got != _BACKEND_SHARED_SECRET:
+        raise HTTPException(status_code=403, detail="Forbidden")
+
 # Initialize OpenAI client
 openai_api_key = os.getenv("OPENAI_API_KEY")
 if not openai_api_key:
@@ -8675,9 +8691,12 @@ async def get_srs_queue_endpoint(username: str, max_cards: int = 20):
 @app.get("/board/tree/get")
 async def get_board_tree(
     thread_id: str = Query(..., description="Thread/tab ID"),
-    include_scan: bool = Query(False, description="Include scan data")
+    include_scan: bool = Query(False, description="Include scan data"),
+    req: Request = None,
 ):
     """Get the board tree for a thread"""
+    if req is not None:
+        _require_shared_secret(req)
     if not board_tree_store:
         raise HTTPException(status_code=503, detail="Board tree store not initialized")
     
@@ -8714,8 +8733,9 @@ class InitBoardTreeRequest(BaseModel):
 
 
 @app.post("/board/tree/init")
-async def init_board_tree(request: InitBoardTreeRequest):
+async def init_board_tree(request: InitBoardTreeRequest, req: Request):
     """Initialize a new board tree for a thread"""
+    _require_shared_secret(req)
     if not board_tree_store:
         raise HTTPException(status_code=503, detail="Board tree store not initialized")
     
@@ -8746,8 +8766,9 @@ class AddMoveToTreeRequest(BaseModel):
 
 
 @app.post("/board/tree/add_move")
-async def add_move_to_tree(request: AddMoveToTreeRequest):
+async def add_move_to_tree(request: AddMoveToTreeRequest, req: Request):
     """Add a move to the board tree"""
+    _require_shared_secret(req)
     if not board_tree_store:
         raise HTTPException(status_code=503, detail="Board tree store not initialized")
     
@@ -8793,8 +8814,9 @@ class BaselineIntuitionRequest(BaseModel):
 
 
 @app.post("/board/baseline_intuition_start")
-async def baseline_intuition_start(request: BaselineIntuitionRequest):
+async def baseline_intuition_start(request: BaselineIntuitionRequest, req: Request):
     """Start baseline intuition analysis (placeholder)"""
+    _require_shared_secret(req)
     # This endpoint might need actual implementation based on your needs
     return {"success": True, "message": "Baseline intuition started"}
 

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000';
+const BACKEND_SHARED_SECRET = process.env.BACKEND_SHARED_SECRET || '';
 
 export async function GET(
   request: NextRequest,
@@ -76,6 +77,12 @@ async function proxyRequest(
         headers[key] = value;
       }
     });
+
+    // Add a shared secret so the backend can reject direct-to-Render bot traffic.
+    // This is only used server-to-server (Vercel -> Render); never exposed to the browser.
+    if (BACKEND_SHARED_SECRET) {
+      headers["X-CHESSTER-SECRET"] = BACKEND_SHARED_SECRET;
+    }
 
     // Make request to backend
     const response = await fetch(backendUrl, {
