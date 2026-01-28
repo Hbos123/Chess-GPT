@@ -29,18 +29,15 @@ def translate_tag_to_natural_english(tag_name: str, context: str = "default") ->
     """
     Translate tag names like "tag.diagonal.d5-a2" to natural English.
     Returns phrases like "diagonal control (d5-a2 diagonal)" or "open file control"
-    
     Args:
         tag_name: The tag name to translate
         context: "default", "neglected", or "hint" - affects phrasing for better natural language
     """
     if not tag_name:
         return "unknown pattern"
-    
     # Remove "tag." prefix if present
     if tag_name.startswith("tag."):
         tag_name = tag_name[4:]
-    
     # Handle specific patterns
     if tag_name.startswith("diagonal.open."):
         parts = tag_name.split(".")
@@ -56,7 +53,6 @@ def translate_tag_to_natural_english(tag_name: str, context: str = "default") ->
             diag = f"{parts[-1]} diagonal"  # e.g., "e3-h6 diagonal"
         else:
             diag = "diagonal"
-        
         # Context-specific phrasing for better natural language
         if context == "neglected":
             return f"capitalizing on the open {diag}"
@@ -64,14 +60,12 @@ def translate_tag_to_natural_english(tag_name: str, context: str = "default") ->
             return f"takes advantage of the open {diag}"
         else:
             return f"open {diag}"
-    
     if tag_name.startswith("diagonal.closed."):
         parts = tag_name.split(".")
         if len(parts) >= 3:
             diag = parts[-1]  # e.g., "d5-a2"
             return f"closed {diag} diagonal"
         return "closed diagonal"
-    
     if tag_name.startswith("diagonal."):
         # Fallback for old format
         parts = tag_name.split(".")
@@ -79,33 +73,24 @@ def translate_tag_to_natural_english(tag_name: str, context: str = "default") ->
             diag = parts[-1]  # e.g., "d5-a2"
             return f"diagonal control ({diag} diagonal)"
         return "diagonal control"
-    
     if tag_name.startswith("file.open."):
         file = tag_name.split(".")[-1]
         return f"open {file}-file control"
-    
     if tag_name.startswith("file.semi."):
         file = tag_name.split(".")[-1]
         return f"semi-open {file}-file control"
-    
     if tag_name == "rook.connected":
         return "connected rooks"
-    
     if tag_name == "rook.open_file":
         return "rook on open file"
-    
     if tag_name == "rook.rank7" or tag_name == "rook.seventh":
         return "rook on 7th rank"
-    
     if tag_name == "bishop.pair":
         return "bishop pair advantage"
-    
     if tag_name == "bishop.bad":
         return "bad bishop"
-    
     if tag_name.startswith("pawn.passed"):
         return "passed pawn"
-    
     if tag_name.startswith("outpost."):
         parts = tag_name.split(".")
         if len(parts) >= 2:
@@ -113,13 +98,10 @@ def translate_tag_to_natural_english(tag_name: str, context: str = "default") ->
             sq = parts[-1] if len(parts) >= 2 else ""
             return f"{piece} outpost on {sq}" if sq else f"{piece} outpost"
         return "outpost"
-    
     if tag_name.startswith("center.control"):
         return "center control"
-    
     if tag_name == "space.advantage":
         return "space advantage"
-    
     if tag_name.startswith("king."):
         if "exposed" in tag_name:
             return "king safety"
@@ -128,24 +110,20 @@ def translate_tag_to_natural_english(tag_name: str, context: str = "default") ->
         if "shield" in tag_name:
             return "king shield"
         return "king safety"
-    
     if tag_name.startswith("activity.mobility"):
         parts = tag_name.split(".")
         if len(parts) >= 3:
             piece = parts[-1]
             return f"{piece} mobility"
         return "piece activity"
-    
     if tag_name.startswith("threat."):
         return "tactical threats"
-    
     # Generic fallback: convert dots to spaces and capitalize
     return tag_name.replace(".", " ").replace("_", " ").title()
 
 
 class ToolExecutor:
     """Executes tools called by LLM in chat"""
-    
     def __init__(
         self,
         engine_queue,
@@ -176,7 +154,6 @@ class ToolExecutor:
         self.openai_client = openai_client
         self.llm_router = llm_router
         self.game_window_manager = game_window_manager
-        
         # Initialize Personal Review System managers
         if supabase_client:
             from personal_stats_manager import PersonalStatsManager
@@ -186,7 +163,6 @@ class ToolExecutor:
         else:
             self.stats_manager = None
             self.archive_manager = None
-        
         # Prefer injected callbacks to avoid module-duplication issues.
         self.review_game_internal = review_game_internal_fn
         self.analyze_fen = analyze_fen_fn
@@ -205,29 +181,24 @@ class ToolExecutor:
                 self.review_game_internal = None
                 self.analyze_fen = None
                 self.save_error_positions = None
-        
         try:
             from main import _generate_opening_lesson_internal
             self.generate_opening_lesson_internal = _generate_opening_lesson_internal
         except ImportError:
             self.generate_opening_lesson_internal = None
-    
     async def execute_tool(self, tool_name: str, arguments: Dict[str, Any], context: Dict = None, status_callback = None) -> Dict[str, Any]:
         """
         Execute a tool and return formatted result
-        
         Args:
             tool_name: Name of tool to execute
             arguments: Tool parameters
             context: Conversation context (fen, pgn, mode, etc.)
             status_callback: Optional async callback for progress updates (phase, message, progress)
-            
         Returns:
             Standardized result dictionary
         """
         print(f"\n🔧 TOOL CALL: {tool_name}")
         print(f"   Arguments: {json.dumps(arguments, indent=2)[:200]}...")
-        
         try:
             # Route to appropriate handler
             if tool_name == "analyze_position":
@@ -283,13 +254,11 @@ class ToolExecutor:
                 return await self._tree_search(arguments, context)
             else:
                 return {"error": f"Unknown tool: {tool_name}"}
-        
         except Exception as e:
             print(f"   ❌ Tool execution error: {e}")
             import traceback
             traceback.print_exc()
             return {"error": str(e), "tool": tool_name}
-    
     # ========================================================================
     # HIGH-LEVEL TOOL IMPLEMENTATIONS
     # ========================================================================
@@ -335,7 +304,6 @@ class ToolExecutor:
             "fen": fen,
             "baseline_intuition": baseline,
         }
-    
     async def _analyze_position(self, args: Dict, context: Dict) -> Dict:
         """
         Analyze a chess position - uses cached analysis if available, otherwise calls endpoint
@@ -345,7 +313,6 @@ class ToolExecutor:
         fen = context.get("board_state") or args.get("fen") or context.get("fen") if context else args.get("fen")
         if not fen:
             return {"error": "No FEN provided and no current position in context"}
-        
         # CHECK FOR CACHED ANALYSIS FIRST (from auto-analysis after moves)
         # IMPORTANT: In DISCUSS/ANALYZE, cached_analysis is a legacy shortcut that can bypass
         # D2/D16 scanning. Only allow cached_analysis in PLAY/lesson/AI-game loops.
@@ -364,22 +331,18 @@ class ToolExecutor:
                 "candidate_moves": cached_analysis.get("candidate_moves", []),
                 "from_cache": True
             }
-        
         # No cache - analyze now
         depth = args.get("depth", 14)  # Fast for overview - deep analysis on-demand
         lines = args.get("lines", 3)
         light_mode = args.get("light_mode", False)  # Default to full analysis (light_mode only for game review/retry)
-        
         print(f"   Analyzing position via /analyze_position endpoint (depth={depth}, lines={lines}, light_mode={light_mode})")
         print(f"   FEN from args: {args.get('fen', 'none')}")
         print(f"   FEN from context.board_state: {context.get('board_state', 'none') if context else 'no context'}")
         print(f"   Using FEN: {fen}")
-        
         # Call the SAME /analyze_position endpoint the UI button uses
         # Use light_mode=False by default for full analysis
         # This gives us the full structured response with candidates, themes, threats
         import aiohttp
-        
         try:
             async with aiohttp.ClientSession() as session:
                 # Convert all parameters to strings for query params (aiohttp requires this)
@@ -389,7 +352,6 @@ class ToolExecutor:
                     "depth": str(depth),
                     "light_mode": "true" if light_mode else "false"  # Convert boolean to string
                 }
-                
                 # Use BACKEND_URL or NEXT_PUBLIC_BACKEND_URL if set, otherwise default to localhost with BACKEND_PORT
                 backend_url = os.getenv("BACKEND_URL") or os.getenv("NEXT_PUBLIC_BACKEND_URL")
                 if not backend_url:
@@ -403,12 +365,9 @@ class ToolExecutor:
                     if response.status != 200:
                         error_text = await response.text()
                         return {"error": f"Analysis failed: {error_text}"}
-                    
                     result = await response.json()
-                    
                     print(f"   ✅ Analysis complete via endpoint")
                     print(f"      Eval: {result.get('eval_cp', 0)}cp")
-                    
                     # Return the EXACT same format the endpoint returns
                     # Frontend will know how to display this
                     return {
@@ -419,29 +378,23 @@ class ToolExecutor:
                         "eval_cp": result.get("eval_cp", 0),
                         "candidate_moves": result.get("candidate_moves", [])
                     }
-        
         except Exception as e:
             print(f"   ❌ Error calling analyze_position endpoint: {e}")
             return {"error": str(e)}
-    
     async def _analyze_move(self, args: Dict, context: Dict) -> Dict:
         """Analyze a specific move"""
         move_san = args.get("move_san")
         depth = args.get("depth", 14)  # Fast for overview - deep analysis on-demand
-        
         # If move_san is missing but we have context.last_move, use it
         if not move_san and context:
             last_move_info = context.get("last_move")
             if last_move_info:
                 move_san = last_move_info.get("move")
                 print(f"   Using context.last_move.move: {move_san}")
-        
         if not move_san:
             return {"error": "No move specified. Provide move_san or ensure context.last_move is available."}
-        
         # Try to get FEN from args, then context.last_move, then context.fen
         fen = args.get("fen")
-        
         # Priority 1: If we have last_move context and move matches (or no move specified), use fen_before
         if not fen and context:
             last_move_info = context.get("last_move")
@@ -452,7 +405,6 @@ class ToolExecutor:
                     fen = last_move_info.get("fen_before")
                     if fen:
                         print(f"   ✅ Using context.last_move.fen_before for move {move_san or move_from_context}")
-        
         # Priority 2: If FEN provided in args but move doesn't match last_move, validate it
         if fen and context:
             last_move_info = context.get("last_move")
@@ -462,7 +414,6 @@ class ToolExecutor:
                 if preferred_fen:
                     print(f"   ✅ Overriding provided FEN with context.last_move.fen_before for move {move_san}")
                     fen = preferred_fen
-        
         # Priority 3: Fallback to context.fen (but this is position AFTER move, so we need to reverse it)
         if not fen and context:
             current_fen = context.get("fen")
@@ -474,26 +425,20 @@ class ToolExecutor:
                 else:
                     print(f"   ⚠️  Warning: Using context.fen (position AFTER move) - attempting to reverse...")
                     fen = current_fen  # Will try to parse, but may fail
-        
         if not fen:
             return {"error": "No FEN provided. For 'rate that move' requests, ensure context.last_move is available."}
-        
         # Validate FEN format (must have 6 parts)
         fen_parts = fen.strip().split()
         if len(fen_parts) < 4:
             return {"error": f"Invalid FEN format: '{fen}'. FEN must include board, turn, castling, and en passant."}
-        
         print(f"   Analyzing move: {move_san} in position {fen[:60]}...")
-        
         # Use analyze_move endpoint logic
         import chess
         import chess.engine
-        
         try:
             board = chess.Board(fen)
         except Exception as e:
             return {"error": f"Invalid FEN: {str(e)}. FEN: {fen}"}
-        
         # Parse move
         try:
             move = board.parse_san(move_san)
@@ -501,7 +446,6 @@ class ToolExecutor:
                 return {"error": f"Move {move_san} is not legal in position {fen[:60]}. Legal moves: {', '.join([board.san(m) for m in list(board.legal_moves)[:5]])}..."}
         except Exception as e:
             return {"error": f"Invalid move notation '{move_san}': {str(e)}. Position: {fen[:60]}"}
-        
         # Tree-first: call backend /analyze_move which is rebased to D2/D16.
         import aiohttp
         try:
@@ -571,21 +515,17 @@ class ToolExecutor:
                     return {"success": True, "thread_id": thread_id, "query": query, "results": data.get("results", [])}
         except Exception as e:
             return {"error": f"tree_search error: {str(e)}"}
-    
     async def _review_full_game(self, args: Dict, status_callback = None, context: Dict = None) -> Dict:
         """Review complete game with rate limiting"""
         pgn = args.get("pgn")
         if not pgn:
             return {"error": "No PGN provided"}
-        
         # Get user_id from context
         user_id = None
         if context:
             user_id = context.get("user_id") or context.get("profile", {}).get("user_id")
-        
         # Get IP address for anonymous users
         ip_address = context.get("ip_address") if context else None
-        
         # Check subscription and rate limits
         if self.supabase_client and (user_id or ip_address):
             try:
@@ -594,11 +534,9 @@ class ToolExecutor:
                 else:
                     # Anonymous user - default to unpaid
                     tier_info = {"tier_id": "unpaid", "tier": {"max_game_reviews_per_day": 0}}
-                
                 allowed, message, usage_info = self.supabase_client.check_and_increment_usage(
                     user_id, ip_address, "game_review", tier_info
                 )
-                
                 if not allowed:
                     return {
                         "error": message,
@@ -610,29 +548,21 @@ class ToolExecutor:
                 import traceback
                 traceback.print_exc()
                 # Continue anyway - don't block on rate limit errors
-        
         side_focus = args.get("side_focus", "both")
         depth = args.get("depth", 14)  # Fast for overview - deep analysis on-demand
-        
         # Emit status if callback provided
         if status_callback:
             await status_callback("executing", "Reviewing game...", 0.0)
-        
         print(f"   Reviewing full game (depth={depth}, side_focus={side_focus})")
-        
         # Use the global engine (pass None to use fallback)
         result = await self.review_game_internal(pgn, side_focus, True, depth, None)
-        
         if status_callback:
             await status_callback("executing", "Review complete", 1.0)
-        
         if "error" in result:
             return result
-        
         # Extract summary stats
         stats = result.get("stats", {})
         game_meta = result.get("game_metadata", {})
-        
         summary = {
             "total_moves": game_meta.get("total_moves", 0),
             "opening": game_meta.get("opening", "Unknown"),
@@ -640,7 +570,6 @@ class ToolExecutor:
             "key_points": len(result.get("key_points", [])),
             "stats": stats
         }
-        
         return {
             "success": True,
             "review": result,
@@ -699,7 +628,6 @@ class ToolExecutor:
         include_pgn = bool(args.get("include_pgn", False))
 
         requests = args.get("requests") or []
-        
         # Auto-infer filters from request names (e.g., "last_rapid_game" -> time_control: "rapid")
         for req in requests:
             if not isinstance(req, dict):
@@ -708,7 +636,6 @@ class ToolExecutor:
             filters = req.get("filters") or {}
             if not isinstance(filters, dict):
                 filters = {}
-            
             # Time control inference from name
             if "rapid" in name and "time_control" not in filters:
                 filters["time_control"] = "rapid"
@@ -721,7 +648,6 @@ class ToolExecutor:
             elif "daily" in name or "correspond" in name:
                 if "time_control" not in filters:
                     filters["time_control"] = "daily"
-            
             # Result inference from name
             if "win" in name or "won" in name:
                 if "result" not in filters:
@@ -732,7 +658,6 @@ class ToolExecutor:
             elif "draw" in name:
                 if "result" not in filters:
                     filters["result"] = "draw"
-            
             # Color inference from name
             if "black" in name:
                 if "color" not in filters:
@@ -740,7 +665,6 @@ class ToolExecutor:
             elif "white" in name:
                 if "color" not in filters:
                     filters["color"] = "white"
-            
             req["filters"] = filters
 
         print(
@@ -774,7 +698,6 @@ class ToolExecutor:
                 "error": "fetch_failed",
                 "message": f"Failed to fetch games: {str(e)}",
             }
-        
         # Check for error in response
         if isinstance(filtered, dict) and filtered.get("error"):
             error_msg = filtered.get("error", "Unknown error")
@@ -784,7 +707,6 @@ class ToolExecutor:
                 "error": "fetch_failed",
                 "message": f"Failed to fetch games: {error_msg}",
             }
-        
         candidates = filtered.get("games", []) or []
         if not candidates:
             return {
@@ -853,7 +775,6 @@ class ToolExecutor:
             "selected_flat": sel.get("selected_flat", []),
             "unmet": sel.get("unmet", []),
         }
-    
     async def _fetch_games(self, args: Dict, status_callback = None, context: Dict = None) -> Dict:
         """
         Fetch games from Chess.com/Lichess WITHOUT Stockfish analysis.
@@ -861,7 +782,6 @@ class ToolExecutor:
         """
         username = args.get("username")
         platform = args.get("platform", "chess.com")
-        
         # Fallback to context.connected_accounts
         if not username or not platform:
             if context:
@@ -872,10 +792,8 @@ class ToolExecutor:
                         username = account.get("username")
                     if not platform:
                         platform = account.get("platform", "chess.com")
-        
         if not username:
             return {"success": False, "error": "Username required"}
-        
         max_games = args.get("max_games", 3)
         time_control = args.get("time_control", "all")
         result_filter = args.get("result", "all")
@@ -883,7 +801,6 @@ class ToolExecutor:
         date_from = args.get("date_from")
         date_to = args.get("date_to")
         color = args.get("color")  # 'white', 'black', or None for both
-        
         async def emit_status(message: str, progress: float = None):
             if status_callback:
                 await status_callback(
@@ -892,11 +809,8 @@ class ToolExecutor:
                     tool="fetch_games",
                     progress=progress
                 )
-        
         await emit_status(f"Fetching games from {platform}...", 0.1)
-        
         from tools.game_filters import fetch_games_filtered
-        
         try:
             filtered = await fetch_games_filtered(
                 username=username,
@@ -915,14 +829,12 @@ class ToolExecutor:
                 "error": str(e),
                 "message": f"Failed to fetch games: {str(e)}"
             }
-        
         if isinstance(filtered, dict) and filtered.get("error"):
             return {
                 "success": False,
                 "error": filtered.get("error"),
                 "message": f"No games found: {filtered.get('error')}"
             }
-        
         games = filtered.get("games", []) or []
         if not games:
             return {
@@ -930,9 +842,7 @@ class ToolExecutor:
                 "error": "no_games",
                 "message": f"No games found for {username} on {platform}"
             }
-        
         await emit_status(f"Found {len(games)} games", 0.9)
-        
         # Format games for return (PGN + metadata only, no analysis)
         formatted_games = []
         for game in games:
@@ -950,7 +860,6 @@ class ToolExecutor:
                 "platform": platform,
                 "username": username
             })
-        
         return {
             "success": True,
             "games": formatted_games,
@@ -963,10 +872,8 @@ class ToolExecutor:
     async def _fetch_and_review_games(self, args: Dict, status_callback = None, context: Dict = None) -> Dict:
         """Workflow: Fetch + analyze games"""
         import asyncio
-        
         username = args.get("username")
         platform = args.get("platform", "chess.com")
-        
         # Fallback to context.connected_accounts if username/platform not provided
         if not username or not platform:
             if context:
@@ -981,7 +888,6 @@ class ToolExecutor:
                     if platform in ("chesscom", "chess_com"):
                         platform = "chess.com"
                     print(f"   📎 Auto-injected from context.connected_accounts: {username} on {platform}")
-        
         # Support both 'count' and 'max_games' as parameters
         max_games = args.get("count") or args.get("max_games", 1)  # Default to 1 game
         games_to_analyze = args.get("games_to_analyze", max_games)  # Analyze all fetched by default
@@ -1003,15 +909,12 @@ class ToolExecutor:
         max_opponent_rating = args.get("max_opponent_rating")
         sort = (args.get("sort") or "date_desc").strip().lower()
         offset = int(args.get("offset", 0) or 0)
-        
         # Get interpreter's intent (injected by main.py)
         interpreter_intent = args.get("interpreter_intent", "")
-        
         # Helper to emit status updates
         async def emit_status(message: str, progress: float = None, phase: str = "executing", replace: bool = False):
             if status_callback:
                 await status_callback(phase, message, progress, replace)
-        
         print(
             "   📋 fetch_and_review_games args: "
             f"username={username}, platform={platform}, count={max_games}, analyze={games_to_analyze}, "
@@ -1019,17 +922,14 @@ class ToolExecutor:
             f"date_from={date_from}, date_to={date_to}, opponent={opponent}, opening_eco={opening_eco}, "
             f"color={color}, offset={offset}, sort={sort}"
         )
-        
         # Check if both username and platform are provided
         missing_fields = []
         if not username:
             missing_fields.append("username")
         if not platform:
             missing_fields.append("platform")
-        
         if missing_fields:
             print(f"   ℹ️ Missing fields: {', '.join(missing_fields)}")
-            
             # Generate appropriate message based on what's missing
             if "username" in missing_fields and "platform" in missing_fields:
                 message = "I need your username and platform to fetch your games. Please provide them (e.g., 'my username is hikaru on chess.com' or 'magnus on lichess')."
@@ -1037,17 +937,14 @@ class ToolExecutor:
                 message = f"I need your {platform} username to fetch your games. Please provide it (e.g., 'my username is hikaru')."
             else:  # platform is missing
                 message = f"I found the username '{username}', but I need to know which platform (Chess.com or Lichess). Please specify (e.g., '{username} on chess.com')."
-            
             return {
                 "success": False,
                 "error": "info_required",
                 "missing_fields": missing_fields,
                 "message": message
             }
-        
         print(f"   🔄 WORKFLOW: Fetch and review games for {username}")
         print(f"      Fetching {max_games} games, analyzing {games_to_analyze} at depth {depth}")
-        
         # Step 1: Fetch games
         await emit_status(f"Fetching games from {platform}...", 0.0)
         print(f"📥 Fetching games for {username} from {platform}...")
@@ -1109,22 +1006,18 @@ class ToolExecutor:
                 # Try to fetch the specific game by ID if available
                 # This might require a different API call depending on the platform
                 # For now, we'll proceed with empty list and let the error handler catch it
-        
         # Apply user-controlled sort + offset + limit
         reverse = True if sort != "date_asc" else False
         games = sorted(games, key=lambda g: (g.get("date") or ""), reverse=reverse)
         if offset:
             games = games[offset:]
         games = games[:max_games]
-        
         if not games:
             if game_id:
                 return {"error": f"Game {game_id} not found for {username} on {platform}"}
             return {"error": f"No games found for {username} on {platform}"}
-        
         await emit_status(f"Fetched {len(games)} game(s)", 0.1)
         print(f"✅ Fetched {len(games)} games from {platform}")
-        
         # Step 2: Analyze subset
         print(f"🔍 Analyzing {games_to_analyze} games with Stockfish (depth {depth})...")
         analyzed_games = []
@@ -1133,21 +1026,17 @@ class ToolExecutor:
             # Calculate base progress for this game (10% for fetch, 80% for analysis, 10% for aggregation)
             game_start_progress = 0.1 + (0.8 * idx / total_to_analyze)
             game_end_progress = 0.1 + (0.8 * (idx + 1) / total_to_analyze)
-            
             await emit_status(f"Reviewing game {idx+1}/{total_to_analyze}...", game_start_progress)
             print(f"   📊 Analyzing game {idx+1}/{total_to_analyze}...")
-            
             pgn = game.get("pgn", "")
             if not pgn:
                 continue
-            
             # Create a move-level progress callback that scales within this game's portion
             # Need to capture idx in closure properly
             game_idx = idx
             game_total = total_to_analyze
             game_start = game_start_progress
             game_end = game_end_progress
-            
             async def move_progress_callback(phase: str, message: str, move_progress: float = None, replace: bool = False):
                 if move_progress is not None:
                     # Scale move progress to fit within this game's progress range
@@ -1156,7 +1045,6 @@ class ToolExecutor:
                     full_message = f"Game {game_idx+1}/{game_total}: {message}"
                     await emit_status(full_message, overall_progress, replace=replace)
                     await asyncio.sleep(0)  # Yield to allow event to be sent
-            
             # Choose which side to focus review on (interpreter-driven)
             player_color = game.get("player_color", "white")
             if review_subject == "opponent":
@@ -1165,12 +1053,9 @@ class ToolExecutor:
                 focus_color = "both"
             else:
                 focus_color = player_color
-            
             # Use the global engine (pass None to use fallback), with move-level callback
             review = await self.review_game_internal(pgn, focus_color, True, depth, None, move_progress_callback)
-            
             print(f"      🔍 Review result for game {idx+1}: has_error={'error' in review}, keys={list(review.keys())[:5]}")
-            
             if "error" in review:
                 print(f"      ⚠️ Review failed for game {idx+1}: {review.get('error', 'unknown error')}")
             elif "error" not in review:
@@ -1200,13 +1085,11 @@ class ToolExecutor:
                     "black": game.get("black"),
                     "date": game.get("date")
                 }
-                
                 # === NEW: Save game with Personal Review System ===
                 if self.archive_manager and self.supabase_client:
                     try:
                         # Always use full review (light analysis removed)
                         review_type = "full"
-                        
                         # Prepare game data for saving
                         game_data = {
                             **review,
@@ -1239,28 +1122,24 @@ class ToolExecutor:
                             "pgn": pgn,
                             "game_review": review
                         }
-                        
                         # Get user_id from context or args
                         user_id = None
                         if context:
                             user_id = context.get("user_id") or context.get("profile", {}).get("user_id")
                         if not user_id:
                             user_id = args.get("user_id")
-                        
                         # Skip saving if no user_id (can't save without authenticated user)
                         if not user_id:
                             print(f"      ⚠️ No user_id available, skipping Personal Review System save")
                         else:
                             # Save game with limit enforcement
                             game_id = self.archive_manager.save_game_with_limit(user_id, game_data)
-                            
                             # Maintain 60-game window after saving
                             if game_id and self.game_window_manager:
                                 try:
                                     await self.game_window_manager.maintain_window(user_id)
                                 except Exception as window_err:
                                     print(f"      ⚠️ Error maintaining game window: {window_err}")
-                            
                             if game_id and review_type == "full":
                                 # Extract and save moves to normalized tables
                                 ply_records = review.get("ply_records", [])
@@ -1276,7 +1155,6 @@ class ToolExecutor:
                                         print(f"      ⚠️ Error saving moves to normalized tables: {moves_err}")
                                         import traceback
                                         traceback.print_exc()
-                                
                                 # Extract and save error positions
                                 if ply_records:
                                     positions_saved = await self.save_error_positions(
@@ -1287,24 +1165,19 @@ class ToolExecutor:
                                         focus_color
                                     )
                                     print(f"      💾 Saved {positions_saved} error positions for training")
-                        
                     except Exception as e:
                         print(f"      ⚠️ Error saving game to Personal Review System: {e}")
                         import traceback
                         traceback.print_exc()
-                
                 analyzed_games.append(review)
                 print(f"      ✅ Added review to analyzed_games (total: {len(analyzed_games)})")
-                
                 # Status update after completing each game
                 await emit_status(f"Completed game {idx+1}/{total_to_analyze}", game_end_progress, replace=True)
                 print(f"      ✅ Game {idx+1}/{total_to_analyze} complete")
                 await asyncio.sleep(0)  # Yield to send event
-        
         await emit_status(f"Analysis complete", 0.9, replace=True)
         print(f"      ✅ Analyzed {len(analyzed_games)} games")
         print(f"      🔍 Final analyzed_games length: {len(analyzed_games)}, games fetched: {len(games)}")
-        
         # Step 3: Always aggregate for conversational output
         if len(analyzed_games) > 0:
             # Import aggregator and key moment selector
@@ -1315,12 +1188,9 @@ class ToolExecutor:
                 detect_all_key_moments
             )
             import concurrent.futures
-            
             aggregator = PersonalReviewAggregator()
-            
             await emit_status(f"Computing statistics...", 0.91, replace=True)
             await asyncio.sleep(0)  # Yield to send status
-            
             # Run CPU-bound aggregation in thread pool to not block event loop
             loop = asyncio.get_event_loop()
             with concurrent.futures.ThreadPoolExecutor() as pool:
@@ -1342,10 +1212,8 @@ class ToolExecutor:
                     {}, 
                     None
                 )
-            
             await emit_status(f"Building performance report...", 0.93, replace=True)
             await asyncio.sleep(0)  # Yield to send status
-            
             # === NEW: Statistics-first key moment selection ===
             first_game = analyzed_games[0] if analyzed_games else None
             first_game_meta = first_game.get("metadata", {}) if first_game else {}
@@ -1355,7 +1223,6 @@ class ToolExecutor:
             # Prefer the original user question (provided by interpreter as tool arg `query`);
             # fall back to interpreter intent summary if needed.
             user_query = (args.get("query") or "").strip() or (interpreter_intent or "")
-            
             # Get all key moments from first game (or combine from all games)
             all_key_moments = first_game.get("all_key_moments", []) if first_game else []
             if not all_key_moments and first_game:
@@ -1364,13 +1231,10 @@ class ToolExecutor:
                     first_game.get("ply_records", []),
                     player_color
                 )
-            
             await emit_status(f"Selecting key moments from game analysis...", 0.95, replace=True)
             await asyncio.sleep(0)
-            
             # Extract ply_records for query interpretation
             first_game_ply_records = first_game.get("ply_records", []) if first_game else []
-            
             # Select key moments using LLM-based selection (handles ANY query flexibly)
             selected_moments, selection_rationale = await select_key_moments_by_statistics(
                 all_key_moments=all_key_moments,
@@ -1394,13 +1258,10 @@ class ToolExecutor:
             # on-demand during walkthrough steps. This saves time during review generation.
             # Pre-commentary will be generated dynamically when each walkthrough step executes.
             pre_commentary_by_ply = {}
-            
             # Loss diagnosis is now included in selection_rationale if applicable
             loss_diagnosis = selection_rationale.get("loss_diagnosis")
-            
             await emit_status(f"Generating summary...", 0.97, replace=True)
             await asyncio.sleep(0)  # Yield to send status
-            
             # Generate context-aware narrative
             narrative = self._generate_review_narrative_with_context(
                 summary=aggregated.get("summary", {}),
@@ -1418,9 +1279,7 @@ class ToolExecutor:
                 first_game=first_game,
                 aggregated=aggregated  # Pass full aggregated data for time analysis
             )
-            
             await emit_status(f"Preparing results...", 0.99, replace=True)
-            
             return {
                 "success": True,
                 "username": username,
@@ -1467,7 +1326,6 @@ class ToolExecutor:
                     "piece_activity": aggregated.get("piece_activity", [])  # Piece-specific accuracy
                 }
             }
-        
         return {
             "success": False,
             "error": "no_games_analyzed",
@@ -1577,7 +1435,6 @@ Return ONLY valid JSON in this exact format:
                         temperature=0.4,
                         model="gpt-5",
                     )
-                
                 loop = asyncio.get_event_loop()
                 import concurrent.futures as _cf
                 with _cf.ThreadPoolExecutor(max_workers=1) as pool:
@@ -1628,39 +1485,31 @@ Return ONLY valid JSON in this exact format:
             import traceback
             traceback.print_exc()
             return {}
-    
     async def _generate_training_session(self, args: Dict) -> Dict:
         """Generate training drills"""
         username = args.get("username")
         training_query = args.get("training_query")
         source = args.get("source", "recent_games")
         num_drills = args.get("num_drills", 15)
-        
         print(f"   🎯 Generating training for {username}: '{training_query}'")
-        
         # Get analyzed games (from context or database)
         analyzed_games = args.get("analyzed_games", [])
-        
         if not analyzed_games and self.supabase_client:
             # Try to get from database
             print(f"      Fetching analyzed games from database...")
             db_games = self.supabase_client.get_analyzed_games(username, limit=10)
             # Convert to expected format (simplified for now)
             analyzed_games = [g.get("game_review", {}) for g in db_games if g.get("game_review")]
-        
         if not analyzed_games:
             return {"error": "No analyzed games available. Analyze some games first."}
-        
         # Plan training
         blueprint = self.training_planner.plan_training(training_query, analyzed_games)
-        
         # Mine positions
         positions = self.position_miner.mine_positions(
             analyzed_games,
             blueprint.get("focus_tags"),
             num_drills
         )
-        
         if not positions:
             return {
                 "success": True,
@@ -1668,7 +1517,6 @@ Return ONLY valid JSON in this exact format:
                 "message": "No relevant positions found for this query. Try a broader search.",
                 "search_criteria": blueprint.get("search_criteria", [])
             }
-        
         # Generate drills
         drills = await self.drill_generator.generate_drills(
             positions,
@@ -1676,7 +1524,6 @@ Return ONLY valid JSON in this exact format:
             self.engine,
             15
         )
-        
         return {
             "success": True,
             "drills_generated": len(drills),
@@ -1685,20 +1532,15 @@ Return ONLY valid JSON in this exact format:
             "search_criteria": blueprint.get("search_criteria", []),
             "message": f"Generated {len(drills)} personalized drills focused on: {', '.join(blueprint.get('focus_tags', []))}"
         }
-    
     async def _get_lesson(self, args: Dict) -> Dict:
         """Generate interactive lesson"""
         topic = args.get("topic")
         level = args.get("level", "intermediate")
-        
         print(f"   📚 Generating lesson on '{topic}' ({level})")
-        
         # Use existing lesson generation
         from opening_builder import build_opening_lesson
-        
         try:
             lesson = await build_opening_lesson(topic, self.engine, None, self.openai_client)
-            
             return {
                 "success": True,
                 "topic": topic,
@@ -1723,7 +1565,6 @@ Return ONLY valid JSON in this exact format:
                 allowed, message, usage_info = self.supabase_client.check_and_increment_usage(
                     user_id, None, "lesson", tier_info
                 )
-                
                 if not allowed:
                     return {
                         "error": message,
@@ -1754,54 +1595,42 @@ Return ONLY valid JSON in this exact format:
             "metadata": result.get("metadata"),
             "recent_lessons": result.get("recent_lessons"),
         }
-    
     # ========================================================================
     # LOW-LEVEL DATA TOOL IMPLEMENTATIONS
     # ========================================================================
-    
     def _query_user_games(self, args: Dict) -> Dict:
         """Query saved games from database"""
         username = args.get("username")
-        
         if not self.supabase_client:
             return {"error": "Database not available"}
-        
         print(f"   🔍 Querying games for {username}")
-        
         # For now, return mock data since Supabase integration pending
         # When integrated, this will call:
         # games = self.supabase_client.get_user_games(user_id, ...)
-        
         return {
             "success": True,
             "games_found": 0,
             "message": "Database integration pending. Games currently in cache only.",
             "note": "This tool will work after Supabase integration is complete"
         }
-    
     def _get_game_details(self, args: Dict) -> Dict:
         """Get full game review data"""
         game_id = args.get("game_id")
-        
         return {
             "success": True,
             "message": "Database integration pending",
             "note": "This tool will work after Supabase integration"
         }
-    
     def _query_positions(self, args: Dict, context: Dict = None) -> Dict:
         """Query saved positions using the new position search tool"""
         from tools.position_search import search_user_positions
-        
         # Resolve user_id
         user_id = args.get("user_id")
         if not user_id and context:
             user_id = context.get("user_id") or context.get("profile", {}).get("user_id")
-            
         if not user_id and self.supabase_client:
             # Try to get current user if authenticated
             pass # We'll assume it's passed in context for now
-            
         if not user_id:
             return {"success": False, "error": "User not authenticated. Cannot search personal history."}
 
@@ -1811,7 +1640,6 @@ Return ONLY valid JSON in this exact format:
         phases = [args.get("phase")] if args.get("phase") else None
         mover_name = args.get("mover_name")
         limit = args.get("limit", 5)
-        
         results = search_user_positions(
             supabase_client=self.supabase_client,
             user_id=user_id,
@@ -1822,65 +1650,54 @@ Return ONLY valid JSON in this exact format:
             mover_name=mover_name,
             limit=limit
         )
-        
         return {
             "success": True,
             "positions_found": len(results),
             "positions": results,
             "message": f"Found {len(results)} positions matching your criteria."
         }
-    
     def _get_training_stats(self, args: Dict) -> Dict:
         """Get training progress stats"""
         username = args.get("username")
-        
         return {
             "success": True,
             "message": "Training stats available after Supabase integration",
             "note": "Currently tracking in memory only"
         }
-    
     def _save_position(self, args: Dict, context: Dict) -> Dict:
         """Save a position to database"""
         username = args.get("username")
         fen = args.get("fen") or context.get("fen") if context else None
         note = args.get("note", "")
         tags = args.get("tags", [])
-        
         if not fen:
             return {"error": "No position to save"}
-        
         return {
             "success": True,
             "message": f"Position saved! (Will persist after Supabase integration)",
             "fen": fen,
             "tags": tags
         }
-    
     def _create_collection(self, args: Dict) -> Dict:
         """Create new collection"""
         username = args.get("username")
         name = args.get("name")
         description = args.get("description", "")
-        
         return {
             "success": True,
             "message": f"Collection '{name}' created! (Will persist after Supabase integration)",
             "name": name
         }
-    
     def _setup_position(self, args: Dict, context: Dict) -> Dict:
         """Set up a chess position on the board"""
         fen = args.get("fen")
         pgn = args.get("pgn")
         orientation = args.get("orientation", "white")
         move_annotations = args.get("move_annotations", {})
-        
         # Validate at least one of FEN or PGN is provided
         if not fen and not pgn:
             # Use current board state from context
             fen = context.get("board_state", "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1")
-        
         return {
             "success": True,
             "display_type": "board",
@@ -1890,10 +1707,8 @@ Return ONLY valid JSON in this exact format:
             "move_annotations": move_annotations,
             "message": f"Position set up (orientation: {orientation})"
         }
-    
     def _generate_review_narrative(self, summary: Dict, phase_stats: Dict, opening_perf: list, username: str, platform: str, user_query: str = "") -> str:
         """Generate structured Q&A style narrative from personal review stats"""
-        
         total_games = summary.get('total_games', 0) or 0
         avg_accuracy_raw = summary.get('avg_accuracy')
         avg_accuracy = float(avg_accuracy_raw) if avg_accuracy_raw is not None else 0.0
@@ -1902,14 +1717,11 @@ Return ONLY valid JSON in this exact format:
         avg_rating = summary.get('avg_rating', 0) or 0
         platform = platform or "chess.com"
         username = username or "player"
-        
         # 1. OPENING - Conversational introduction
         narrative = f"I just finished analyzing your last **{total_games} games** on **{platform}** as **{username}**. "
         narrative += f"Let me break down what I found.\n\n"
-        
         # 2. VERDICT SECTION
         narrative += f"## Your Performance Assessment\n\n"
-        
         # Make verdict more conversational based on accuracy
         if avg_accuracy and avg_accuracy > 90:
             narrative += f"You're playing at an **exceptional level** with **{avg_accuracy:.1f}% accuracy**. "
@@ -1925,12 +1737,9 @@ Return ONLY valid JSON in this exact format:
             narrative += f"Don't be discouraged - identifying these weaknesses is the first step to getting stronger. "
         else:
             narrative += f"Let me analyze your performance based on the games reviewed.\n\n"
-        
         narrative += f"\n\n"
-        
         # 3. JUSTIFICATION - Tell the story
         narrative += f"## Here's What the Data Shows\n\n"
-        
         justifications = self._get_top_justifications(phase_stats, opening_perf, win_rate, avg_accuracy)
         if len(justifications) >= 3:
             narrative += f"{justifications[0]}\n\n"
@@ -1939,25 +1748,19 @@ Return ONLY valid JSON in this exact format:
         else:
             for just in justifications:
                 narrative += f"{just}\n\n"
-        
         # 4. ACTIONABLE PLAN - Guide them forward
         narrative += f"## My Recommendations\n\n"
         narrative += f"If I were coaching you, here's what I'd focus on first:\n\n"
-        
         suggestions = self._generate_prioritized_suggestions(phase_stats, avg_accuracy, opening_perf)
         for idx, suggestion in enumerate(suggestions[:3], 1):
             narrative += f"**{idx}. {suggestion['title']}**\n\n"
             narrative += f"{suggestion['detail']}\n\n"
-        
         # 5. CLOSING - Encourage exploration
         narrative += f"Want more details? Expand the charts below to see your complete breakdown by phase, opening, time control, and more!\n"
-        
         return narrative
-    
     def _get_top_justifications(self, phase_stats: Dict, opening_perf: list, win_rate: float, avg_accuracy: float) -> list:
         """Extract 3-5 most impactful data points as conversational statements"""
         justifications = []
-        
         # Check phase performance gaps
         if phase_stats:
             phases_sorted = sorted(
@@ -1967,19 +1770,16 @@ Return ONLY valid JSON in this exact format:
             weakest = phases_sorted[0]
             strongest = phases_sorted[-1]
             gap = strongest[1] - weakest[1]
-            
             if gap > 10:
                 justifications.append(
                     f"**Phase consistency is an issue.** Your {strongest[0]} ({_safe_float(strongest[1], 0.0):.1f}%) is {gap:.0f}% stronger than your {weakest[0]} ({_safe_float(weakest[1], 0.0):.1f}%). This gap suggests you need focused practice in your weaker phase."
                 )
-            
             # Highlight if endgame is weak
             endgame_acc = _safe_float(phase_stats.get('endgame', {}).get('accuracy'), 0.0)
             if endgame_acc < 70 and phase_stats.get('endgame', {}).get('move_count', 0) > 0:
                 justifications.append(
                     f"**Your endgame technique needs work.** At {endgame_acc:.1f}% accuracy, you're likely missing conversions or allowing draws in winning positions. This is costing you rating points."
                 )
-        
         # Win rate correlation
         if win_rate < 40 and avg_accuracy > 75:
             justifications.append(
@@ -1989,7 +1789,6 @@ Return ONLY valid JSON in this exact format:
             justifications.append(
                 f"**You're good at closing out games.** Your {_safe_float(win_rate, 0.0):.0f}% win rate shows you know how to convert advantages into wins - that's a valuable skill."
             )
-        
         # Opening performance
         if opening_perf and len(opening_perf) > 0:
             sanitized = []
@@ -2004,28 +1803,23 @@ Return ONLY valid JSON in this exact format:
                 justifications.append(
                     f"**You have a weapon in your repertoire.** Your {best_opening.get('opening', 'Unknown')} is performing at {best_opening.get('avg_accuracy', 0):.1f}% - well above your average. Keep playing it!"
                 )
-            
             # Check for weak openings
             weak_openings = [op for op in sanitized if op.get('avg_accuracy', 0.0) < avg_accuracy - 5]
             if weak_openings:
                 justifications.append(
                     f"**One opening is dragging you down.** Your {weak_openings[0].get('opening', 'Unknown')} is underperforming at {weak_openings[0].get('avg_accuracy', 0):.1f}%. Consider either studying it more or switching to something else."
                 )
-        
         # If we have fewer than 3, add generic insights
         if len(justifications) < 3:
             if avg_accuracy > 80:
                 justifications.append("**You're playing consistently.** No major weaknesses jumped out - you maintain solid accuracy across all game phases.")
             elif avg_accuracy < 70:
                 justifications.append("**Tactical mistakes are the main issue.** You need to slow down and calculate more thoroughly before making moves.")
-        
         return justifications
-    
     def _generate_prioritized_suggestions(self, phase_stats: Dict, avg_accuracy: float, opening_perf: list) -> list:
         """Generate ordered suggestions by impact"""
         suggestions = []
         avg_accuracy = _safe_float(avg_accuracy, 0.0)
-        
         # Priority 1: Fix biggest weakness
         if phase_stats:
             weakest_phase = min(phase_stats.items(), key=lambda x: x[1].get('accuracy', 100) if x[1].get('accuracy') is not None else 100)
@@ -2034,14 +1828,12 @@ Return ONLY valid JSON in this exact format:
                     'title': f"Master {weakest_phase[0]} technique",
                     'detail': f"At {_safe_float(weakest_phase[1].get('accuracy'), 0.0):.1f}%, this is costing you games. Study {weakest_phase[0]} fundamentals and practice conversion."
                 })
-        
         # Priority 2: Improve consistency
         if avg_accuracy < 85:
             suggestions.append({
                 'title': "Reduce tactical errors",
                 'detail': "Focus on calculating candidate moves thoroughly before playing. Aim for 85%+ accuracy."
             })
-        
         # Priority 3: Opening repertoire
         if opening_perf and len(opening_perf) > 0:
             sanitized = []
@@ -2057,23 +1849,19 @@ Return ONLY valid JSON in this exact format:
                     'title': "Strengthen opening preparation",
                     'detail': f"Study {weak_openings[0].get('opening', 'Unknown')} - you're {(avg_accuracy - weak_openings[0].get('avg_accuracy', 0)):.0f}% below your average."
                 })
-        
         # Priority 4: Time management (if we have blunder trigger data)
         if len(suggestions) < 3:
             suggestions.append({
                 'title': "Improve time management",
                 'detail': "Avoid time pressure situations that lead to mistakes. Budget your clock wisely."
             })
-        
         # Priority 5: Pattern recognition
         if len(suggestions) < 3:
             suggestions.append({
                 'title': "Study tactical patterns",
                 'detail': "Work on recognizing common tactical motifs (forks, pins, skewers) to improve calculation speed."
             })
-        
         return suggestions
-    
     async def _generate_llm_narrative(
         self,
         summary: Dict,
@@ -2101,10 +1889,8 @@ Return ONLY valid JSON in this exact format:
                 game_result = first_game.get("result", first_game.get("game_result", ""))
             if not game_result and game_metadata:
                 game_result = game_metadata.get("result", "")
-            
             termination = game_metadata.get("termination", "") if game_metadata else ""
             time_control_raw = game_metadata.get("time_control", "") if game_metadata else ""
-            
             # Parse time control for clarity
             time_control = time_control_raw
             if time_control_raw:
@@ -2135,23 +1921,18 @@ Return ONLY valid JSON in this exact format:
                             time_control = f"{seconds//60}min (classical)"
                 except:
                     pass  # Keep original if parsing fails
-            
             opening = first_game.get("opening", {}) if first_game else {}
             opening_name = opening.get("name", "Unknown opening") if opening else "Unknown opening"
-            
             avg_accuracy = _safe_float(summary.get('avg_accuracy'), 0.0)
             avg_cp_loss = _safe_float(summary.get('avg_cp_loss'), 0.0)
-            
             # Phase stats
             opening_acc = phase_stats.get("opening", {}).get("avg_accuracy")
             middlegame_acc = phase_stats.get("middlegame", {}).get("avg_accuracy")
             endgame_acc = phase_stats.get("endgame", {}).get("avg_accuracy")
-            
             # Count move types
             blunders = [m for m in selected_moments if m.get("primary_label") == "blunder"]
             mistakes = [m for m in selected_moments if m.get("primary_label") == "mistake"]
             best_moves = [m for m in selected_moments if m.get("primary_label") in ["best", "excellent", "critical_best"]]
-            
             # Build context string
             context = f"""Game Review Data:
 - Player: {username} on {platform}
@@ -2163,7 +1944,6 @@ Return ONLY valid JSON in this exact format:
 - Opening: {opening_name}
 - Overall accuracy: {avg_accuracy:.1f}%
 - Average centipawn loss: {avg_cp_loss:.1f}"""
-            
             # Add win/loss stats if multi-game or available
             if total_games > 1 or wins or losses or draws:
                 context += f"""
@@ -2171,7 +1951,6 @@ Return ONLY valid JSON in this exact format:
 - Wins: {wins}
 - Losses: {losses}
 - Draws: {draws}"""
-            
             # Add color performance if available
             if white_acc is not None or black_acc is not None:
                 context += "\n\nPerformance by Color:"
@@ -2180,7 +1959,6 @@ Return ONLY valid JSON in this exact format:
                     context += f"\n- White: {_safe_float(white_acc, 0.0):.1f}% accuracy ({white_games} games)"
                 if black_acc is not None:
                     context += f"\n- Black: {_safe_float(black_acc, 0.0):.1f}% accuracy ({black_games} games)"
-            
             # Add opening performance if available
             if opening_performance_data:
                 context += "\n\nOpening Performance:"
@@ -2195,14 +1973,10 @@ Return ONLY valid JSON in this exact format:
                     opening_win_rate = opening.get("win_rate", 0)
                     if isinstance(opening_win_rate, (int, float)) and opening_win_rate <= 1.0:
                         opening_win_rate = opening_win_rate * 100
-                    
-                    context += f"
-{i}. {name}: {_safe_float(accuracy, 0.0):.1f}% accuracy, {_safe_float(opening_win_rate, 0.0):.1f}% win rate ({games} games: {opening_wins}W/{opening_losses}L/{opening_draws}D)"
-            
+                    context += f"\n{i}. {name}: {_safe_float(accuracy, 0.0):.1f}% accuracy, {_safe_float(opening_win_rate, 0.0):.1f}% win rate ({games} games: {opening_wins}W/{opening_losses}L/{opening_draws}D)"
             context += "
 
 Phase Accuracy (only phases with moves shown):"""
-            
             # Only include phases that have data
             phase_acc_parts = []
             if opening_acc is not None:
@@ -2211,12 +1985,10 @@ Phase Accuracy (only phases with moves shown):"""
                 phase_acc_parts.append(f"- Middlegame: {_safe_float(middlegame_acc, 0.0):.1f}%")
             if endgame_acc is not None:
                 phase_acc_parts.append(f"- Endgame: {_safe_float(endgame_acc, 0.0):.1f}%")
-            
             if phase_acc_parts:
                 context += "\n" + "\n".join(phase_acc_parts)
             else:
                 context += "\n- No phase data available"
-            
             context += f"""
 
 Key Moments Found:
@@ -2224,21 +1996,17 @@ Key Moments Found:
 - Mistakes: {len(mistakes)}
 - Excellent/Best moves: {len(best_moves)}
 - Total key moments: {len(selected_moments)}"""
-            
             # === TIME ANALYSIS ===
             if aggregated:
                 time_mgmt = aggregated.get("time_management", {})
                 accuracy_by_time = aggregated.get("accuracy_by_time_spent", [])
                 blunder_triggers = aggregated.get("blunder_triggers", {})
                 mistake_patterns = aggregated.get("mistake_patterns", {})
-                
                 time_context_parts = []
-                
                 # Average time per move
                 avg_time = _safe_float(time_mgmt.get("avg_time_per_move"), 0.0)
                 if avg_time and avg_time > 0:
                     time_context_parts.append(f"- Average time per move: {avg_time:.1f}s")
-                
                 # Time by phase - only include phases with data
                 phase_times = []
                 avg_opening_time = _safe_float(time_mgmt.get("avg_time_opening"), 0.0)
@@ -2252,7 +2020,6 @@ Key Moments Found:
                     phase_times.append(f"Endgame {avg_endgame_time:.1f}s")
                 if phase_times:
                     time_context_parts.append(f"- Time per phase: {', '.join(phase_times)}")
-                
                 # Accuracy by time ranges - ONLY include categories with moves
                 if accuracy_by_time:
                     valid_ranges = [tr for tr in accuracy_by_time if tr.get("move_count", 0) > 0]
@@ -2263,11 +2030,9 @@ Key Moments Found:
                             acc = _safe_float(time_range.get("avg_accuracy"), 0.0)
                             count = time_range.get("move_count", 0)
                             time_context_parts.append(f"  • {label}: {acc:.1f}% ({count} moves)")
-                
                 # Only add time analysis header if we have data
                 if time_context_parts:
                     context += "\n\n**Time Management Analysis:**\n" + "\n".join(time_context_parts)
-                
                 # Error triggers - only if there were errors
                 total_blunders_trig = blunder_triggers.get("total_blunders", 0)
                 if total_blunders_trig > 0:
@@ -2282,12 +2047,10 @@ Key Moments Found:
                     complex_pos = blunder_triggers.get("complex_positions", 0)
                     if complex_pos > 0:
                         context += f"\n- Errors in complex positions: {complex_pos}"
-                    
                     # Blunders in time trouble
                     blunders_time_trouble = mistake_patterns.get("blunders_in_time_trouble", 0)
                     if blunders_time_trouble > 0:
                         context += f"\n- Blunders in time trouble: {blunders_time_trouble}"
-            
             # Add time spent on key moments
             moments_with_time = []
             for moment in selected_moments[:10]:
@@ -2296,21 +2059,17 @@ Key Moments Found:
                 time_spent = record.get("time_spent_s", 0)
                 if time_spent:
                     moments_with_time.append((ply, record.get("san", "?"), time_spent, record.get("category", "")))
-            
             if moments_with_time:
                 context += "\n\n**Time spent on key moments:**"
                 for ply, san, time_s, cat in moments_with_time[:5]:
                     context += f"\n- Move {ply} ({san}): {_safe_float(time_s, 0.0):.1f}s ({cat})"
-            
             context += f"\n\nQuery Intent: {selection_rationale.get('query_intent', 'general')}"
             context += f"\nNarrative Focus: {selection_rationale.get('narrative_focus', '')}"
-            
             # Add loss diagnosis if present
             if loss_diagnosis:
                 loss_type = loss_diagnosis.get("loss_type", "")
                 loss_detail = loss_diagnosis.get("detail", "")
                 context += f"\n\nLoss Diagnosis:\n- Type: {loss_type}\n- Detail: {loss_detail}"
-                
                 # Add time analysis from loss diagnosis
                 time_analysis = loss_diagnosis.get("time_analysis", {})
                 if time_analysis:
@@ -2320,7 +2079,6 @@ Key Moments Found:
                         context += f"\n- Slow moves that ate time: {len(slow_moves)}"
                     if time_pressure_moves:
                         context += f"\n- Errors made under time pressure: {len(time_pressure_moves)}"
-            
             # Add a few key moment details (not all - LLM will summarize)
             if selected_moments[:5]:
                 context += "\n\nTop Key Moments:"
@@ -2335,7 +2093,6 @@ Key Moments Found:
                     time_spent_f = _safe_float(time_spent, 0.0)
                     time_str = f", {time_spent_f:.1f}s" if time_spent_f > 0 else ""
                     context += f"\n{i}. Move {ply} ({move_san}): {category}, {_safe_float(cp_loss, 0.0):.0f}cp loss, {phase}{time_str}"
-            
             system_prompt = """You are a chess coach providing game feedback. Answer the user's question directly and naturally.
 
 Your goal: Provide a helpful, personalized response that directly addresses what they asked.
@@ -2349,7 +2106,6 @@ Be conversational, honest, and helpful. Let the data guide your insights, but do
             # Call OpenAI
             import asyncio
             from concurrent.futures import ThreadPoolExecutor
-            
             if self.llm_router:
                 # Wrap sync call in executor to avoid blocking async context
                 loop = asyncio.get_event_loop()
@@ -2369,7 +2125,6 @@ Be conversational, honest, and helpful. Let the data guide your insights, but do
                         timeout=20.0
                     )
                 return narrative.strip()
-            
             loop = asyncio.get_event_loop()
             with ThreadPoolExecutor() as executor:
                 response = await loop.run_in_executor(
@@ -2383,10 +2138,8 @@ Be conversational, honest, and helpful. Let the data guide your insights, but do
                         temperature=0.7
                     )
                 )
-            
             narrative = response.choices[0].message.content.strip()
             return narrative
-            
         except Exception as e:
             # No synthetic fallback narrative: avoid crashing the tool call.
             import traceback
@@ -2398,7 +2151,6 @@ Be conversational, honest, and helpful. Let the data guide your insights, but do
             if hasattr(e, '__dict__'):
                 print(f"   Exception details: {e.__dict__}")
             return ""
-    
     def _generate_review_narrative_with_context(
         self,
         summary: Dict,
@@ -2423,7 +2175,6 @@ Be conversational, honest, and helpful. Let the data guide your insights, but do
         # For single game reviews with a user query, use LLM-based narrative
         if total_games == 1 and user_query and self.openai_client:
             ply_records = first_game.get("ply_records", []) if first_game else []
-            
             # Run async LLM call synchronously
             import asyncio
             try:
@@ -2481,27 +2232,22 @@ Be conversational, honest, and helpful. Let the data guide your insights, but do
                 if hasattr(e, '__dict__'):
                     print(f"   Exception details: {e.__dict__}")
                 # Fall through to template-based generation
-        
         avg_accuracy = _safe_float(summary.get('avg_accuracy'), 0.0)
         win_rate = summary.get('win_rate', 0)
-        
         # Determine query type for context
         query_type = selection_rationale.get("query_type", "general")
         query_intent = selection_rationale.get("query_intent", "general")
         narrative_focus = selection_rationale.get("narrative_focus", "")
-        
         # Route to query-specific narrative generator
         if query_intent and query_intent != "general":
             # Use query-driven narrative
             ply_records_for_narrative = first_game.get("ply_records", []) if first_game else []
-            
             # Get game result for context
             game_result = None
             if first_game:
                 game_result = first_game.get("result", first_game.get("game_result", ""))
             if not game_result and game_metadata:
                 game_result = game_metadata.get("result", "")
-            
             return self._generate_query_driven_narrative(
                 query_intent=query_intent,
                 selected_moments=selected_moments,
@@ -2544,21 +2290,17 @@ Be conversational, honest, and helpful. Let the data guide your insights, but do
                 platform=platform,
                 total_games=total_games
             )
-        
         # Default to general narrative
         # Build narrative
         narrative = ""
-        
         # === OPENING ===
         if total_games == 1:
             narrative += f"I just finished analyzing your last game on **{platform}** as **{username}**. "
         else:
             narrative += f"I just finished analyzing your last **{total_games} games** on **{platform}** as **{username}**. "
         narrative += "Let me break down what I found.\n\n"
-        
         # === VERDICT (context-aware) ===
         narrative += "## Your Performance Assessment\n\n"
-        
         # Accuracy assessment
         if avg_accuracy > 90:
             narrative += f"You're playing at an **exceptional level** with **{avg_accuracy:.1f}% accuracy**. "
@@ -2572,14 +2314,12 @@ Be conversational, honest, and helpful. Let the data guide your insights, but do
         else:
             narrative += f"At **{avg_accuracy:.1f}% accuracy**, there's **significant opportunity for improvement**. "
             narrative += "Don't be discouraged - identifying these weaknesses is the first step to getting stronger."
-        
         # Add strengths section
         strengths = []
         if avg_accuracy > 90:
             strengths.append("exceptional calculation skills")
         elif avg_accuracy > 80:
             strengths.append("solid fundamentals")
-        
         # Check for strong phases
         if phase_stats:
             valid_phases = [(name, data) for name, data in phase_stats.items() 
@@ -2589,7 +2329,6 @@ Be conversational, honest, and helpful. Let the data guide your insights, but do
                 if strongest_phase[1].get('accuracy', 0) > 85:
                     phase_name = strongest_phase[0].replace('_', ' ').title()
                     strengths.append(f"strong {phase_name.lower()} play")
-        
         # Check for strong tags (high accuracy with good frequency)
         if tag_stats:
             all_tags = tag_stats.get("performance_by_tags", {}).get("all_tags", [])
@@ -2599,33 +2338,25 @@ Be conversational, honest, and helpful. Let the data guide your insights, but do
                 top_tag = max(strong_tags, key=lambda x: x.get("move_count", 0))
                 tag_natural = translate_tag_to_natural_english(top_tag.get("tag", ""))
                 strengths.append(f"strong performance in {tag_natural} positions")
-        
         if strengths:
             narrative += f" Your strengths include {', '.join(strengths[:2])}."
-        
         narrative += "\n\n"
-        
         # === LOSS DIAGNOSIS (if applicable) ===
         if loss_diagnosis and loss_diagnosis.get("loss_type"):
             loss_type = loss_diagnosis.get("loss_type")
             detail = loss_diagnosis.get("detail", "")
-            
             # Check termination type from game metadata
             termination = ""
             if game_metadata:
                 termination = game_metadata.get("termination", "").lower()
-            
             is_timeout = "time" in termination or "timeout" in termination
             is_resignation = "resign" in termination
-            
             # Enhance detail with termination info if available
             if is_timeout and "time" not in detail.lower():
                 detail = f"Lost on time. {detail}"
             elif is_resignation and "resign" not in detail.lower():
                 detail = f"Resigned. {detail}"
-            
             narrative += "## What Went Wrong\n\n"
-            
             if loss_type == "single_critical_blunder":
                 narrative += f"**Single critical blunder.** {detail}. "
                 narrative += "The game was competitive until that moment.\n\n"
@@ -2645,34 +2376,27 @@ Be conversational, honest, and helpful. Let the data guide your insights, but do
             else:
                 narrative += f"**Gradual decline.** {detail}. "
                 narrative += "No single moment lost the game - it was an accumulation of small errors.\n\n"
-        
         # === STATISTICS-DRIVEN INSIGHTS ===
         narrative += "## Here's What the Data Shows\n\n"
-        
         # Get significant statistics from rationale
         significant_stats = selection_rationale.get("significant_stats", [])
-        
         justifications = []
-        
         # Phase consistency (context-aware)
         if phase_stats:
             # Filter out phases with None accuracy
             valid_phases = [(name, data) for name, data in phase_stats.items() 
                           if data.get('accuracy') is not None and data.get('move_count', 0) > 0]
-            
             if len(valid_phases) >= 2:
                 sorted_phases = sorted(valid_phases, key=lambda x: x[1].get('accuracy', 0))
                 weakest = sorted_phases[0]
                 strongest = sorted_phases[-1]
                 gap = strongest[1].get('accuracy', 0) - weakest[1].get('accuracy', 0)
-                
                 if gap > 10:
                     justifications.append(
                         f"**Phase consistency is an issue.** Your {strongest[0]} ({_safe_float(strongest[1].get('accuracy'), 0.0):.1f}%) "
                         f"is {gap:.0f}% stronger than your {weakest[0]} ({_safe_float(weakest[1].get('accuracy'), 0.0):.1f}%). "
                         f"This gap suggests you need focused practice in your weaker phase."
                     )
-            
             # Note missing phases without claiming 0% accuracy
             missing_phases = [name for name, data in phase_stats.items() 
                            if data.get('accuracy') is None or data.get('move_count', 0) == 0]
@@ -2682,7 +2406,6 @@ Be conversational, honest, and helpful. Let the data guide your insights, but do
                     f"**Game ended early.** No {phase_str} moves were played, "
                     f"so there's no accuracy data for {'that phase' if len(missing_phases) == 1 else 'those phases'}."
                 )
-        
         # Tag-based statistics (only significant ones - unusually high/low performance or unusual preferences)
         for stat in significant_stats[:2]:  # Top 2 significant stats
             if stat.get("type") == "tag_accuracy":
@@ -2691,7 +2414,6 @@ Be conversational, honest, and helpful. Let the data guide your insights, but do
                 acc = stat.get("accuracy", 0)
                 count = stat.get("count", 0)
                 direction = stat.get("direction", "low")
-                
                 if direction == "low":
                     justifications.append(
                         f"**Weakness in {tag_natural} positions.** Your accuracy drops to {_safe_float(acc, 0.0):.1f}% in these positions "
@@ -2706,7 +2428,6 @@ Be conversational, honest, and helpful. Let the data guide your insights, but do
                 tag = stat.get("tag", "unknown")
                 pattern = stat.get("pattern", "")
                 tag_natural = translate_tag_to_natural_english(tag)
-                
                 if pattern == "seeks":
                     created_acc = stat.get("created_accuracy", 0)
                     count = stat.get("count", 0)
@@ -2721,7 +2442,6 @@ Be conversational, honest, and helpful. Let the data guide your insights, but do
                         f"**You failed to capitalize on {tag_natural}.** You remove these patterns "
                         f"with lower accuracy ({_safe_float(removed_acc, 0.0):.1f}%, {count} moves). Consider maintaining them instead."
                     )
-        
         # Win rate context (single game = statement, multiple = percentage)
         if total_games == 1:
             result = summary.get('wins', 0) > 0
@@ -2734,31 +2454,25 @@ Be conversational, honest, and helpful. Let the data guide your insights, but do
                 f"**Win conversion is an issue.** Your {_safe_float(win_rate, 0.0)*100:.0f}% win rate is surprisingly low "
                 f"for {_safe_float(avg_accuracy, 0.0):.1f}% accuracy. You might be losing won positions."
             )
-        
         # Add justifications to narrative
         for j in justifications[:3]:
             narrative += f"{j}\n\n"
-        
         # === RECOMMENDATIONS ===
         narrative += "## My Recommendations\n\n"
         narrative += "If I were coaching you, here's what I'd focus on first:\n\n"
-        
         suggestions = self._generate_prioritized_suggestions_with_tags(
             phase_stats, avg_accuracy, opening_perf, tag_stats, significant_stats
         )
         for idx, suggestion in enumerate(suggestions[:3], 1):
             narrative += f"**{idx}. {suggestion['title']}**\n\n"
             narrative += f"{suggestion['detail']}\n\n"
-        
         # === CLOSING ===
         if selected_moments:
             narrative += f"Want more details? Expand the charts below to see your complete breakdown, "
             narrative += f"or let's walk through the **{len(selected_moments)} key moments** I've identified!\n"
         else:
             narrative += "Want more details? Expand the charts below to see your complete breakdown!\n"
-        
         return narrative
-    
     def _generate_loss_diagnosis_narrative(
         self,
         summary: Dict,
@@ -2773,13 +2487,11 @@ Be conversational, honest, and helpful. Let the data guide your insights, but do
         Generate brief, focused narrative explaining why the player lost.
         """
         narrative = ""
-        
         # Brief opening
         if total_games == 1:
             narrative += f"Here's why you lost your last game on **{platform}** as **{username}**.\n\n"
         else:
             narrative += f"Here's why you lost your last game.\n\n"
-        
         # Loss categorization
         if not loss_diagnosis or not loss_diagnosis.get("loss_type"):
             narrative += "You lost this game. Let's walk through the key moments to understand what happened.\n\n"
@@ -2789,7 +2501,6 @@ Be conversational, honest, and helpful. Let the data guide your insights, but do
                     ply = moment.get("ply", 0)
                     labels = moment.get("labels", [])
                     primary = moment.get("primary_label", "")
-                    
                     if primary == "blunder":
                         narrative += f"{i}. Move {ply}: Critical blunder\n"
                     elif primary == "mistake":
@@ -2797,11 +2508,9 @@ Be conversational, honest, and helpful. Let the data guide your insights, but do
                     elif "advantage_shift" in labels:
                         narrative += f"{i}. Move {ply}: Advantage shifted against you\n"
             return narrative
-        
         loss_type = loss_diagnosis.get("loss_type", "gradual_decline")
         detail = loss_diagnosis.get("detail", "")
         termination = game_metadata.get("termination", "").lower() if game_metadata else ""
-        
         # Direct answer based on loss type
         if loss_type == "single_critical_blunder":
             blunder_ply = loss_diagnosis.get("blunder_ply") or (loss_diagnosis.get("key_moves", [0])[0] if loss_diagnosis.get("key_moves") else None)
@@ -2832,7 +2541,6 @@ Be conversational, honest, and helpful. Let the data guide your insights, but do
         else:
             narrative += f"**Gradual decline.** {detail}"
             narrative += " No single moment lost the game - it was an accumulation of small errors.\n\n"
-        
         # Brief summary of key moments (just the relevant ones)
         if selected_moments:
             narrative += "**Key moments:**\n"
@@ -2840,7 +2548,6 @@ Be conversational, honest, and helpful. Let the data guide your insights, but do
                 ply = moment.get("ply", 0)
                 labels = moment.get("labels", [])
                 primary = moment.get("primary_label", "")
-                
                 if primary == "blunder":
                     narrative += f"{i}. Move {ply}: Critical blunder\n"
                 elif primary == "mistake":
@@ -2849,9 +2556,7 @@ Be conversational, honest, and helpful. Let the data guide your insights, but do
                     narrative += f"{i}. Move {ply}: Advantage shifted against you\n"
                 elif "missed_critical_win" in labels:
                     narrative += f"{i}. Move {ply}: Missed winning opportunity\n"
-        
         return narrative
-    
     def _generate_query_driven_narrative(
         self,
         query_intent: str,
@@ -2871,11 +2576,9 @@ Be conversational, honest, and helpful. Let the data guide your insights, but do
         Directly answers the user's question in a natural way.
         """
         narrative = ""
-        
         # Get actual game result from metadata
         actual_result = game_result or (game_metadata.get("result", "") if game_metadata else "")
         termination = (game_metadata.get("termination", "") if game_metadata else "").lower()
-        
         # Normalize result
         if actual_result:
             actual_result_lower = actual_result.lower()
@@ -2895,7 +2598,6 @@ Be conversational, honest, and helpful. Let the data guide your insights, but do
                 is_win = is_loss = is_draw = False
         else:
             is_win = is_loss = is_draw = False
-        
         # Only correct the game result for loss_diagnosis queries
         # (e.g., user asked "why did I lose?" but they actually drew/won)
         # Do NOT show this for blunder_review or general queries
@@ -2908,7 +2610,6 @@ Be conversational, honest, and helpful. Let the data guide your insights, but do
         elif query_intent == "loss_diagnosis" and is_win:
             narrative += f"You didn't lose this game – you **won**!\n\n"
             narrative += "Here's a look at the key moments:\n\n"
-        
         if query_intent == "time_analysis":
             # Sort by time spent
             moments_with_time = []
@@ -2917,9 +2618,7 @@ Be conversational, honest, and helpful. Let the data guide your insights, but do
                 record = next((r for r in ply_records if r.get("ply") == ply), None)
                 if record:
                     moments_with_time.append((moment, record))
-            
             moments_with_time.sort(key=lambda x: x[1].get("time_spent_s", 0), reverse=True)
-            
             if moments_with_time:
                 narrative += f"Here are the moves where you spent the most time:\n\n"
                 for i, (moment, record) in enumerate(moments_with_time[:10], 1):
@@ -2929,7 +2628,6 @@ Be conversational, honest, and helpful. Let the data guide your insights, but do
                     narrative += f"{i}. Move {ply} ({move_san}): {time_spent:.1f} seconds\n"
             else:
                 narrative += "I couldn't find significant time usage data for this game.\n"
-        
         elif query_intent == "blunder_review":
             if len(selected_moments) == 0:
                 narrative += "Great news – you didn't make any blunders in this game!\n"
@@ -2948,7 +2646,6 @@ Be conversational, honest, and helpful. Let the data guide your insights, but do
                     move_san = record.get("san", "?")
                     cp_loss = record.get("cp_loss", 0)
                     narrative += f"{i}. Move {ply} ({move_san}): {cp_loss:.0f}cp loss\n"
-        
         elif query_intent == "best_moves":
             if len(selected_moments) == 0:
                 narrative += "I couldn't identify any standout best moves in this game.\n"
@@ -2960,7 +2657,6 @@ Be conversational, honest, and helpful. Let the data guide your insights, but do
                     move_san = record.get("san", "?")
                     category = record.get("category", "excellent")
                     narrative += f"{i}. Move {ply} ({move_san}): {category}\n"
-        
         elif query_intent == "tactical_moments":
             if len(selected_moments) == 0:
                 narrative += "There weren't any significant tactical moments in this game.\n"
@@ -2972,7 +2668,6 @@ Be conversational, honest, and helpful. Let the data guide your insights, but do
                     move_san = record.get("san", "?")
                     category = record.get("category", "tactical")
                     narrative += f"{i}. Move {ply} ({move_san}): {category}\n"
-        
         elif query_intent == "time_pressure":
             if len(selected_moments) == 0:
                 narrative += "You didn't make any significant errors under time pressure.\n"
@@ -2985,7 +2680,6 @@ Be conversational, honest, and helpful. Let the data guide your insights, but do
                     time_spent = record.get("time_spent_s", 0)
                     cp_loss = record.get("cp_loss", 0)
                     narrative += f"{i}. Move {ply} ({move_san}): {time_spent:.1f}s, {cp_loss:.0f}cp loss\n"
-        
         elif query_intent == "advantage_shifts":
             if len(selected_moments) == 0:
                 narrative += "There weren't significant advantage shifts in this game.\n"
@@ -2996,7 +2690,6 @@ Be conversational, honest, and helpful. Let the data guide your insights, but do
                     record = next((r for r in ply_records if r.get("ply") == ply), {})
                     move_san = record.get("san", "?")
                     narrative += f"{i}. Move {ply} ({move_san}): Advantage shifted\n"
-        
         elif query_intent == "loss_diagnosis":
             # Draw/win cases already handled at the top of function with opening sentence
             if is_draw or is_win:
@@ -3009,7 +2702,6 @@ Be conversational, honest, and helpful. Let the data guide your insights, but do
                         record = next((r for r in ply_records if r.get("ply") == ply), {})
                         move_san = record.get("san", "?")
                         cp_loss = record.get("cp_loss", 0)
-                        
                         if primary == "blunder" or primary == "mistake":
                             narrative += f"{i}. Move {ply} ({move_san}): {primary.title()} ({cp_loss:.0f}cp)\n"
                         elif primary in ["best", "excellent"]:
@@ -3028,7 +2720,6 @@ Be conversational, honest, and helpful. Let the data guide your insights, but do
                     loss_type = loss_diagnosis.get("loss_type", "gradual_decline")
                     detail = loss_diagnosis.get("detail", "")
                     local_termination = game_metadata.get("termination", "").lower() if game_metadata else ""
-                    
                     # Direct answer based on loss type - conversational
                     if loss_type == "single_critical_blunder":
                         blunder_ply = loss_diagnosis.get("blunder_ply") or (loss_diagnosis.get("key_moves", [0])[0] if loss_diagnosis.get("key_moves") else None)
@@ -3058,7 +2749,6 @@ Be conversational, honest, and helpful. Let the data guide your insights, but do
                     else:
                         narrative += f"**The loss was gradual.** {detail}"
                         narrative += " No single move lost the game – it was an accumulation of small inaccuracies.\n\n"
-                
                 # Key moments list for actual loss
                 if selected_moments:
                     narrative += "**Key moments:**\n"
@@ -3069,7 +2759,6 @@ Be conversational, honest, and helpful. Let the data guide your insights, but do
                         record = next((r for r in ply_records if r.get("ply") == ply), {})
                         move_san = record.get("san", "?")
                         cp_loss = record.get("cp_loss", 0)
-                        
                         if primary == "blunder":
                             narrative += f"{i}. Move {ply} ({move_san}): Blunder ({cp_loss:.0f}cp loss)\n"
                         elif primary == "mistake":
@@ -3080,14 +2769,12 @@ Be conversational, honest, and helpful. Let the data guide your insights, but do
                             narrative += f"{i}. Move {ply} ({move_san}): Missed winning opportunity\n"
                         else:
                             narrative += f"{i}. Move {ply} ({move_san}): Key moment\n"
-        
         else:
             # Custom/flexible query - use LLM's narrative focus conversationally
             # Use narrative_focus to guide the opening
             if narrative_focus and not narrative.strip():
                 # LLM provided a focus - use it conversationally
                 narrative += f"{narrative_focus}\n\n"
-            
             if selected_moments:
                 narrative += f"Here are the {len(selected_moments)} key moments:\n\n"
                 for i, moment in enumerate(selected_moments[:15], 1):
@@ -3096,12 +2783,10 @@ Be conversational, honest, and helpful. Let the data guide your insights, but do
                     if not record:
                         # Try to get record from moment itself
                         record = moment.get("record", {})
-                    
                     move_san = record.get("san", "?")
                     category = record.get("category", "")
                     cp_loss = record.get("cp_loss", 0)
                     time_spent = record.get("time_spent_s", 0)
-                    
                     # Build informative line
                     details = []
                     if category:
@@ -3110,14 +2795,11 @@ Be conversational, honest, and helpful. Let the data guide your insights, but do
                         details.append(f"{cp_loss:.0f}cp loss")
                     if time_spent and time_spent > 10:
                         details.append(f"{time_spent:.1f}s")
-                    
                     detail_str = f" ({', '.join(details)})" if details else ""
                     narrative += f"{i}. Move {ply} ({move_san}){detail_str}\n"
             else:
                 narrative += "I couldn't find any moments matching your query.\n"
-        
         return narrative
-    
     def _generate_comprehensive_narrative(
         self,
         summary: Dict,
@@ -3132,21 +2814,17 @@ Be conversational, honest, and helpful. Let the data guide your insights, but do
         Generate comprehensive narrative showing all errors.
         """
         narrative = ""
-        
         if total_games == 1:
             narrative += f"I just finished analyzing your last game on **{platform}** as **{username}**. "
         else:
             narrative += f"I just finished analyzing your last **{total_games} games** on **{platform}** as **{username}**. "
         narrative += "Here's a comprehensive breakdown of all errors.\n\n"
-        
         narrative += f"**All mistakes and blunders ({len(selected_moments)} total):**\n\n"
         for i, moment in enumerate(selected_moments, 1):
             ply = moment.get("ply")
             primary = moment.get("primary_label", "")
             narrative += f"{i}. Move {ply}: {primary}\n"
-        
         return narrative
-    
     def _generate_specific_narrative(
         self,
         summary: Dict,
@@ -3160,20 +2838,16 @@ Be conversational, honest, and helpful. Let the data guide your insights, but do
         Generate narrative for specific queries (e.g., "top 3 moves").
         """
         narrative = ""
-        
         if total_games == 1:
             narrative += f"Based on your query, here's what I found from your last game on **{platform}** as **{username}**.\n\n"
         else:
             narrative += f"Based on your query, here's what I found.\n\n"
-        
         narrative += f"**Selected moments ({len(selected_moments)}):**\n\n"
         for i, moment in enumerate(selected_moments, 1):
             ply = moment.get("ply")
             primary = moment.get("primary_label", "")
             narrative += f"{i}. Move {ply}: {primary}\n"
-        
         return narrative
-    
     def _generate_prioritized_suggestions_with_tags(
         self,
         phase_stats: Dict,
@@ -3184,7 +2858,6 @@ Be conversational, honest, and helpful. Let the data guide your insights, but do
     ) -> list:
         """Generate suggestions prioritizing significant tag weaknesses."""
         suggestions = []
-        
         # Priority 1: Tag-based weakness (if significant)
         for stat in significant_stats[:1]:
             if stat.get("type") == "tag_accuracy":
@@ -3206,7 +2879,6 @@ Be conversational, honest, and helpful. Let the data guide your insights, but do
                                  f"Either study them deeply or avoid creating them unnecessarily."
                     })
                     break
-        
         # Priority 2: Phase weakness
         if phase_stats:
             valid_phases = [(name, data) for name, data in phase_stats.items()
@@ -3219,47 +2891,39 @@ Be conversational, honest, and helpful. Let the data guide your insights, but do
                         'detail': f"At {weakest[1].get('accuracy', 0):.1f}%, this phase is costing you. "
                                  f"Study {weakest[0]} fundamentals and practice key techniques."
                     })
-        
         # Priority 3: General accuracy
         if avg_accuracy < 85 and len(suggestions) < 3:
             suggestions.append({
                 'title': "Reduce tactical errors",
                 'detail': "Focus on calculating candidate moves thoroughly before playing. Aim for 85%+ accuracy."
             })
-        
         # Priority 4: Time management
         if len(suggestions) < 3:
             suggestions.append({
                 'title': "Improve time management",
                 'detail': "Avoid time pressure situations. Budget your clock wisely in the opening and middlegame."
             })
-        
         # Priority 5: Pattern recognition
         if len(suggestions) < 3:
             suggestions.append({
                 'title': "Study tactical patterns",
                 'detail': "Work on recognizing common tactical motifs to improve calculation speed and accuracy."
             })
-        
         return suggestions
-    
     # ========================================================================
     # INVESTIGATION TOOL IMPLEMENTATIONS
     # ========================================================================
-    
     async def _investigate(self, args: Dict, context: Dict) -> Dict:
         """Run a complex multi-step investigation"""
         try:
             from planning_agent import InvestigationPlanner
             from step_executor import StepExecutor
-            
             query = args.get("query", "")
             investigation_type = args.get("investigation_type")
             target_player = args.get("target_player")
             target_event = args.get("target_event")
             platform = args.get("platform")
             username = args.get("username")
-            
             # Build context for planner
             inv_context = {
                 "player": target_player,
@@ -3268,20 +2932,16 @@ Be conversational, honest, and helpful. Let the data guide your insights, but do
                 "username": username,
                 **context
             }
-            
             # Create plan
             planner = InvestigationPlanner(self.openai_client)
             plan = await planner.create_plan(query, inv_context)
-            
             # Execute plan
             executor = StepExecutor(
                 tool_executor=self,
                 openai_client=self.openai_client,
                 engine_queue=self.engine_queue
             )
-            
             result = await executor.execute_plan(plan, inv_context)
-            
             return {
                 "success": result.success,
                 "investigation_type": plan.investigation_type.value,
@@ -3290,63 +2950,49 @@ Be conversational, honest, and helpful. Let the data guide your insights, but do
                 "failed_steps": result.failed_steps,
                 "duration_ms": result.total_duration_ms
             }
-            
         except Exception as e:
             import traceback
             traceback.print_exc()
             return {"error": f"Investigation failed: {str(e)}"}
-    
     async def _web_search(self, args: Dict) -> Dict:
         """Search the web for chess information"""
         try:
             from tools.web_search import web_search
-            
             query = args.get("query", "")
             max_results = args.get("max_results", 5)
             search_filter = args.get("search_filter", "all")
-            
             result = await web_search(
                 query=query,
                 max_results=max_results,
                 search_filter=search_filter
             )
-            
             return result
-            
         except Exception as e:
             return {"error": f"Web search failed: {str(e)}"}
-    
     async def _multi_depth_analyze(self, args: Dict) -> Dict:
         """Analyze a game at multiple depths"""
         try:
             from tools.multi_depth_analysis import multi_depth_analyze
-            
             pgn = args.get("pgn", "")
             depths = args.get("depths", [10, 20, 30])
             focus_side = args.get("focus_side", "both")
-            
             result = await multi_depth_analyze(
                 pgn=pgn,
                 depths=depths,
                 focus_side=focus_side,
                 engine_queue=self.engine_queue
             )
-            
             return result
-            
         except Exception as e:
             return {"error": f"Multi-depth analysis failed: {str(e)}"}
-    
     async def _engine_correlation(self, args: Dict) -> Dict:
         """Calculate engine correlation for a game"""
         try:
             from tools.engine_correlation import engine_correlation
-            
             pgn = args.get("pgn", "")
             depth = args.get("depth", 25)
             top_n = args.get("top_n", 3)
             exclude_book = args.get("exclude_book_moves", 10)
-            
             result = await engine_correlation(
                 pgn=pgn,
                 depth=depth,
@@ -3354,55 +3000,41 @@ Be conversational, honest, and helpful. Let the data guide your insights, but do
                 exclude_book_moves=exclude_book,
                 engine_queue=self.engine_queue
             )
-            
             return result
-            
         except Exception as e:
             return {"error": f"Engine correlation failed: {str(e)}"}
-    
     async def _calculate_baseline(self, args: Dict) -> Dict:
         """Calculate player baseline from games"""
         try:
             from tools.player_baseline import calculate_baseline
-            
             games = args.get("games", [])
             exclude_outliers = args.get("exclude_outliers", True)
-            
             result = await calculate_baseline(
                 games=games,
                 exclude_outliers=exclude_outliers
             )
-            
             return result
-            
         except Exception as e:
             return {"error": f"Baseline calculation failed: {str(e)}"}
-    
     async def _detect_anomalies(self, args: Dict) -> Dict:
         """Detect statistical anomalies in performance"""
         try:
             from tools.anomaly_detection import detect_anomalies
-            
             test_games = args.get("test_games", [])
             baseline = args.get("baseline", {})
             metrics = args.get("metrics")
-            
             result = await detect_anomalies(
                 test_games=test_games,
                 baseline=baseline,
                 metrics=metrics
             )
-            
             return result
-            
         except Exception as e:
             return {"error": f"Anomaly detection failed: {str(e)}"}
-    
     def format_result_for_llm(self, result: Dict, tool_name: str) -> str:
         """Format tool result as text for LLM"""
         if result.get("error"):
             return f"Error: {result['error']}"
-        
         # Format based on tool type
         if tool_name == "analyze_position":
             # Full endpoint response is in endpoint_response
@@ -3410,18 +3042,14 @@ Be conversational, honest, and helpful. Let the data guide your insights, but do
             fen = result.get("fen", "")
             eval_cp = endpoint_data.get("eval_cp", 0)
             mate_in = endpoint_data.get("mate_in")
-            
             # Get side to move
             turn = "White" if " w " in fen else "Black" if " b " in fen else "?"
-            
             # Convert to pawns
             eval_pawns = eval_cp / 100.0
-            
             # Get candidates
             candidates = endpoint_data.get("candidate_moves", [])
             best_move = candidates[0].get("move") if candidates else "No move"
             best_eval = candidates[0].get("eval_cp", 0) / 100.0 if candidates else 0
-            
             # Determine winner
             if eval_cp > 50:
                 winner = f"White is winning by {eval_pawns:.2f} pawns"
@@ -3431,20 +3059,16 @@ Be conversational, honest, and helpful. Let the data guide your insights, but do
                 winner = "Position is equal (±0.00 pawns)"
             else:
                 winner = f"{'White' if eval_cp > 0 else 'Black'} has a small edge ({abs(eval_pawns):.2f} pawns)"
-            
             # Signal frontend to trigger full analysis, but don't show this message
             return "__TRIGGER_ANALYZE_POSITION__"
-        
         elif tool_name == "review_full_game":
             summary = result.get("summary", {})
             return f"Game reviewed: {summary.get('total_moves', 0)} moves, {summary.get('opening', 'Unknown')} opening, {summary.get('key_points', 0)} key moments identified. Character: {summary.get('game_character', 'unknown')}."
-        
         elif tool_name == "fetch_and_review_games":
             if result.get("error") == "username_required":
                 return result.get("message", "Username required")
             elif result.get("error"):
                 return f"Error: {result.get('message', result.get('error'))}"
-            
             games_analyzed = result.get('games_analyzed', 0)
             avg_acc = _safe_float((result.get('stats', {}) or {}).get('avg_accuracy'), 0.0)
             return f"Personal review complete: Analyzed {games_analyzed} games from {result.get('platform', 'platform')}, average accuracy {avg_acc:.1f}%. Displaying narrative and charts in chat."
@@ -3457,38 +3081,31 @@ Be conversational, honest, and helpful. Let the data guide your insights, but do
             total = result.get("total_candidates", 0)
             selected_flat = result.get("selected_flat") or []
             return f"Selected {len(selected_flat)} game(s) from {total} candidate games. Displaying game list in chat."
-        
         elif tool_name == "generate_training_session":
             return f"{result.get('message', 'Training generated')}. Created {result.get('drills_generated', 0)} drills."
-        
         elif tool_name == "setup_position":
             fen = result.get("fen", "Position")
             pgn = result.get("pgn", "")
             orientation = result.get("orientation", "white")
             annotations = result.get("move_annotations", {})
-            
             msg = f"Position displayed (board oriented from {orientation}'s perspective)"
             if pgn:
                 msg += f". Game loaded with {len(pgn.split('.')) - 1} moves"
             if annotations:
                 msg += f". {len(annotations)} moves have annotations"
             return msg
-        
         # Investigation tools
         elif tool_name == "investigate":
             inv_type = result.get("investigation_type", "investigation")
             steps = result.get("steps_completed", 0)
             synthesis = result.get("synthesis", "")
-            
             msg = f"Investigation complete ({inv_type}): {steps} analysis steps run.\n\n"
             if synthesis:
                 msg += synthesis
             return msg
-        
         elif tool_name == "web_search":
             results = result.get("results", [])
             context = result.get("news_context", "")
-            
             if results:
                 msg = f"Found {len(results)} results:\n"
                 for r in results[:3]:
@@ -3497,52 +3114,41 @@ Be conversational, honest, and helpful. Let the data guide your insights, but do
                     msg += f"\nContext: {context[:300]}..."
                 return msg
             return "No results found."
-        
         elif tool_name == "multi_depth_analyze":
             comparison = result.get("depth_comparison", [])
             indicators = result.get("suspicion_indicators", {})
-            
             msg = "Multi-depth analysis:\n"
             for d in comparison:
                 msg += f"- Depth {d['depth']}: {d['accuracy']:.1f}% accuracy, {d['avg_cp_loss']:.1f} avg CP loss\n"
-            
             if any(indicators.values()):
                 msg += "\nFlags: "
                 flags = [k for k, v in indicators.items() if v]
                 msg += ", ".join(flags)
             return msg
-        
         elif tool_name == "engine_correlation":
             top1 = result.get("top1_match", 0)
             top3 = result.get("top3_match", 0)
             level = result.get("suspicion_level", "unknown")
-            
             return f"Engine correlation: {top1:.1f}% top-1 match, {top3:.1f}% top-3 match. Suspicion level: {level}."
-        
         elif tool_name == "calculate_baseline":
             acc = result.get("accuracy", {})
             games = result.get("games_analyzed", 0)
-            
             if acc:
                 return f"Baseline calculated from {games} games: {acc.get('mean', 0):.1f}% accuracy (±{acc.get('std', 0):.1f})"
             return f"Baseline calculated from {games} games."
-        
         elif tool_name == "detect_anomalies":
             score = result.get("anomaly_score", 0)
             flags = result.get("flags", [])
             interpretation = result.get("interpretation", "")
-            
             msg = f"Anomaly score: {score:.2f}\n"
             if flags:
                 msg += f"Flags: {', '.join(flags)}\n"
             if interpretation:
                 msg += interpretation
             return msg
-        
         elif tool_name == "analyze_move":
             # Get all data from endpoint_response
             endpoint_response = result.get("endpoint_response", {})
-            
             # Core metrics
             move_played = result.get("move") or result.get("move_san") or endpoint_response.get("move_played") or endpoint_response.get("move_san", "unknown")
             is_best = result.get("is_best_move") or endpoint_response.get("is_best_move", False)
@@ -3551,12 +3157,10 @@ Be conversational, honest, and helpful. Let the data guide your insights, but do
             eval_before = endpoint_response.get("eval_before_cp", 0)
             eval_after = endpoint_response.get("eval_after_cp", 0)
             best_move = endpoint_response.get("best_move_san") or endpoint_response.get("best_move", "")
-            
             # Extract PV moves from analysis or confidence data
             def extract_pv_san(analysis_obj_key, fen_before):
                 """Extract PV in SAN format from analysis objects"""
                 pv_san = None
-                
                 # Try to get PV from analysis candidate_moves (most direct)
                 if analysis and isinstance(analysis, dict):
                     af_obj = analysis.get(analysis_obj_key, {})
@@ -3566,7 +3170,6 @@ Be conversational, honest, and helpful. Let the data guide your insights, but do
                             pv_san = candidates[0].get("pv_san", "")
                             if pv_san:
                                 return pv_san
-                
                 # Fallback: try to get PV from confidence data and convert UCI to SAN
                 if confidence and isinstance(confidence, dict):
                     conf_key = "played_move" if analysis_obj_key == "af_played" else "best_move"
@@ -3594,20 +3197,16 @@ Be conversational, honest, and helpful. Let the data guide your insights, but do
                                             pv_san = " ".join(pv_san_list)
                                     except Exception as e:
                                         pass
-                
                 return pv_san
-            
             # Get PV for played move
             analysis = endpoint_response.get("analysis", {})
             confidence = endpoint_response.get("confidence", {})
             fen_before = endpoint_response.get("fen_before", "")
             played_pv_san = extract_pv_san("af_played", fen_before)
-            
             # Get PV for best move (if not best move)
             best_pv_san = None
             if not is_best:
                 best_pv_san = extract_pv_san("af_best", fen_before)
-            
             # CLAIM LINE: Significant tag deltas from compare_tags_for_move_analysis
             played_move_description = endpoint_response.get("played_move_description", {})
             claim_line = {
@@ -3617,7 +3216,6 @@ Be conversational, honest, and helpful. Let the data guide your insights, but do
                 "summary": played_move_description.get("summary", ""),
                 "principal_variation": played_pv_san  # PV that supports the claim line
             }
-            
             # Best move description (if not best move)
             best_move_description = endpoint_response.get("best_move_description", {}) if not is_best else None
             if best_move_description:
@@ -3628,12 +3226,10 @@ Be conversational, honest, and helpful. Let the data guide your insights, but do
                     "summary": best_move_description.get("summary", ""),
                     "principal_variation": best_pv_san  # PV for best move
                 }
-            
             # Additional context
             opening_name = endpoint_response.get("opening_name", "")
             is_theory = endpoint_response.get("is_theory", False)
             threat_info = endpoint_response.get("played_move_threat_category") or endpoint_response.get("played_move_threat_description", "")
-            
             # Build comprehensive data structure - let LLM format based on system_prompt_additions
             formatted_data = {
                 "move": move_played,
@@ -3654,14 +3250,11 @@ Be conversational, honest, and helpful. Let the data guide your insights, but do
                 },
                 "threat": threat_info if threat_info else None
             }
-            
             # Return as JSON - LLM will format based on system_prompt_additions
             import json
             return json.dumps(formatted_data, indent=2)
-        
         else:
             return json.dumps(result, indent=2)
-    
     def _set_ai_game(self, args: Dict, context: Dict) -> Dict:
         """
         Set AI game mode. This tool just returns a UI command that will be handled by the frontend.
@@ -3670,11 +3263,9 @@ Be conversational, honest, and helpful. Let the data guide your insights, but do
         active = args.get("active", False)
         ai_side = args.get("ai_side", "auto")
         make_move_now = args.get("make_move_now", False)
-        
         # Normalize ai_side: "auto" -> null for frontend
         if ai_side == "auto":
             ai_side = None
-        
         # Return a result that includes a UI command
         # The task controller will extract this and add it to ui_commands
         return {
@@ -3691,7 +3282,6 @@ Be conversational, honest, and helpful. Let the data guide your insights, but do
                 }
             }
         }
-    
     async def _add_personal_review_graph(self, args: Dict, context: Dict) -> Dict:
         """
         Add a personal review graph to the chat.
@@ -3703,14 +3293,11 @@ Be conversational, honest, and helpful. Let the data guide your insights, but do
             build_series, assign_color
         )
         from profile_analytics.graph_data import build_graph_game_point
-        
         user_id = context.get("user_id")
         if not user_id:
             return {"error": "User ID not found in context"}
-        
         if not self.supabase_client:
             return {"error": "Database client not available"}
-        
         # Get tool arguments
         data_type = args.get("data_type")
 
@@ -3722,7 +3309,6 @@ Be conversational, honest, and helpful. Let the data guide your insights, but do
         grouping = args.get("grouping", "game")
         x_range = args.get("x_axis_range")
         color = args.get("color")
-        
         # Fetch game data
         limit = 60
         try:
@@ -3745,7 +3331,6 @@ Be conversational, honest, and helpful. Let the data guide your insights, but do
                 games_data = self.supabase_client._execute_query(query, (user_id, limit))
             else:
                 games_data = []
-            
             # If no pre-computed data, fetch games and build points
             if not games_data:
                 games = self.supabase_client.get_active_reviewed_games(
@@ -3753,17 +3338,14 @@ Be conversational, honest, and helpful. Let the data guide your insights, but do
                 )
                 if not games:
                     return {"error": "No analyzed games found for user"}
-                
                 # Sort by date
                 def _date_key(g):
                     gd = g.get("game_date")
                     if isinstance(gd, str):
                         return gd
                     return ""
-                
                 games_sorted = sorted(games, key=_date_key)
                 games_data = [build_graph_game_point(g, idx) for idx, g in enumerate(games_sorted)]
-            
             # Format games data
             games = []
             for idx, point in enumerate(games_data):
@@ -3780,16 +3362,13 @@ Be conversational, honest, and helpful. Let the data guide your insights, but do
                     "time_bucket_accuracy": point.get("time_bucket_accuracy") or {},
                     "tag_transitions": point.get("tag_transitions") or {"gained": {}, "lost": {}},
                 })
-            
             # Apply x-axis range filter if provided
             if x_range:
                 start = x_range.get("start_game", 0)
                 end = x_range.get("end_game", len(games))
                 games = games[start:end]
-            
             if not games:
                 return {"error": "No games in specified range"}
-            
             # Group games based on grouping mode
             if grouping == "game":
                 time_points = group_by_game(games)
@@ -3799,7 +3378,6 @@ Be conversational, honest, and helpful. Let the data guide your insights, but do
                 time_points = group_by_batch5(games)
             else:
                 return {"error": f"Unknown grouping mode: {grouping}"}
-            
             # Build series entry
             series_id = str(uuid.uuid4())
             series_entry = {
@@ -3809,13 +3387,10 @@ Be conversational, honest, and helpful. Let the data guide your insights, but do
                 "color": color or assign_color(0),
                 "params": params
             }
-            
             # Build series
             built_series = build_series(series_entry, time_points)
-            
             # Build x labels
             x_labels = [p.get("label", "") for p in time_points]
-            
             # Return graph data structure
             graph_id = str(uuid.uuid4())
             return {
@@ -3830,7 +3405,6 @@ Be conversational, honest, and helpful. Let the data guide your insights, but do
                 "xLabels": x_labels,
                 "grouping": grouping,
             }
-            
         except Exception as e:
             import traceback
             print(f"   ❌ Error building graph: {e}")
@@ -3844,35 +3418,28 @@ Be conversational, honest, and helpful. Let the data guide your insights, but do
         """
         import uuid
         from profile_analytics.graph_utils import group_by_game, group_by_day, group_by_batch5, assign_color
-        
         user_id = context.get("user_id") if context else None
         if not user_id:
             return {"error": "user_id required in context"}
         supabase_client = self.supabase_client or self.supabase
         if not supabase_client:
             return {"error": "Database client not available"}
-        
         # Get habits data
         from personal_stats_manager import PersonalStatsManager
         stats_manager = PersonalStatsManager(supabase_client)
         habits_data = stats_manager.get_habits_for_frontend(user_id)
-        
         habits = habits_data.get("habits", [])
         if not habits:
             return {"error": "No habits data available"}
-        
         # Sort by extremeness (absolute significance) - highest first
         habits_sorted = sorted(habits, key=lambda h: abs(h.get("extremeness", 0)), reverse=True)
-        
         # Get top N habits (default 3, max 5)
         top_n = min(args.get("top_habits", 3), 5)
         top_habits = habits_sorted[:top_n]
-        
         # Get recent games for win rate
         games = supabase_client.get_active_reviewed_games(user_id, limit=30)
         if not games:
             return {"error": "No games available"}
-        
         # Group games
         grouping = args.get("grouping", "game")
         if grouping == "day":
@@ -3884,10 +3451,8 @@ Be conversational, honest, and helpful. Let the data guide your insights, but do
         else:
             from profile_analytics.graph_utils import group_by_game
             time_points = group_by_game(games)
-        
         # Build series for win rate
         series_list = []
-        
         # Win rate series
         win_rate_values = []
         for point in time_points:
@@ -3895,7 +3460,6 @@ Be conversational, honest, and helpful. Let the data guide your insights, but do
             total = len(point_games)
             wins = sum(1 for g in point_games if str(g.get("result", "")).lower() == "win")
             win_rate_values.append((wins / total * 100) if total > 0 else None)
-        
         series_list.append({
             "id": str(uuid.uuid4()),
             "name": "Win Rate",
@@ -3903,7 +3467,6 @@ Be conversational, honest, and helpful. Let the data guide your insights, but do
             "rawValues": win_rate_values,
             "normalizedValues": win_rate_values,  # Already 0-100
         })
-        
         # Build series for each top habit
         # Collect all unique dates from games
         all_dates = set()
@@ -3913,20 +3476,15 @@ Be conversational, honest, and helpful. Let the data guide your insights, but do
                 game_date = game_date[:10]
             if game_date:
                 all_dates.add(game_date)
-        
         sorted_dates = sorted(all_dates)
-        
         # For each habit, build accuracy series over time
         colors = ["#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#06b6d4"]  # Green, amber, red, purple, cyan
-        
         for idx, habit in enumerate(top_habits):
             habit_name = habit.get("display_name", habit.get("name", "Unknown"))
             habit_key = habit.get("name", "")
             history = habit.get("history", [])
-            
             # Create map of date -> accuracy
             history_map = {entry.get("game_date", ""): entry.get("accuracy") for entry in history}
-            
             # Build values for each time point
             habit_values = []
             for point in time_points:
@@ -3941,12 +3499,10 @@ Be conversational, honest, and helpful. Let the data guide your insights, but do
                         acc = history_map[game_date]
                         if acc is not None:
                             point_accuracies.append(acc)
-                
                 if point_accuracies:
                     habit_values.append(sum(point_accuracies) / len(point_accuracies))
                 else:
                     habit_values.append(None)
-            
             series_list.append({
                 "id": str(uuid.uuid4()),
                 "name": habit_name,
@@ -3954,10 +3510,8 @@ Be conversational, honest, and helpful. Let the data guide your insights, but do
                 "rawValues": habit_values,
                 "normalizedValues": habit_values,  # Accuracy is already 0-100
             })
-        
         # Build x labels
         x_labels = [p.get("label", "") for p in time_points]
-        
         graph_id = str(uuid.uuid4())
         return {
             "graph_id": graph_id,
