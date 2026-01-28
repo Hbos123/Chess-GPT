@@ -2177,9 +2177,9 @@ Return ONLY valid JSON in this exact format:
                 context += "\n\nPerformance by Color:"
 
                 if white_acc is not None:
-                context += f"\n- White: {_safe_float(white_acc, 0.0):.1f}% accuracy ({white_games} games)""
+                context += f"\n- White: {_safe_float(white_acc, 0.0):.1f}% accuracy ({white_games} games)"
                 if black_acc is not None:
-                context += f"\n- Black: {_safe_float(black_acc, 0.0):.1f}% accuracy ({black_games} games)""
+                context += f"\n- Black: {_safe_float(black_acc, 0.0):.1f}% accuracy ({black_games} games)"
             
             # Add opening performance if available
             if opening_performance_data:
