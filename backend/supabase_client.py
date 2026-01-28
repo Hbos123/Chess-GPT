@@ -851,6 +851,11 @@ class SupabaseClient:
 
             return result.data if result.data else []
         except Exception as e:
+            error_msg = str(e)
+            # On timeout, return empty list to avoid blocking the request
+            if "timeout" in error_msg.lower() or "ReadTimeout" in error_msg:
+                print(f"[supabase] Timeout fetching games for overview snapshot (user_id={user_id[:8]}...), returning empty list")
+                return []
             return self._handle_supabase_error(e, "fetching overview snapshot games", [])
     
     def get_active_reviewed_games(self, user_id: str, limit: int = 30, include_full_review: bool = False, include_compressed: bool = False) -> List[Dict]:
