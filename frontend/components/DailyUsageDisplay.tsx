@@ -92,28 +92,6 @@ export default function DailyUsageDisplay({ compact = false }: DailyUsageDisplay
         <div style={{ marginBottom: '6px', fontWeight: 600, color: 'var(--text-primary)' }}>
           Daily Usage
         </div>
-        {usage.messages && (
-          <div style={{ marginBottom: '4px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '2px' }}>
-              <span>Messages:</span>
-              <strong>{usage.messages.remaining !== undefined ? usage.messages.remaining : usage.messages.limit - usage.messages.used} remaining</strong>
-            </div>
-            <div style={{
-              width: '100%',
-              height: '4px',
-              backgroundColor: 'var(--bg-secondary)',
-              borderRadius: '2px',
-              overflow: 'hidden'
-            }}>
-              <div style={{
-                height: '100%',
-                width: `${getPercentage(usage.messages.used, usage.messages.limit)}%`,
-                backgroundColor: getColor(usage.messages.used, usage.messages.limit),
-                transition: 'width 0.2s ease'
-              }} />
-            </div>
-          </div>
-        )}
         {usage.tokens && (
           <div style={{ marginBottom: '4px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '2px' }}>
@@ -211,28 +189,6 @@ export default function DailyUsageDisplay({ compact = false }: DailyUsageDisplay
       <h3 style={{ margin: '0 0 12px 0', fontSize: '16px', fontWeight: 600 }}>
         Daily Usage
       </h3>
-      {usage.messages && (
-        <div style={{ marginBottom: '12px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px', fontSize: '14px' }}>
-            <span>Messages</span>
-            <strong>{usage.messages.remaining !== undefined ? usage.messages.remaining : usage.messages.limit - usage.messages.used} remaining</strong>
-          </div>
-          <div style={{
-            width: '100%',
-            height: '6px',
-            backgroundColor: 'var(--bg-primary)',
-            borderRadius: '3px',
-            overflow: 'hidden'
-          }}>
-            <div style={{
-              height: '100%',
-              width: `${getPercentage(usage.messages.used, usage.messages.limit)}%`,
-              backgroundColor: getColor(usage.messages.used, usage.messages.limit),
-              transition: 'width 0.2s ease'
-            }} />
-          </div>
-        </div>
-      )}
       {usage.tokens && (
         <div style={{ marginBottom: '12px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px', fontSize: '14px' }}>

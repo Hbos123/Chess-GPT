@@ -3426,13 +3426,16 @@ async def check_limits(request: CheckLimitsRequest, req: Request):
             user_id, ip_address, tier_info, estimated_tokens=request.estimated_tokens
         )
         if not token_allowed:
+            # Include tier_id in response for frontend to customize message
+            token_info_with_tier = token_info.copy() if token_info else {}
+            token_info_with_tier["tier_id"] = tier_info.get("tier_id", "unpaid")
             return JSONResponse(
                 status_code=429,
                 content={
                     "allowed": False,
                     "error": "token_limit",
                     "message": token_error,
-                    "info": token_info,
+                    "info": token_info_with_tier,
                     "type": "token_limit"
                 }
             )

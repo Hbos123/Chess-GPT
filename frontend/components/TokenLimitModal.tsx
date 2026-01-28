@@ -25,42 +25,61 @@ export default function TokenLimitModal({ onClose, limitInfo, onOpenProfile }: T
   };
 
   const getUpgradeMessage = () => {
-    const nextStep = limitInfo.info.next_step;
     const tierId = limitInfo.info.tier_id || 'unpaid';
+    const isLoggedIn = tierId !== 'unpaid' && !limitInfo.info.next_step?.includes('sign');
     
-    if (nextStep === 'sign_in') {
+    // Unlogged user
+    if (!isLoggedIn || tierId === 'unpaid') {
       return {
-        title: 'Sign In Required',
-        message: 'Sign in to get more daily messages and tokens.',
-        action: 'Sign In',
+        title: 'Usage Limit Hit',
+        message: 'Sign in or make an account to keep on trying this out.',
+        action: 'Sign In / Sign Up',
         actionUrl: '/auth',
         useModal: false
       };
-    } else if (nextStep === 'upgrade_lite') {
+    }
+    
+    // Signed in unpaid user
+    if (tierId === 'unpaid') {
       return {
-        title: 'Upgrade to Lite',
-        message: 'Upgrade to Lite tier for 15 messages/day and 43k tokens/day.',
-        action: 'Upgrade',
-        actionUrl: null,
-        useModal: true
-      };
-    } else if (nextStep === 'upgrade') {
-      return {
-        title: 'Upgrade Your Plan',
-        message: 'Upgrade your plan to get more daily messages and tokens.',
-        action: 'Upgrade',
-        actionUrl: null,
-        useModal: true
-      };
-    } else {
-      return {
-        title: 'Limit Reached',
-        message: 'You\'ve reached your daily limit. Try again tomorrow or upgrade for more.',
+        title: 'Limit Hit',
+        message: 'Upgrade to a paid plan to get more daily tokens and unlock premium features.',
         action: 'View Plans',
         actionUrl: null,
         useModal: true
       };
     }
+    
+    // Lite tier
+    if (tierId === 'lite') {
+      return {
+        title: 'Limit Hit',
+        message: 'Upgrade to Regular tier for more daily tokens and enhanced features.',
+        action: 'Upgrade',
+        actionUrl: null,
+        useModal: true
+      };
+    }
+    
+    // Starter tier
+    if (tierId === 'starter') {
+      return {
+        title: 'Limit Hit',
+        message: 'Consider moving to Full tier for unlimited tokens and all premium features.',
+        action: 'View Plans',
+        actionUrl: null,
+        useModal: true
+      };
+    }
+    
+    // Default fallback
+    return {
+      title: 'Limit Reached',
+      message: 'You\'ve reached your daily limit. Try again tomorrow or upgrade for more.',
+      action: 'View Plans',
+      actionUrl: null,
+      useModal: true
+    };
   };
 
   const upgradeInfo = getUpgradeMessage();
