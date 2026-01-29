@@ -246,18 +246,7 @@ export default function OverviewTab({ data, profileStatus, onOpenPersonalReview,
   const targetGames = profileStatus?.target_games || 60;
   const progressPercent = Math.min((activeGames / targetGames) * 100, 100);
   
-  // Log target games for debugging
-  useEffect(() => {
-    if (profileStatus?.target_games !== undefined) {
-      console.log('[OverviewTab] Target games from profileStatus:', {
-        target_games: profileStatus.target_games,
-        activeGames,
-        games_indexed: profileStatus.games_indexed,
-        deep_analyzed_games: profileStatus.deep_analyzed_games,
-        state: profileStatus.state
-      });
-    }
-  }, [profileStatus?.target_games, activeGames, profileStatus?.games_indexed, profileStatus?.deep_analyzed_games, profileStatus?.state]);
+  // Reduced logging - removed verbose target games logging
   
   // Get games being analyzed right now
   const gamesIndexed = profileStatus?.games_indexed || 0;
