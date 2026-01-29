@@ -2,35 +2,35 @@
 // Simple web worker wrapper around stockfish.wasm
 // Uses stockfish from public folder to avoid Next.js module resolution issues
 
-let engine: any = null;
+let stockfishWorker: Worker | null = null;
 let engineReady = false;
+let readyQueue: string[] = [];
 
-async function ensureEngine() {
-  if (engine && engineReady) return;
+function initStockfish() {
+  if (stockfishWorker) return;
   
   try {
-    // Use stockfish from public folder - load as a Worker
-    // The stockfish.js file in public/stockfish/ handles WASM loading
-    const stockfishWorker = new Worker('/stockfish/stockfish.js', { type: 'classic' });
-    
-    engine = {
-      postMessage: (msg: string) => {
-        stockfishWorker.postMessage(msg);
-      },
-      onmessage: null as ((line: any) => void) | null,
-      terminate: () => {
-        stockfishWorker.terminate();
-      }
-    };
+    // Use stockfish-lite.js from public folder (same as StockfishAnalysis component)
+    stockfishWorker = new Worker('/stockfish-lite.js', { type: 'classic' });
     
     stockfishWorker.onmessage = (e: MessageEvent) => {
       const text = typeof e.data === 'string' ? e.data : String(e.data || '');
+      if (!text || text.trim() === '') return;
+      
+      // Handle ready response
       if (text.trim() === 'readyok') {
         engineReady = true;
+        // Process queued messages
+        readyQueue.forEach(msg => {
+          if (stockfishWorker) stockfishWorker.postMessage(msg);
+        });
+        readyQueue = [];
         (self as any).postMessage({ type: 'ready' });
-      } else if (engine.onmessage) {
-        engine.onmessage({ data: text });
+        return;
       }
+      
+      // Forward Stockfish output to parent
+      (self as any).postMessage({ type: 'sf', data: text });
     };
     
     stockfishWorker.onerror = (e: ErrorEvent) => {
@@ -50,15 +50,17 @@ async function ensureEngine() {
 self.onmessage = async (ev: MessageEvent) => {
   const msg = ev.data;
   if (msg?.cmd === 'init') {
-    await ensureEngine();
+    initStockfish();
     return;
   }
   if (msg?.cmd === 'send') {
-    if (!engine || !engineReady) {
-      await ensureEngine();
+    if (!stockfishWorker) {
+      initStockfish();
     }
-    if (engine && engine.postMessage) {
-      engine.postMessage(msg.data);
+    if (!engineReady) {
+      readyQueue.push(msg.data);
+    } else if (stockfishWorker) {
+      stockfishWorker.postMessage(msg.data);
     }
   }
 };
