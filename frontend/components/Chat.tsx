@@ -26,7 +26,7 @@ interface ChatProps {
   onReturnToMainLine?: () => void;
   isAnalyzing?: boolean;  // Block input while analyzing
   tokenUsage?: {
-    messages?: { used: number; limit: number };
+    messages?: { used: number; limit: number | string };
     tokens?: { used: number; limit: number };
   };
 }

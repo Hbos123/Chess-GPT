@@ -89,7 +89,7 @@ interface ConversationProps {
   onPromoteVariation?: (node: MoveNode) => void;
   onAddComment?: (node: MoveNode, comment: string) => void;
   tokenUsage?: {
-    messages?: { used: number; limit: number };
+    messages?: { used: number; limit: number | string };
     tokens?: { used: number; limit: number };
   };
 }
