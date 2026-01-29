@@ -2412,7 +2412,8 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
       // Get the first linked account to use for analysis
       const firstAccount = profilePreferences.accounts?.[0];
       if (firstAccount && firstAccount.username) {
-        const platform = firstAccount.platform === "chess.com" ? "chess.com" : "lichess";
+        // Normalize platform: ProfileAccount uses "chesscom" but frontend analysis expects "chess.com"
+        const platform = firstAccount.platform === "chesscom" ? "chess.com" : "lichess";
         
         console.log('[AutoAnalysis] 🚀 Starting frontend analysis automatically', {
           username: firstAccount.username,
