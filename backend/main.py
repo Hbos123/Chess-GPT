@@ -7698,11 +7698,22 @@ async def profile_overview(user_id: str):
         tier_info = {}
         if supabase_client and user_id:
             tier_info = supabase_client.get_subscription_overview(user_id, use_cache=True)
+            print(f"📊 [PROFILE_OVERVIEW] Tier info for user {user_id}: {tier_info}")
         
         tier = tier_info.get("tier", {}) if tier_info else {}
         max_storage = tier.get("max_games_storage", 60)  # Default to 60 if no tier
+        tier_id = tier_info.get("tier_id", "unknown") if tier_info else "unknown"
+        
         # Use max_games_storage as target, but cap at 60 for rolling window logic
         target_games = min(max_storage, 60) if max_storage > 0 else 60
+        
+        print(f"🎯 [PROFILE_OVERVIEW] Target games calculation for user {user_id}:")
+        print(f"   - Tier ID: {tier_id}")
+        print(f"   - Max storage from tier: {max_storage}")
+        print(f"   - Calculated target_games: {target_games}")
+        print(f"   - Active games count: {active_games_count}")
+        print(f"   - Games indexed: {full_status.get('games_indexed', 0)}")
+        print(f"   - Deep analyzed games: {full_status.get('deep_analyzed_games', 0)}")
         
         status = {
             "state": full_status.get("state", "idle"),
@@ -7715,6 +7726,8 @@ async def profile_overview(user_id: str):
             "background_active": full_status.get("background_active", False),
             "next_poll_at": full_status.get("next_poll_at"),
         }
+        
+        print(f"📤 [PROFILE_OVERVIEW] Returning status with target_games={target_games} for user {user_id}")
     except Exception:
         status = _default_profile_status()
     try:

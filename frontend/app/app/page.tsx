@@ -2369,25 +2369,45 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
   }, [user?.id, profilePreferences?.accounts?.length]); // Only run when accounts change
 
   // Auto-trigger frontend analysis when games are indexed but not analyzed
+  const analysisTriggeredRef = useRef(false);
   useEffect(() => {
-    if (!user?.id || !profilePreferences?.accounts?.length) return;
+    if (!user?.id || !profilePreferences?.accounts?.length) {
+      analysisTriggeredRef.current = false;
+      return;
+    }
     
     // Check if we have indexed games but no analyzed games
     const hasIndexedGames = (profileStatus?.games_indexed || 0) > 0;
     const hasAnalyzedGames = (profileStatus?.deep_analyzed_games || 0) > 0;
     const isIdle = profileStatus?.state === 'idle';
+    const targetGames = profileStatus?.target_games || 60;
+    
+    console.log('[AutoAnalysis] Checking if frontend analysis should trigger', {
+      userId: user.id,
+      hasIndexedGames,
+      indexed: profileStatus?.games_indexed,
+      hasAnalyzedGames,
+      analyzed: profileStatus?.deep_analyzed_games,
+      isIdle,
+      targetGames,
+      alreadyTriggered: analysisTriggeredRef.current
+    });
     
     // If we have indexed games but no analyzed games, and we're idle, log for now
     // Frontend analysis will be triggered manually via PersonalReview component
-    if (hasIndexedGames && !hasAnalyzedGames && isIdle) {
-      console.log('[AutoAnalysis] Games indexed but not analyzed', {
+    if (hasIndexedGames && !hasAnalyzedGames && isIdle && !analysisTriggeredRef.current) {
+      console.log('[AutoAnalysis] ✅ Games indexed but not analyzed - ready for frontend analysis', {
         indexed: profileStatus?.games_indexed,
         analyzed: profileStatus?.deep_analyzed_games,
-        target: profileStatus?.target_games,
+        target: targetGames,
         message: 'Open Personal Review to analyze games'
       });
+      analysisTriggeredRef.current = true; // Prevent repeated logs
+    } else if (hasAnalyzedGames) {
+      // Reset if games get analyzed
+      analysisTriggeredRef.current = false;
     }
-  }, [user?.id, profileStatus?.games_indexed, profileStatus?.deep_analyzed_games, profileStatus?.state]);
+  }, [user?.id, profileStatus?.games_indexed, profileStatus?.deep_analyzed_games, profileStatus?.state, profileStatus?.target_games]);
 
   useEffect(() => {
     if (user && showAuthModal) {

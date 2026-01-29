@@ -380,30 +380,42 @@ class ProfileIndexingManager:
 
         async with self._lock:
             # Check cooldown to prevent rapid duplicate requests
-            import time
             last_start = self._last_indexing_start.get(user_id, 0)
-            time_since_last = time.time() - last_start
+            time_since_last = current_time - last_start
+            print(f"⏱️ [START_INDEXING] Cooldown check for user {user_id}: {time_since_last:.1f}s since last start (cooldown: {self._indexing_cooldown_seconds}s)")
+            
             if time_since_last < self._indexing_cooldown_seconds:
                 print(f"⏸️ [START_INDEXING] Cooldown active for user {user_id} ({time_since_last:.1f}s since last start), skipping duplicate request")
                 return
             
             existing_task = self._tasks.get(user_id)
-            if existing_task and not existing_task.done():
-                # Check if task is actively running (not just queued)
-                status = self._status.get(user_id)
-                if status and status.state in ("fetching", "indexing", "analyzing", "reviewing"):
-                    print(f"⏸️ [START_INDEXING] Indexing already in progress for user {user_id} (state: {status.state}), skipping duplicate request")
-                    return
-                print(f"🔄 [START_INDEXING] Cancelling existing task for user {user_id}")
-                existing_task.cancel()
-                # Wait a moment for cancellation to propagate
-                try:
-                    await asyncio.wait_for(existing_task, timeout=0.1)
-                except (asyncio.CancelledError, asyncio.TimeoutError):
-                    pass
+            if existing_task:
+                task_done = existing_task.done()
+                print(f"🔍 [START_INDEXING] Existing task check for user {user_id}: done={task_done}")
+                
+                if not task_done:
+                    # Check if task is actively running (not just queued)
+                    status = self._status.get(user_id)
+                    current_state = status.state if status else "unknown"
+                    print(f"📊 [START_INDEXING] Current status state for user {user_id}: {current_state}")
+                    
+                    if status and current_state in ("fetching", "indexing", "analyzing", "reviewing"):
+                        print(f"⏸️ [START_INDEXING] Indexing already in progress for user {user_id} (state: {current_state}), skipping duplicate request")
+                        return
+                    
+                    print(f"🔄 [START_INDEXING] Cancelling existing task for user {user_id} (state was: {current_state})")
+                    existing_task.cancel()
+                    # Wait a moment for cancellation to propagate
+                    try:
+                        await asyncio.wait_for(existing_task, timeout=0.1)
+                        print(f"✅ [START_INDEXING] Existing task cancelled for user {user_id}")
+                    except (asyncio.CancelledError, asyncio.TimeoutError):
+                        print(f"⚠️ [START_INDEXING] Task cancellation timeout/error for user {user_id}")
+                        pass
             
             # Record when indexing starts
-            self._last_indexing_start[user_id] = time.time()
+            self._last_indexing_start[user_id] = current_time
+            print(f"📝 [START_INDEXING] Recorded start time for user {user_id}: {current_time}")
             
             print(f"🚀 [START_INDEXING] Creating new indexing task for user {user_id}")
             task = asyncio.create_task(
@@ -414,7 +426,7 @@ class ProfileIndexingManager:
                 )
             )
             self._tasks[user_id] = task
-            print(f"✅ [START_INDEXING] Task created and stored for user {user_id}")
+            print(f"✅ [START_INDEXING] Task created and stored for user {user_id}, task_id={id(task)}")
 
     async def _run_indexing(
         self,
