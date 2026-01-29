@@ -100,6 +100,8 @@ export default function ProfileDashboard({ onClose, initialTab = 'overview', onC
     completed_accounts: 2,
     total_games_estimate: 247,
     games_indexed: 247,
+    deep_analyzed_games: 0,
+    target_games: 5, // Default fallback - will be overridden by real data
     progress_percent: 100,
     started_at: "2026-01-15T10:00:00Z",
     finished_at: "2026-01-15T10:45:00Z",
@@ -125,8 +127,6 @@ export default function ProfileDashboard({ onClose, initialTab = 'overview', onC
   const [patternHistory, setPatternHistory] = useState<{current: any[], historical: any[]}>(DUMMY_PATTERN_HISTORY);
   const backendBase = getBackendBase();
 
-  // TEMPORARY: Comment out all fetch logic - UNCOMMENT AFTER FORMATTING IS DONE
-  /*
   // Load profile status to get analyzed games count - poll more frequently when analyzing
   useEffect(() => {
     if (!user?.id) return;
@@ -141,6 +141,15 @@ export default function ProfileDashboard({ onClose, initialTab = 'overview', onC
         if (response.ok) {
           const data = await response.json();
           const newStatus = data.status || null;
+          
+          console.log('[ProfileDashboard] Loaded profile status:', {
+            target_games: newStatus?.target_games,
+            games_indexed: newStatus?.games_indexed,
+            deep_analyzed_games: newStatus?.deep_analyzed_games,
+            state: newStatus?.state,
+            fullStatus: newStatus
+          });
+          
           setProfileStatus(newStatus);
           
           // If actively analyzing, trigger analytics refresh too
@@ -179,7 +188,6 @@ export default function ProfileDashboard({ onClose, initialTab = 'overview', onC
       clearInterval(statusCheckInterval);
     };
   }, [user?.id, backendBase, profileStatus?.state]);
-  */ // END TEMPORARY COMMENT
 
   // TEMPORARY: Comment out pattern history fetch - UNCOMMENT AFTER FORMATTING IS DONE
   /*
