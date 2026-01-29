@@ -88,6 +88,21 @@ def _require_shared_secret(req: Request) -> None:
     if not got or got != _BACKEND_SHARED_SECRET:
         raise HTTPException(status_code=403, detail="Forbidden")
 
+def extract_client_ip(req: Request) -> str:
+    """
+    Extract the client IP address from request headers.
+    Handles x-forwarded-for which may contain multiple comma-separated IPs.
+    Returns the first (client) IP, or falls back to req.client.host.
+    """
+    forwarded = req.headers.get("x-forwarded-for", "").strip()
+    if forwarded:
+        # x-forwarded-for can contain: "client, proxy1, proxy2"
+        # Extract the first IP (client)
+        first_ip = forwarded.split(",")[0].strip()
+        if first_ip:
+            return first_ip
+    return req.client.host if req.client else "unknown"
+
 # Initialize OpenAI client
 openai_api_key = os.getenv("OPENAI_API_KEY")
 if not openai_api_key:
@@ -3462,7 +3477,7 @@ async def check_limits(request: CheckLimitsRequest, req: Request):
     import time
     try:
         user_id = request.user_id
-        ip_address = req.headers.get("x-forwarded-for") or req.client.host
+        ip_address = extract_client_ip(req)
         cache_key = f"{user_id or ip_address}"
         
         if not supabase_client:
@@ -3677,7 +3692,7 @@ async def deduct_usage(request: DeductUsageRequest, req: Request):
     Frontend holds local copy and only calls this when user performs actions.
     """
     user_id = request.user_id
-    ip_address = req.headers.get("x-forwarded-for") or req.client.host
+    ip_address = extract_client_ip(req)
     
     if not supabase_client:
         raise HTTPException(status_code=503, detail="Supabase not available")
@@ -3789,7 +3804,7 @@ async def llm_chat(request: LLMRequest, req: Request):
         
         # Get user_id and ip_address from request
         user_id = request.user_id
-        ip_address = request.ip_address or req.headers.get("x-forwarded-for") or req.client.host
+        ip_address = request.ip_address or extract_client_ip(req)
         
         # Build context for tool selection
         context = request.context or {}
@@ -4434,7 +4449,7 @@ async def llm_chat_stream(request: LLMRequest, http_request: Request):
             
             # Get user info for rate limiting
             user_id = request.user_id
-            ip_address = request.ip_address or (http_request.client.host if http_request else None)
+            ip_address = request.ip_address or (extract_client_ip(http_request) if http_request else None)
 
             # Tier gating (free/unpaid/anon -> tools locked)
             tier_info = None
