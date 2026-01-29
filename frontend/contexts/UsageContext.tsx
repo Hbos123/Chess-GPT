@@ -120,38 +120,57 @@ export function UsageProvider({ children }: { children: React.ReactNode }) {
         // Rate limit exceeded - parse error info to show usage
         try {
           const errorData = await response.json();
+          console.log('[UsageContext] 429 error response:', JSON.stringify(errorData, null, 2));
+          
           if (errorData.info) {
             const messages = errorData.info.messages || {};
             const tokens = errorData.info.tokens || {};
             const gameReviews = errorData.info.game_reviews || {};
             const lessons = errorData.info.lessons || {};
+            const tier_id = errorData.info.tier_id || 'unpaid';
+            const tier = errorData.info.tier || {};
+            
+            console.log('[UsageContext] Parsed 429 info:', {
+              messages,
+              tokens,
+              gameReviews,
+              lessons,
+              tier_id,
+              tier
+            });
             
             setUsage({
               messages: {
-                used: messages.used || 0,
-                limit: messages.limit || 0,
+                used: messages.used ?? 0,
+                limit: messages.limit ?? 0,
                 remaining: 0
               },
               tokens: {
-                used: tokens.used || 0,
-                limit: tokens.limit || 0,
-                remaining: 0
+                used: tokens.used ?? 0,
+                limit: tokens.limit ?? tier.daily_tokens ?? 15000,
+                remaining: tokens.remaining ?? Math.max(0, (tokens.limit ?? tier.daily_tokens ?? 15000) - (tokens.used ?? 0))
               },
               gameReviews: {
-                used: gameReviews.used || 0,
-                limit: gameReviews.limit || 0,
-                remaining: 0
+                used: gameReviews.used ?? 0,
+                limit: gameReviews.limit ?? tier.max_game_reviews_per_day ?? 0,
+                remaining: typeof gameReviews.remaining === 'number' 
+                  ? gameReviews.remaining 
+                  : (gameReviews.limit === 'unlimited' ? 'unlimited' : Math.max(0, (gameReviews.limit ?? tier.max_game_reviews_per_day ?? 0) - (gameReviews.used ?? 0)))
               },
               lessons: {
-                used: lessons.used || 0,
-                limit: lessons.limit || 0,
-                remaining: 0
+                used: lessons.used ?? 0,
+                limit: lessons.limit ?? tier.max_lessons_per_day ?? 0,
+                remaining: typeof lessons.remaining === 'number'
+                  ? lessons.remaining
+                  : (lessons.limit === 'unlimited' ? 'unlimited' : Math.max(0, (lessons.limit ?? tier.max_lessons_per_day ?? 0) - (lessons.used ?? 0)))
               },
-              tier_id: errorData.info.tier_id || 'unpaid'
+              tier_id: tier_id
             });
+          } else {
+            console.warn('[UsageContext] 429 response missing info:', errorData);
           }
         } catch (parseErr) {
-          console.warn('Failed to parse 429 error response:', parseErr);
+          console.error('[UsageContext] Failed to parse 429 error response:', parseErr);
         }
       }
     } catch (error) {
