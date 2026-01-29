@@ -7575,25 +7575,43 @@ async def start_profile_indexing(user_id: str):
     Manually trigger profile indexing for a user.
     Used by frontend to auto-start analysis when accounts are linked.
     """
+    print(f"🔵 [START_INDEXING_ENDPOINT] Received request for user {user_id}")
+    
     if not profile_indexer:
+        print(f"❌ [START_INDEXING_ENDPOINT] Profile indexer not initialized")
         raise HTTPException(status_code=503, detail="Profile indexer not initialized")
+    
+    # Check current status to prevent duplicate requests
+    current_status = profile_indexer.get_status(user_id)
+    if current_status:
+        current_state = current_status.get("state", "unknown")
+        print(f"📊 [START_INDEXING_ENDPOINT] Current status for user {user_id}: state={current_state}, games_indexed={current_status.get('games_indexed', 0)}")
+        
+        # If already fetching/indexing, don't start another
+        if current_state in ("fetching", "indexing", "analyzing", "reviewing", "queued"):
+            print(f"⏸️ [START_INDEXING_ENDPOINT] Indexing already in progress (state: {current_state}), returning success without starting new task")
+            return {"success": True, "message": f"Indexing already in progress (state: {current_state})", "accounts": 0, "skipped": True}
     
     # Load preferences to get accounts
     prefs = profile_indexer.load_preferences(user_id) or {}
+    print(f"📋 [START_INDEXING_ENDPOINT] Loaded preferences for user {user_id}: {len(prefs.get('accounts', []))} accounts")
     
     # Also check Supabase if in-memory prefs are empty
     if (not prefs or not prefs.get("accounts")) and supabase_client:
+        print(f"🔍 [START_INDEXING_ENDPOINT] In-memory prefs empty, checking Supabase for user {user_id}")
         profile_row = supabase_client.get_or_create_profile(user_id)
         if profile_row:
             linked = profile_row.get("linked_accounts") or []
             time_controls = profile_row.get("time_controls") or []
             if linked or time_controls:
                 prefs = {"accounts": linked, "time_controls": time_controls}
+                print(f"✅ [START_INDEXING_ENDPOINT] Loaded {len(linked)} accounts from Supabase for user {user_id}")
     
     accounts = prefs.get("accounts", [])
     time_controls = prefs.get("time_controls", [])
     
     if not accounts:
+        print(f"⚠️ [START_INDEXING_ENDPOINT] No accounts found for user {user_id}")
         return JSONResponse(
             status_code=400,
             content={"error": "No accounts linked", "message": "Please link accounts before starting analysis"}
@@ -7614,7 +7632,10 @@ async def start_profile_indexing(user_id: str):
             "username": username
         })
     
+    print(f"✅ [START_INDEXING_ENDPOINT] Normalized {len(normalized_accounts)} accounts for user {user_id}: {normalized_accounts}")
+    
     if not normalized_accounts:
+        print(f"❌ [START_INDEXING_ENDPOINT] No valid accounts after normalization for user {user_id}")
         return JSONResponse(
             status_code=400,
             content={"error": "No valid accounts", "message": "Please provide valid account usernames"}
@@ -7622,14 +7643,16 @@ async def start_profile_indexing(user_id: str):
     
     # Start indexing
     try:
+        print(f"🚀 [START_INDEXING_ENDPOINT] Calling profile_indexer.start_indexing for user {user_id}")
         await profile_indexer.start_indexing(
             user_id=user_id,
             accounts=normalized_accounts,
             time_controls=[tc.lower() for tc in time_controls] if time_controls else [],
         )
+        print(f"✅ [START_INDEXING_ENDPOINT] Successfully started indexing for user {user_id}")
         return {"success": True, "message": "Indexing started", "accounts": len(normalized_accounts)}
     except Exception as e:
-        print(f"❌ [START_INDEXING] Error starting indexing: {e}")
+        print(f"❌ [START_INDEXING_ENDPOINT] Error starting indexing for user {user_id}: {e}")
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Failed to start indexing: {str(e)}")
