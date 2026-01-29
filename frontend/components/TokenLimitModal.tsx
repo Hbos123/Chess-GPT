@@ -42,13 +42,12 @@ export default function TokenLimitModal({ onClose, limitInfo, onOpenProfile, isL
     // Unlogged user
     if (!isLoggedIn) {
       return {
-        title: isMessageLimit ? 'Daily preview used up' : 'Daily limit reached',
-        message: isMessageLimit
-          ? 'Create an account to unlock 2 messages/day and start tracking your progress.'
-          : 'Sign in to get more daily tokens and unlock your chess journey.',
+        title: 'Usage limit reached',
+        message: 'Make an account with us to keep on trying chesster out!',
         action: 'Sign In / Create Account',
         actionUrl: '/auth',
-        useModal: false
+        useModal: false,
+        showUsage: false // Don't show usage for unsigned-in
       };
     }
     
@@ -61,7 +60,8 @@ export default function TokenLimitModal({ onClose, limitInfo, onOpenProfile, isL
           : 'Upgrade to Lite for more daily tokens and unlock tools.',
         action: 'Upgrade to Lite',
         actionUrl: null,
-        useModal: true
+        useModal: true,
+        showUsage: false // Don't show usage for unpaid tier
       };
     }
     
@@ -72,7 +72,8 @@ export default function TokenLimitModal({ onClose, limitInfo, onOpenProfile, isL
         message: 'Move up to Starter for a bigger daily token budget and more features.',
         action: 'Upgrade to Starter',
         actionUrl: null,
-        useModal: true
+        useModal: true,
+        showUsage: true
       };
     }
     
@@ -83,29 +84,33 @@ export default function TokenLimitModal({ onClose, limitInfo, onOpenProfile, isL
         message: 'Upgrade to Full for the biggest daily token budget and everything unlocked.',
         action: 'Upgrade to Full',
         actionUrl: null,
-        useModal: true
+        useModal: true,
+        showUsage: true
       };
     }
     
     // Default fallback
     return {
       title: 'Limit Reached',
-      message: 'You’ve reached your daily limit. Try again tomorrow or upgrade for more.',
+      message: 'You've reached your daily limit. Try again tomorrow or upgrade for more.',
       action: 'View Plans',
       actionUrl: null,
-      useModal: true
+      useModal: true,
+      showUsage: true
     };
   };
 
   const upgradeInfo = getUpgradeMessage();
-  const usage =
+  // Only show usage for paid tiers (lite, starter, full)
+  const usage = upgradeInfo.showUsage && (
     limitInfo.type === "message_limit" && limitInfo.info.messages && typeof limitInfo.info.messages.limit === "number"
       ? `${limitInfo.info.messages.used ?? 0} / ${limitInfo.info.messages.limit}`
       : limitInfo.type === "token_limit" && limitInfo.info.tokens
         ? `${limitInfo.info.tokens.used ?? 0} / ${limitInfo.info.tokens.limit ?? 0}`
         : (limitInfo.info.used !== undefined && limitInfo.info.limit !== undefined
           ? `${limitInfo.info.used} / ${limitInfo.info.limit}`
-          : null);
+          : null)
+  ) || null;
 
   return (
     <div

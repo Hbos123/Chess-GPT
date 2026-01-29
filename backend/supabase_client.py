@@ -39,7 +39,7 @@ class SupabaseClient:
     def __init__(self, url: str, service_role_key: str):
         self.client: Client = create_client(url, service_role_key)
         print(f"✅ Supabase client initialized: {url}")
-        
+
         # Caching for subscription and usage data to reduce Supabase queries
         # Subscription cache: user_id -> (data, timestamp)
         self._subscription_cache: Dict[str, Tuple[Dict[str, Any], float]] = {}
@@ -195,8 +195,8 @@ class SupabaseClient:
                 data = {
                     "tier_id": effective_tier_id,
                     "status": raw_status,
-                    "current_period_start": row.get("current_period_start"),
-                    "current_period_end": row.get("current_period_end"),
+                "current_period_start": row.get("current_period_start"),
+                "current_period_end": row.get("current_period_end"),
                     "stripe_customer_id": row.get("stripe_customer_id") if effective_tier_id != "unpaid" else None,
                     "stripe_subscription_id": row.get("stripe_subscription_id") if effective_tier_id != "unpaid" else None,
                     "tier": tier_row,
@@ -411,19 +411,19 @@ class SupabaseClient:
         retry_delay = 0.5
         
         for attempt in range(max_retries):
-            try:
-                # Supabase Python v2: filters (eq, etc.) are available on the request builder
-                # returned by .select()/.update()/.delete(), not on .table() directly.
-                query = self.client.table("daily_usage").select("*")
-                if user_id:
-                    query = self._apply_eq(query, "user_id", user_id)
-                else:
-                    query = self._apply_eq(query, "ip_address", ip_address)
-                query = self._apply_eq(query, "usage_date", date.isoformat())
-                
-                result = query.execute()
-                return result.data[0] if result.data else None
-            except Exception as e:
+        try:
+            # Supabase Python v2: filters (eq, etc.) are available on the request builder
+            # returned by .select()/.update()/.delete(), not on .table() directly.
+            query = self.client.table("daily_usage").select("*")
+            if user_id:
+                query = self._apply_eq(query, "user_id", user_id)
+            else:
+                query = self._apply_eq(query, "ip_address", ip_address)
+            query = self._apply_eq(query, "usage_date", date.isoformat())
+            
+            result = query.execute()
+            return result.data[0] if result.data else None
+        except Exception as e:
                 error_str = str(e).lower()
                 is_connection_error = any(term in error_str for term in [
                     "server disconnected", "connection", "timeout", "network", 
@@ -436,8 +436,8 @@ class SupabaseClient:
                     time.sleep(wait_time)
                     continue
                 else:
-                    print(f"[daily_usage] Error getting usage: {e}")
-                    return None
+            print(f"[daily_usage] Error getting usage: {e}")
+            return None
 
     def _increment_daily_usage(self, user_id: Optional[str], ip_address: Optional[str], resource_type: str):
         """Increment daily usage counter with retry logic for connection errors"""
@@ -446,49 +446,49 @@ class SupabaseClient:
         retry_delay = 0.5
         
         for attempt in range(max_retries):
-            try:
-                today = datetime.now().date()
-                count_field = "game_reviews_count" if resource_type == "game_review" else "lessons_count"
-                
-                # Try to get existing record
-                query = self.client.table("daily_usage").select("*")
+        try:
+            today = datetime.now().date()
+            count_field = "game_reviews_count" if resource_type == "game_review" else "lessons_count"
+            
+            # Try to get existing record
+            query = self.client.table("daily_usage").select("*")
+            if user_id:
+                query = self._apply_eq(query, "user_id", user_id)
+            else:
+                query = self._apply_eq(query, "ip_address", ip_address)
+            query = self._apply_eq(query, "usage_date", today.isoformat())
+            
+            result = query.execute()
+            
+            if result.data:
+                # Update existing
+                current = result.data[0].get(count_field, 0)
+                upd = self.client.table("daily_usage").update({count_field: current + 1})
                 if user_id:
-                    query = self._apply_eq(query, "user_id", user_id)
+                    upd = self._apply_eq(upd, "user_id", user_id)
                 else:
-                    query = self._apply_eq(query, "ip_address", ip_address)
-                query = self._apply_eq(query, "usage_date", today.isoformat())
-                
-                result = query.execute()
-                
-                if result.data:
-                    # Update existing
-                    current = result.data[0].get(count_field, 0)
-                    upd = self.client.table("daily_usage").update({count_field: current + 1})
-                    if user_id:
-                        upd = self._apply_eq(upd, "user_id", user_id)
-                    else:
-                        upd = self._apply_eq(upd, "ip_address", ip_address)
-                    upd = self._apply_eq(upd, "usage_date", today.isoformat())
-                    upd.execute()
+                    upd = self._apply_eq(upd, "ip_address", ip_address)
+                upd = self._apply_eq(upd, "usage_date", today.isoformat())
+                upd.execute()
+            else:
+                # Create new record
+                data = {
+                    "usage_date": today.isoformat(),
+                    count_field: 1
+                }
+                if user_id:
+                    data["user_id"] = user_id
                 else:
-                    # Create new record
-                    data = {
-                        "usage_date": today.isoformat(),
-                        count_field: 1
-                    }
-                    if user_id:
-                        data["user_id"] = user_id
-                    else:
-                        data["ip_address"] = ip_address
-                    
-                    self.client.table("daily_usage").insert(data).execute()
+                    data["ip_address"] = ip_address
+                
+                self.client.table("daily_usage").insert(data).execute()
                 
                 # Invalidate usage cache after incrementing
                 self.invalidate_usage_cache(user_id, ip_address, today)
                 
                 # Success - break out of retry loop
                 return
-            except Exception as e:
+        except Exception as e:
                 error_str = str(e).lower()
                 is_connection_error = any(term in error_str for term in [
                     "server disconnected", "connection", "timeout", "network", 
@@ -501,8 +501,8 @@ class SupabaseClient:
                     time.sleep(wait_time)
                     continue
                 else:
-                    print(f"[daily_usage] Error incrementing usage: {e}")
-                    traceback.print_exc()
+            print(f"[daily_usage] Error incrementing usage: {e}")
+            traceback.print_exc()
                     return  # Give up after max retries
 
     def check_message_limit(
@@ -1051,37 +1051,37 @@ class SupabaseClient:
         """
         max_retries = 3
         for attempt in range(max_retries):
+        try:
+            select_fields = (
+                "id,game_date,created_at,updated_at,"
+                "pgn,user_color,user_rating,result,opening_name,accuracy_overall,time_control"
+            )
+            query = self.client.table("games")\
+                .select(select_fields)\
+                .eq("user_id", user_id)\
+                .is_("archived_at", "null")\
+                .or_("review_type.eq.full,review_type.is.null")
+
+            # Filter out compressed games unless explicitly requested (best-effort)
             try:
-                select_fields = (
-                    "id,game_date,created_at,updated_at,"
-                    "pgn,user_color,user_rating,result,opening_name,accuracy_overall,time_control"
-                )
-                query = self.client.table("games")\
-                    .select(select_fields)\
-                    .eq("user_id", user_id)\
-                    .is_("archived_at", "null")\
-                    .or_("review_type.eq.full,review_type.is.null")
-
-                # Filter out compressed games unless explicitly requested (best-effort)
-                try:
-                    query = query.is_("compressed_at", "null")
-                    result = query.order("updated_at", desc=True).limit(int(limit)).execute()
-                except Exception as e:
-                    if self._is_missing_column_error(e, "compressed_at"):
-                        result = self.client.table("games")\
-                            .select(select_fields)\
-                            .eq("user_id", user_id)\
-                            .is_("archived_at", "null")\
-                            .or_("review_type.eq.full,review_type.is.null")\
-                            .order("updated_at", desc=True)\
-                            .limit(int(limit))\
-                            .execute()
-                    else:
-                        raise
-
-                return result.data if result.data else []
+                query = query.is_("compressed_at", "null")
+                result = query.order("updated_at", desc=True).limit(int(limit)).execute()
             except Exception as e:
-                error_msg = str(e)
+                if self._is_missing_column_error(e, "compressed_at"):
+                    result = self.client.table("games")\
+                        .select(select_fields)\
+                        .eq("user_id", user_id)\
+                        .is_("archived_at", "null")\
+                        .or_("review_type.eq.full,review_type.is.null")\
+                        .order("updated_at", desc=True)\
+                        .limit(int(limit))\
+                        .execute()
+                else:
+                    raise
+
+            return result.data if result.data else []
+        except Exception as e:
+            error_msg = str(e)
                 error_type = type(e).__name__
                 
                 # Check if it's a transient connection error
@@ -1102,12 +1102,12 @@ class SupabaseClient:
                     continue
                 
                 # On timeout or final attempt failure, return empty list to avoid blocking the request
-                if "timeout" in error_msg.lower() or "ReadTimeout" in error_msg:
-                    print(f"[supabase] Timeout fetching games for overview snapshot (user_id={user_id[:8]}...), returning empty list")
-                    return []
+            if "timeout" in error_msg.lower() or "ReadTimeout" in error_msg:
+                print(f"[supabase] Timeout fetching games for overview snapshot (user_id={user_id[:8]}...), returning empty list")
+                return []
                 
                 # For other errors, use centralized error handler
-                return self._handle_supabase_error(e, "fetching overview snapshot games", [])
+            return self._handle_supabase_error(e, "fetching overview snapshot games", [])
         
         # If we exhausted retries, return empty list
         print(f"[supabase] Exhausted retries for overview snapshot (user_id={user_id[:8]}...), returning empty list")
@@ -2341,19 +2341,19 @@ class SupabaseClient:
         """
         max_retries = 3
         for attempt in range(max_retries):
-            try:
-                # Use personal_stats table instead of profile_stats
-                # Specify on_conflict to use the unique constraint on user_id
-                self.client.table("personal_stats").upsert(
-                    {
-                        "user_id": user_id,
-                        "stats": stats,
-                        "updated_at": datetime.utcnow().isoformat() + "Z"
-                    },
-                    on_conflict="user_id"
-                ).execute()
-                return True
-            except Exception as e:
+        try:
+            # Use personal_stats table instead of profile_stats
+            # Specify on_conflict to use the unique constraint on user_id
+            self.client.table("personal_stats").upsert(
+                {
+                    "user_id": user_id,
+                    "stats": stats,
+                    "updated_at": datetime.utcnow().isoformat() + "Z"
+                },
+                on_conflict="user_id"
+            ).execute()
+            return True
+        except Exception as e:
                 error_msg = str(e)
                 error_type = type(e).__name__
                 
@@ -2375,12 +2375,12 @@ class SupabaseClient:
                     continue
                 
                 # If not a connection error or out of retries, log and return False
-                print(f"Error saving profile stats: {e}")
+            print(f"Error saving profile stats: {e}")
                 return False
         
         # If we exhausted retries, return False
         print(f"[supabase] Exhausted retries for saving profile stats (user_id={user_id[:8]}...)")
-        return False
+            return False
 
     def get_profile_stats(self, user_id: str) -> Dict:
         """Fetch cached profile statistics"""

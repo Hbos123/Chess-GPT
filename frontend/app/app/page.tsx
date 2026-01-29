@@ -61,6 +61,7 @@ import {
 import { getBackendBase } from "@/lib/backendBase";
 import { fetchAndReviewGamesFrontend } from "@/lib/gameReviewOrchestrator";
 import { wipeMyData } from "@/lib/wipeUserData";
+import { resetMyTokens } from "@/lib/resetTokens";
 import "../../styles/chatUI.css";
 import "../styles.css";
 
@@ -226,11 +227,12 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
     }
   }, []);
 
-  // Attach wipeMyData to window for console access
+  // Attach wipeMyData and resetMyTokens to window for console access
   useEffect(() => {
     if (typeof window !== 'undefined') {
       (window as any).wipeMyData = wipeMyData;
-      console.log('💡 Console helper loaded! Type: await wipeMyData()');
+      (window as any).resetMyTokens = resetMyTokens;
+      console.log('💡 Console helpers loaded! Type: await wipeMyData() or await resetMyTokens()');
     }
   }, []);
   
@@ -5596,6 +5598,21 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
   // Check token limits before sending message (only tokens, not messages)
   async function checkTokenLimitsBeforeSend(message: string, excludeFromMessageCount: boolean = false): Promise<boolean> {
     try {
+      // For unsigned-in users, check message limit first
+      if (!user?.id && usage && typeof usage.messages.remaining === "number" && usage.messages.remaining <= 0) {
+        setTokenLimitInfo({
+          type: 'message_limit',
+          message: 'Daily message limit reached',
+          info: {
+            messages: usage.messages,
+            tier_id: 'unpaid',
+            next_step: 'sign_in'
+          }
+        });
+        setShowTokenLimitModal(true);
+        return false;
+      }
+      
       // Estimate tokens (~4 chars per token, add buffer for response)
       const estimatedTokens = Math.ceil(message.length / 4) + 5000;
       
