@@ -28,6 +28,7 @@ import GameSetupModal from "@/components/GameSetupModal";
 import OpeningLessonModal from "@/components/OpeningLessonModal";
 import TrainingSession from "@/components/TrainingSession";
 import { useAuth } from "@/contexts/AuthContext";
+import { useUsage } from "@/contexts/UsageContext";
 import { stripEmojis } from "@/utils/emojiFilter";
 import type {
   Mode,
@@ -2056,6 +2057,7 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
   >(null);
   const layoutRef = useRef<HTMLDivElement | null>(null);
   const { user, loading: authLoading, signOut } = useAuth();
+  const { usage, checkCanSendMessage, deductTokens } = useUsage();
   const authUserEmail = user?.email ?? null;
   const authUserName =
     (user?.user_metadata?.username as string | undefined) ||
@@ -5333,46 +5335,51 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
       // Estimate tokens (~4 chars per token, add buffer for response)
       const estimatedTokens = Math.ceil(message.length / 4) + 5000;
       
-      const response = await fetch(`${getBackendBase()}/check_limits`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          user_id: user?.id || null,
-          estimated_tokens: estimatedTokens,
-          message_count: excludeFromMessageCount ? 0 : 1  // Don't count walkthrough/lesson messages
-        })
-      });
-      
-      if (!response.ok) {
-        const error = await response.json();
-        // Only show modal for token limits, not message limits (since we only check tokens)
-        if (error.type === 'token_limit' || error.error === 'token_limit') {
+      // Local check first (instant feedback)
+      if (!checkCanSendMessage(estimatedTokens)) {
+        if (usage) {
           setTokenLimitInfo({
             type: 'token_limit',
-            message: error.message || 'Daily token limit exceeded',
-            info: error.info || {}
+            message: 'Daily token limit exceeded',
+            info: {
+              tokens: usage.tokens,
+              messages: usage.messages,
+              tier_id: usage.tier_id
+            }
           });
           setShowTokenLimitModal(true);
-          return false;
         }
-        // For message limits, just return false silently (shouldn't happen since we set message_count=0)
         return false;
       }
       
-      // Store usage info for progress bar
-      const data = await response.json();
-      if (data.info) {
-        const messages = data.info.messages;
-        const messagesWithRemaining = messages ? {
-          ...messages,
-          remaining: messages.limit - messages.used
-        } : undefined;
-        
+      // Deduct tokens atomically (backend updates DB and returns new usage)
+      const messageCount = excludeFromMessageCount ? 0 : 1;
+      const success = await deductTokens(estimatedTokens, messageCount);
+      
+      if (!success) {
+        // Limit was exceeded (race condition or limit hit during deduction)
+        if (usage) {
+          setTokenLimitInfo({
+            type: 'token_limit',
+            message: 'Daily token limit exceeded',
+            info: {
+              tokens: usage.tokens,
+              messages: usage.messages,
+              tier_id: usage.tier_id
+            }
+          });
+          setShowTokenLimitModal(true);
+        }
+        return false;
+      }
+      
+      // Update tokenUsage for progress bar (usage context already updated)
+      if (usage) {
         setTokenUsage({
-          messages: messagesWithRemaining,
-          tokens: data.info.tokens,
-          gameReviews: data.info.game_reviews,
-          lessons: data.info.lessons
+          messages: usage.messages,
+          tokens: usage.tokens,
+          gameReviews: usage.gameReviews,
+          lessons: usage.lessons
         });
       }
       

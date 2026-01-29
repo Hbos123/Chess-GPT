@@ -5,6 +5,7 @@ import PersonalReviewCharts from "./PersonalReviewCharts";
 import PersonalReviewReport from "./PersonalReviewReport";
 import TrainingManager from "./TrainingManager";
 import { useAuth } from "@/contexts/AuthContext";
+import { useUsage } from "@/contexts/UsageContext";
 import { getBackendBase } from "@/lib/backendBase";
 import { fetchAndReviewGamesFrontend } from "@/lib/gameReviewOrchestrator";
 import { aggregateReviews } from "@/lib/reviewAggregator";
@@ -18,6 +19,7 @@ export default function PersonalReview({ onClose }: PersonalReviewProps) {
   console.log("[PersonalReview] 🎬 Component rendering");
   
   const { user, loading: authLoading } = useAuth();
+  const { usage, loading: usageLoading } = useUsage();
   console.log("[PersonalReview] 👤 Auth context", { 
     hasUser: !!user, 
     userId: user?.id, 
@@ -463,84 +465,45 @@ export default function PersonalReview({ onClose }: PersonalReviewProps) {
         throw new Error("User not authenticated");
       }
 
-      // Check tier limits before starting analysis
-      try {
-        const limitsResponse = await fetch(`${backendBase}/check_limits`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            user_id: user.id,
-            estimated_tokens: 0,
-            message_count: 0,
-          }),
-        });
+      // Check tier limits before starting analysis (using local usage context)
+      if (!usage || usageLoading) {
+        setError("Loading usage information...");
+        setStep("input");
+        setIsLoading(false);
+        return;
+      }
 
-        if (!limitsResponse.ok) {
-          let limitsData;
-          try {
-            limitsData = await limitsResponse.json();
-          } catch (parseErr) {
-            throw new Error("Failed to check subscription limits");
-          }
-          
-          // Handle 429 (rate limit) specifically
-          if (limitsResponse.status === 429) {
-            const errorType = limitsData.type || limitsData.error || "unknown";
-            const errorMessage = limitsData.message || "Daily limit exceeded";
-            
-            // For message limits, show upgrade message
-            if (errorType === "message_limit") {
-              setError(`${errorMessage}. Please upgrade your plan or try again tomorrow.`);
-            } else if (errorType === "token_limit") {
-              setError(`${errorMessage}. Please upgrade your plan for more tokens.`);
-            } else {
-              setError(errorMessage);
-            }
-            
-            setStep("input");
-            setIsLoading(false);
-            return;
-          }
-          
-          // For other errors (403, 500, etc.)
-          throw new Error(limitsData.message || "Failed to check subscription limits");
-        }
+      const tierId = usage.tier_id || "unpaid";
+      
+      // Get max reviews from usage context
+      const gameReviewsInfo = usage.gameReviews;
+      const used = typeof gameReviewsInfo.used === "number" ? gameReviewsInfo.used : 0;
+      const limit = gameReviewsInfo.limit;
 
-        const limitsData = await limitsResponse.json();
-        const tierId = limitsData.info?.tier_id || "unpaid";
-        const tier = limitsData.info?.tier || {};
-        const maxReviewsPerDay = tier.max_game_reviews_per_day || 0;
+      // Check if game reviews are allowed for this tier
+      if (tierId === "unpaid" && (limit === 0 || (typeof limit === "number" && limit === 0))) {
+        setError("Game reviews are not available for unpaid users. Please upgrade to a paid plan to analyze games.");
+        setStep("input");
+        setIsLoading(false);
+        return;
+      }
 
-        // Check if game reviews are allowed for this tier
-        if (tierId === "unpaid" && maxReviewsPerDay === 0) {
-          setError("Game reviews are not available for unpaid users. Please upgrade to a paid plan to analyze games.");
-          setStep("input");
-          setIsLoading(false);
-          return;
-        }
+      // Check if user has remaining reviews for today
+      if (limit !== "unlimited" && typeof limit === "number" && used >= limit) {
+        setError(`Daily game review limit exceeded (${used}/${limit}). Limit resets at midnight. Please upgrade for more reviews.`);
+        setStep("input");
+        setIsLoading(false);
+        return;
+      }
 
-        // Check if user has remaining reviews for today
-        const gameReviewsInfo = limitsData.info?.game_reviews;
-        if (gameReviewsInfo) {
-          const used = gameReviewsInfo.used || 0;
-          const limit = gameReviewsInfo.limit;
-          
-          if (limit !== "unlimited" && typeof limit === "number" && used >= limit) {
-            setError(`Daily game review limit exceeded (${used}/${limit}). Limit resets at midnight. Please upgrade for more reviews.`);
-            setStep("input");
-            setIsLoading(false);
-            return;
-          }
-
-          // Check if analyzing more games than remaining
-          if (limit !== "unlimited" && typeof limit === "number" && gamesToAnalyze > (limit - used)) {
-            const remaining = limit - used;
-            setError(`Cannot analyze ${gamesToAnalyze} games. You have ${remaining} review${remaining !== 1 ? 's' : ''} remaining today. Please reduce the number of games or upgrade your plan.`);
-            setStep("input");
-            setIsLoading(false);
-            return;
-          }
-        }
+      // Check if analyzing more games than remaining
+      if (limit !== "unlimited" && typeof limit === "number" && gamesToAnalyze > (limit - used)) {
+        const remaining = limit - used;
+        setError(`Cannot analyze ${gamesToAnalyze} games. You have ${remaining} review${remaining !== 1 ? 's' : ''} remaining today. Please reduce the number of games or upgrade your plan.`);
+        setStep("input");
+        setIsLoading(false);
+        return;
+      }
 
         console.log("[PersonalReview] Tier check passed:", {
           tierId,

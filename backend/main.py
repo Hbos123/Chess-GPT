@@ -3563,6 +3563,106 @@ async def check_limits(request: CheckLimitsRequest, req: Request):
         return {"allowed": True, "message": "Limit check error, allowing request"}
 
 
+class DeductUsageRequest(BaseModel):
+    user_id: Optional[str] = None
+    tokens: int
+    message_count: int = 1
+
+
+@app.post("/deduct_usage")
+async def deduct_usage(request: DeductUsageRequest, req: Request):
+    """
+    Deduct tokens/messages from daily allowance and return updated usage.
+    This replaces the check-then-deduct pattern with atomic deduction.
+    Frontend holds local copy and only calls this when user performs actions.
+    """
+    user_id = request.user_id
+    ip_address = req.headers.get("x-forwarded-for") or req.client.host
+    
+    if not supabase_client:
+        raise HTTPException(status_code=503, detail="Supabase not available")
+    
+    # Get subscription info (cached)
+    tier_info = supabase_client.get_subscription_overview(user_id, use_cache=True) if user_id else {
+        "tier_id": "unpaid",
+        "tier": {
+            "daily_messages": 1,
+            "daily_tokens": 15000,
+            "max_game_reviews_per_day": 0,
+            "max_lessons_per_day": 0
+        }
+    }
+    
+    # Check limits BEFORE deducting
+    msg_allowed, msg_error, msg_info = supabase_client.check_message_limit(
+        user_id, ip_address, tier_info
+    )
+    if not msg_allowed:
+        return JSONResponse(
+            status_code=429,
+            content={"error": "message_limit", "message": msg_error, "info": msg_info}
+        )
+    
+    # Check token limit
+    token_allowed, token_error, token_info = supabase_client.check_token_limit(
+        user_id, ip_address, tier_info, estimated_tokens=request.tokens
+    )
+    if not token_allowed:
+        return JSONResponse(
+            status_code=429,
+            content={"error": "token_limit", "message": token_error, "info": token_info}
+        )
+    
+    # Deduct tokens and messages atomically
+    success, updated_usage = supabase_client.deduct_usage_sync(
+        user_id, ip_address, request.tokens, request.message_count
+    )
+    
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to deduct usage")
+    
+    # Get tier limits for response
+    tier = tier_info.get("tier", {})
+    max_messages = tier.get("daily_messages", 1 if not user_id else 2)
+    max_tokens = tier.get("daily_tokens", 15000)
+    max_reviews = tier.get("max_game_reviews_per_day", 0)
+    max_lessons = tier.get("max_lessons_per_day", 0)
+    
+    # Calculate remaining
+    tokens_used = updated_usage.get("tokens_used", 0)
+    messages_used = updated_usage.get("messages_count", 0)
+    reviews_used = updated_usage.get("game_reviews_count", 0)
+    lessons_used = updated_usage.get("lessons_count", 0)
+    
+    # Return updated usage info
+    return {
+        "success": True,
+        "usage": {
+            "messages": {
+                "used": messages_used,
+                "limit": max_messages,
+                "remaining": max(0, max_messages - messages_used)
+            },
+            "tokens": {
+                "used": tokens_used,
+                "limit": max_tokens,
+                "remaining": max(0, max_tokens - tokens_used)
+            },
+            "gameReviews": {
+                "used": reviews_used,
+                "limit": max_reviews if max_reviews is not None else "unlimited",
+                "remaining": "unlimited" if max_reviews is None else max(0, max_reviews - reviews_used)
+            },
+            "lessons": {
+                "used": lessons_used,
+                "limit": max_lessons if max_lessons is not None else "unlimited",
+                "remaining": "unlimited" if max_lessons is None else max(0, max_lessons - lessons_used)
+            },
+            "tier_id": tier_info.get("tier_id", "unpaid")
+        }
+    }
+
+
 @app.post("/llm_chat")
 async def llm_chat(request: LLMRequest, req: Request):
     """

@@ -1,131 +1,15 @@
 "use client";
 
-import { useState, useEffect, useRef } from 'react';
-import { getBackendBase } from '@/lib/backendBase';
-import { useAuth } from '@/contexts/AuthContext';
+import { useUsage } from '@/contexts/UsageContext';
 
 interface DailyUsageDisplayProps {
   compact?: boolean;
 }
 
 export default function DailyUsageDisplay({ compact = false }: DailyUsageDisplayProps) {
-  const { user } = useAuth();
-  const [usage, setUsage] = useState<{
-    messages?: { used: number; limit: number; remaining?: number };
-    tokens?: { used: number; limit: number };
-    gameReviews?: { used: number; limit: number | string; remaining?: number | string };
-    lessons?: { used: number; limit: number | string; remaining?: number | string };
-  } | null>(null);
-  const [loading, setLoading] = useState(true);
+  const { usage, loading } = useUsage();
   
-  // Client-side cache to avoid redundant state updates
-  const lastFetchedRef = useRef<string | null>(null);
-  const intervalRef = useRef<NodeJS.Timeout | null>(null);
-  const isVisibleRef = useRef(true);
-
-  useEffect(() => {
-    const fetchUsage = async () => {
-      // Skip if tab is hidden (Page Visibility API)
-      if (!isVisibleRef.current) {
-        return;
-      }
-
-      try {
-        const response = await fetch(`${getBackendBase()}/check_limits`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            user_id: user?.id || null,
-            estimated_tokens: 0, // Just get current usage, don't check limits
-            message_count: 0
-          })
-        });
-
-        if (response.ok) {
-          const data = await response.json();
-          if (data.info) {
-            const messages = data.info.messages;
-            const messagesWithRemaining = messages ? {
-              ...messages,
-              remaining: messages.limit - messages.used
-            } : undefined;
-            
-            const newUsage = {
-              messages: messagesWithRemaining,
-              tokens: data.info.tokens,
-              gameReviews: data.info.game_reviews,
-              lessons: data.info.lessons
-            };
-            
-            // Client-side cache: only update if data changed
-            const usageKey = JSON.stringify(newUsage);
-            if (usageKey !== lastFetchedRef.current) {
-              lastFetchedRef.current = usageKey;
-              setUsage(newUsage);
-            }
-          }
-        } else if (response.status === 429) {
-          // Rate limit exceeded - parse error info to show usage
-          try {
-            const errorData = await response.json();
-            if (errorData.info) {
-              const messages = errorData.info.messages;
-              const messagesWithRemaining = messages ? {
-                ...messages,
-                remaining: 0 // No remaining when limit exceeded
-              } : undefined;
-              
-              const newUsage = {
-                messages: messagesWithRemaining,
-                tokens: errorData.info.tokens,
-                gameReviews: errorData.info.game_reviews,
-                lessons: errorData.info.lessons
-              };
-              
-              // Client-side cache: only update if data changed
-              const usageKey = JSON.stringify(newUsage);
-              if (usageKey !== lastFetchedRef.current) {
-                lastFetchedRef.current = usageKey;
-                setUsage(newUsage);
-              }
-            }
-          } catch (parseErr) {
-            console.warn('Failed to parse 429 error response:', parseErr);
-          }
-        }
-      } catch (err) {
-        console.error('Failed to fetch usage:', err);
-        // Don't set loading to false on network errors - keep showing last known state
-        // setLoading(false);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    // Initial fetch
-    fetchUsage();
-    
-    // Page Visibility API: pause polling when tab is hidden
-    const handleVisibilityChange = () => {
-      isVisibleRef.current = !document.hidden;
-      if (!document.hidden) {
-        // Tab became visible - fetch immediately
-        fetchUsage();
-      }
-    };
-    
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    
-    // Refresh every 60 seconds (reduced from 30s to minimize queries)
-    intervalRef.current = setInterval(fetchUsage, 60000);
-    
-    return () => {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
-      }
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-    };
-  }, [user?.id]);
+  // No polling needed - usage updates via realtime subscription in UsageContext!
 
   if (loading) {
     return <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>Loading...</div>;

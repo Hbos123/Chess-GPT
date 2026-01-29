@@ -707,6 +707,79 @@ class SupabaseClient:
         thread = threading.Thread(target=_do_increment, daemon=True)
         thread.start()
     
+    def deduct_usage_sync(self, user_id: Optional[str], ip_address: Optional[str], tokens: int, message_count: int = 1) -> Tuple[bool, Optional[Dict]]:
+        """
+        Synchronously deduct tokens and messages from daily allowance.
+        Returns (success: bool, updated_usage: dict or None)
+        """
+        try:
+            today = datetime.now().date()
+            
+            # Get existing record
+            query = self.client.table("daily_usage").select("*")
+            if user_id:
+                query = self._apply_eq(query, "user_id", user_id)
+            else:
+                query = self._apply_eq(query, "ip_address", ip_address)
+            query = self._apply_eq(query, "usage_date", today.isoformat())
+            
+            result = query.execute()
+            
+            if result.data:
+                # Update existing record
+                current = result.data[0]
+                current_tokens = current.get("tokens_used", 0)
+                current_messages = current.get("messages_count", 0)
+                
+                upd = self.client.table("daily_usage").update({
+                    "tokens_used": current_tokens + tokens,
+                    "messages_count": current_messages + message_count
+                })
+                if user_id:
+                    upd = self._apply_eq(upd, "user_id", user_id)
+                else:
+                    upd = self._apply_eq(upd, "ip_address", ip_address)
+                upd = self._apply_eq(upd, "usage_date", today.isoformat())
+                upd.execute()
+                
+                # Return updated usage
+                updated_usage = {
+                    "tokens_used": current_tokens + tokens,
+                    "messages_count": current_messages + message_count,
+                    "game_reviews_count": current.get("game_reviews_count", 0),
+                    "lessons_count": current.get("lessons_count", 0)
+                }
+            else:
+                # Create new record
+                data = {
+                    "usage_date": today.isoformat(),
+                    "tokens_used": tokens,
+                    "messages_count": message_count
+                }
+                if user_id:
+                    data["user_id"] = user_id
+                else:
+                    data["ip_address"] = ip_address
+                
+                self.client.table("daily_usage").insert(data).execute()
+                
+                updated_usage = {
+                    "tokens_used": tokens,
+                    "messages_count": message_count,
+                    "game_reviews_count": 0,
+                    "lessons_count": 0
+                }
+            
+            # Invalidate cache
+            self.invalidate_usage_cache(user_id, ip_address, today)
+            
+            return True, updated_usage
+        except Exception as e:
+            print(f"[daily_usage] Error deducting usage: {e}")
+            import traceback
+            traceback.print_exc()
+            return False, None
+    
     # ============================================================================
     # GAMES
     # ============================================================================
