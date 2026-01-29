@@ -2396,8 +2396,23 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
       alreadyTriggered: analysisTriggeredRef.current
     });
     
+    // Add explicit condition breakdown for debugging
+    const condition1 = hasIndexedGames;
+    const condition2 = !hasAnalyzedGames;
+    const condition3 = isReadyForAnalysis;
+    const condition4 = !analysisTriggeredRef.current;
+    const allConditionsMet = condition1 && condition2 && condition3 && condition4;
+    
+    console.log('[AutoAnalysis] Condition breakdown:', {
+      'hasIndexedGames': condition1,
+      '!hasAnalyzedGames': condition2,
+      'isReadyForAnalysis': condition3,
+      '!alreadyTriggered': condition4,
+      'ALL_MET': allConditionsMet
+    });
+    
     // If we have indexed games but no analyzed games, and we're ready (idle/completed/reviewing), auto-trigger frontend analysis
-    if (hasIndexedGames && !hasAnalyzedGames && isReadyForAnalysis && !analysisTriggeredRef.current) {
+    if (allConditionsMet) {
       const indexedCount = profileStatus?.games_indexed || 0;
       const gamesToAnalyze = Math.min(indexedCount, targetGames);
       
