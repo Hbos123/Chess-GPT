@@ -50,10 +50,15 @@ export default function OverviewTab({ data, profileStatus, onOpenPersonalReview,
       const gameMatch = message.match(/[Gg]ame (\d+)\/(\d+)/i) || message.match(/[Aa]nalyzing [Gg]ame (\d+)\/(\d+)/i);
       const moveMatch = message.match(/[Mm]ove (\d+)\/(\d+)/i) || message.match(/[Aa]nalyzing [Mm]ove (\d+)\/(\d+)/i);
       
+      // Use target_games from profileStatus as the authoritative source for total games
+      // This ensures we always show the subscription tier limit, not the backend response
+      const targetGamesFromStatus = profileStatus?.target_games || targetGames || 5;
+      
       if (gameMatch || moveMatch || (status === "analyzing" && message)) {
         setAnalysisProgress({
           currentGame: gameMatch ? parseInt(gameMatch[1]) : (analysisProgress?.currentGame || 0),
-          totalGames: gameMatch ? parseInt(gameMatch[2]) : (analysisProgress?.totalGames || 0),
+          // Always use target_games from subscription tier, not from the message
+          totalGames: targetGamesFromStatus,
           currentMove: moveMatch ? parseInt(moveMatch[1]) : (analysisProgress?.currentMove || 0),
           totalMoves: moveMatch ? parseInt(moveMatch[2]) : (analysisProgress?.totalMoves || 0),
           message: message,
@@ -70,7 +75,7 @@ export default function OverviewTab({ data, profileStatus, onOpenPersonalReview,
     return () => {
       window.removeEventListener('analysis-progress' as any, handleProgress as EventListener);
     };
-  }, []);
+  }, [profileStatus?.target_games, targetGames]); // Add target_games as dependency
   
   // Load linked accounts from profile overview
   useEffect(() => {
@@ -266,7 +271,7 @@ export default function OverviewTab({ data, profileStatus, onOpenPersonalReview,
     }
     if (profileStatus?.state === "analyzing" || profileStatus?.state === "reviewing") {
       const analyzed = profileStatus?.deep_analyzed_games || activeGames || 0;
-      const total = profileStatus?.games_indexed || analyzed;
+      const total = targetGames; // Use target_games from subscription tier instead of games_indexed
       if (total > 0 && analyzed < total) {
         return `Analyzing game ${analyzed + 1} of ${total}...`;
       }

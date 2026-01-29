@@ -71,22 +71,29 @@ export async function fetchAndReviewGamesFrontend(
       platform,
       fetchOptions
     );
+    
+    // Limit to max_games from subscription tier (this is the authoritative source)
+    const limitedGames = gamesToAnalyze.slice(0, max_games);
+    if (limitedGames.length < gamesToAnalyze.length) {
+      console.log(`[GameReviewOrchestrator] Limiting to ${max_games} games (tier limit) from ${gamesToAnalyze.length} available`);
+    }
+    
     // Reduced logging - only log if many games
-    if (gamesToAnalyze.length > 10) {
-      console.log(`[GameReviewOrchestrator] ${gamesToAnalyze.length} games to analyze`);
+    if (limitedGames.length > 10) {
+      console.log(`[GameReviewOrchestrator] ${limitedGames.length} games to analyze (of ${gamesToAnalyze.length} available)`);
     }
 
-    if (!gamesToAnalyze || gamesToAnalyze.length === 0) {
+    if (!limitedGames || limitedGames.length === 0) {
       result.success = true;
       return result;
     }
 
-    result.games_fetched = gamesToAnalyze.length;
+    result.games_fetched = limitedGames.length;
 
     if (progressCallback) {
       progressCallback(
         "analyzing",
-        `Found ${gamesToAnalyze.length} game(s) to analyze`,
+        `Found ${limitedGames.length} game(s) to analyze (of ${gamesToAnalyze.length} available)`,
         0.1
       );
     }
@@ -95,16 +102,16 @@ export async function fetchAndReviewGamesFrontend(
     const reviews: GameReview[] = [];
     const errors: string[] = [];
 
-    for (let i = 0; i < gamesToAnalyze.length; i++) {
-      const game = gamesToAnalyze[i];
-      const gameProgress = 0.1 + (0.7 * i) / gamesToAnalyze.length;
-      const nextGameProgress = 0.1 + (0.7 * (i + 1)) / gamesToAnalyze.length;
+    for (let i = 0; i < limitedGames.length; i++) {
+      const game = limitedGames[i];
+      const gameProgress = 0.1 + (0.7 * i) / limitedGames.length;
+      const nextGameProgress = 0.1 + (0.7 * (i + 1)) / limitedGames.length;
 
       try {
         if (progressCallback) {
           progressCallback(
             "analyzing",
-            `Analyzing game ${i + 1}/${gamesToAnalyze.length}...`,
+            `Analyzing game ${i + 1}/${limitedGames.length}...`,
             gameProgress
           );
         }
@@ -121,21 +128,21 @@ export async function fetchAndReviewGamesFrontend(
               // Format message to include both game and move info for better parsing
               const moveMatch = message.match(/move (\d+)\/(\d+)/i) || message.match(/Analyzing move (\d+)\/(\d+)/i);
               if (moveMatch) {
-                // Include both game and move info in a format that OverviewTab can parse
-                progressCallback(phase, `Game ${i + 1}/${gamesToAnalyze.length} - Move ${moveMatch[1]}/${moveMatch[2]}`, scaledProgress, replace);
+                // Use limitedGames.length (max_games from subscription tier) instead of gamesToAnalyze.length
+                progressCallback(phase, `Game ${i + 1}/${limitedGames.length} - Move ${moveMatch[1]}/${moveMatch[2]}`, scaledProgress, replace);
               } else {
-                progressCallback(phase, `Game ${i + 1}/${gamesToAnalyze.length} - ${message}`, scaledProgress, replace);
+                progressCallback(phase, `Game ${i + 1}/${limitedGames.length} - ${message}`, scaledProgress, replace);
               }
             }
           }
         );
 
         // Reduced logging - only log every 5th game or last game
-        if (i % 5 === 0 || i === gamesToAnalyze.length - 1) {
+        if (i % 5 === 0 || i === limitedGames.length - 1) {
           const accuracy = typeof review.stats === 'object' && 'overall_accuracy' in review.stats
             ? (review.stats as any).overall_accuracy ?? 0
             : (review.stats as any).overall_accuracy ?? 0;
-          console.log(`[GameReviewOrchestrator] Game ${i + 1}/${gamesToAnalyze.length}: ${accuracy.toFixed(1)}%`);
+          console.log(`[GameReviewOrchestrator] Game ${i + 1}/${limitedGames.length}: ${accuracy.toFixed(1)}%`);
         }
         reviews.push(review);
 
@@ -143,7 +150,7 @@ export async function fetchAndReviewGamesFrontend(
         if (progressCallback) {
           progressCallback(
             "saving",
-            `Saving game ${i + 1}/${gamesToAnalyze.length}...`,
+            `Saving game ${i + 1}/${limitedGames.length}...`,
             nextGameProgress - 0.05
           );
         }
@@ -153,8 +160,8 @@ export async function fetchAndReviewGamesFrontend(
           if (gameId) {
             result.games_saved++;
             // Reduced logging - only log every 5th save or errors
-            if (result.games_saved % 5 === 0 || result.games_saved === gamesToAnalyze.length) {
-              console.log(`[GameReviewOrchestrator] Saved ${result.games_saved}/${gamesToAnalyze.length} games`);
+            if (result.games_saved % 5 === 0 || result.games_saved === limitedGames.length) {
+              console.log(`[GameReviewOrchestrator] Saved ${result.games_saved}/${limitedGames.length} games`);
             }
           } else {
             errors.push(`Failed to save game ${i + 1}`);
@@ -185,7 +192,7 @@ export async function fetchAndReviewGamesFrontend(
         if (progressCallback) {
           progressCallback(
             "complete",
-            `Completed game ${i + 1}/${gamesToAnalyze.length}`,
+            `Completed game ${i + 1}/${limitedGames.length}`,
             nextGameProgress
           );
         }
@@ -208,8 +215,8 @@ export async function fetchAndReviewGamesFrontend(
     }
 
     // Set first game and review
-    if (gamesToAnalyze.length > 0) {
-      result.first_game = gamesToAnalyze[0];
+    if (limitedGames.length > 0) {
+      result.first_game = limitedGames[0];
     }
     if (reviews.length > 0) {
       result.first_game_review = reviews[0];
