@@ -253,7 +253,7 @@ export default function OverviewTab({ data, profileStatus, onOpenPersonalReview,
       return `${needed} more game${needed > 1 ? 's' : ''} needed`;
     }
     if (activeGames === targetGames && activeGames > 0) {
-      return "60-game window complete";
+      return `${targetGames}-game window complete`;
     }
     return "No games analyzed yet";
   };
