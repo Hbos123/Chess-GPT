@@ -51,6 +51,13 @@ export async function wipeMyData(userId?: string): Promise<void> {
 
 // Make it available on window for easy console access
 if (typeof window !== 'undefined') {
+  // Use a function to ensure it's available immediately
   (window as any).wipeMyData = wipeMyData;
-  console.log('💡 Console helper loaded! Type: await wipeMyData()');
+  // Also add a global reference
+  (globalThis as any).wipeMyData = wipeMyData;
+  
+  // Log when module loads (only in dev to avoid spam)
+  if (process.env.NODE_ENV === 'development') {
+    console.log('💡 Console helper loaded! Type: await wipeMyData()');
+  }
 }

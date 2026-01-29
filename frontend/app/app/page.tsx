@@ -60,7 +60,7 @@ import {
 } from "@/lib/api";
 import { getBackendBase } from "@/lib/backendBase";
 import { fetchAndReviewGamesFrontend } from "@/lib/gameReviewOrchestrator";
-import "@/lib/wipeUserData"; // Load console helper
+import { wipeMyData } from "@/lib/wipeUserData";
 import "../../styles/chatUI.css";
 import "../styles.css";
 
@@ -223,6 +223,14 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
     } catch {
       const id = `sess_${Date.now()}_${Math.random().toString(16).slice(2)}`;
       setSessionId(id);
+    }
+  }, []);
+
+  // Attach wipeMyData to window for console access
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      (window as any).wipeMyData = wipeMyData;
+      console.log('💡 Console helper loaded! Type: await wipeMyData()');
     }
   }, []);
   
