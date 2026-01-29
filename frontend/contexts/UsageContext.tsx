@@ -62,41 +62,59 @@ export function UsageProvider({ children }: { children: React.ReactNode }) {
         })
       });
 
+      console.log('[UsageContext] check_limits response:', {
+        status: response.status,
+        ok: response.ok,
+        statusText: response.statusText
+      });
+
       if (response.ok) {
         const data = await response.json();
+        console.log('[UsageContext] Response data:', JSON.stringify(data, null, 2));
+        
         if (data.info) {
           const messages = data.info.messages || {};
           const tokens = data.info.tokens || {};
           const gameReviews = data.info.game_reviews || {};
           const lessons = data.info.lessons || {};
           
+          console.log('[UsageContext] Parsed info:', {
+            messages,
+            tokens,
+            gameReviews,
+            lessons,
+            tier_id: data.info.tier_id
+          });
+          
           setUsage({
             messages: {
-              used: messages.used || 0,
-              limit: messages.limit || 0,
-              remaining: (messages.limit || 0) - (messages.used || 0)
+              used: messages.used ?? 0,
+              limit: messages.limit ?? 0,
+              remaining: Math.max(0, (messages.limit ?? 0) - (messages.used ?? 0))
             },
             tokens: {
-              used: tokens.used || 0,
-              limit: tokens.limit || 0,
-              remaining: (tokens.limit || 0) - (tokens.used || 0)
+              used: tokens.used ?? 0,
+              limit: tokens.limit ?? 0,
+              remaining: Math.max(0, (tokens.limit ?? 0) - (tokens.used ?? 0))
             },
             gameReviews: {
-              used: gameReviews.used || 0,
-              limit: gameReviews.limit || 0,
+              used: gameReviews.used ?? 0,
+              limit: gameReviews.limit ?? 0,
               remaining: typeof gameReviews.remaining === 'number' 
                 ? gameReviews.remaining 
-                : (gameReviews.limit === 'unlimited' ? 'unlimited' : 0)
+                : (gameReviews.limit === 'unlimited' ? 'unlimited' : Math.max(0, (gameReviews.limit ?? 0) - (gameReviews.used ?? 0)))
             },
             lessons: {
-              used: lessons.used || 0,
-              limit: lessons.limit || 0,
+              used: lessons.used ?? 0,
+              limit: lessons.limit ?? 0,
               remaining: typeof lessons.remaining === 'number'
                 ? lessons.remaining
-                : (lessons.limit === 'unlimited' ? 'unlimited' : 0)
+                : (lessons.limit === 'unlimited' ? 'unlimited' : Math.max(0, (lessons.limit ?? 0) - (lessons.used ?? 0)))
             },
             tier_id: data.info.tier_id || 'unpaid'
           });
+        } else {
+          console.warn('[UsageContext] No info in response:', data);
         }
       } else if (response.status === 429) {
         // Rate limit exceeded - parse error info to show usage

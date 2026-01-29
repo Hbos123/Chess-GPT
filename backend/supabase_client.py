@@ -535,6 +535,48 @@ class SupabaseClient:
         self._increment_message_count(user_id, None)
         return True, "", {"used": messages_count + 1, "limit": max_messages}
 
+    def get_message_usage(
+        self,
+        user_id: Optional[str],
+        ip_address: Optional[str],
+        tier_info: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        Get current message usage WITHOUT incrementing (read-only).
+        Used by /check_limits endpoint to display current usage.
+        
+        Returns:
+            dict with "used", "limit", "remaining"
+        """
+        # Unsigned users: 1 message/day
+        if not user_id:
+            if not ip_address:
+                return {"used": 0, "limit": 1, "remaining": 1}
+            
+            today = datetime.now().date()
+            usage = self._get_daily_usage(None, ip_address, today, use_cache=True)
+            messages_count = usage.get("messages_count", 0) if usage else 0
+            
+            return {
+                "used": messages_count,
+                "limit": 1,
+                "remaining": max(0, 1 - messages_count)
+            }
+        
+        # Signed-in users: check tier limits
+        tier = tier_info.get("tier", {})
+        max_messages = tier.get("daily_messages", 2)  # Default to 2 for unpaid
+        
+        today = datetime.now().date()
+        usage = self._get_daily_usage(user_id, None, today, use_cache=True)
+        messages_count = usage.get("messages_count", 0) if usage else 0
+        
+        return {
+            "used": messages_count,
+            "limit": max_messages,
+            "remaining": max(0, max_messages - messages_count)
+        }
+
     def check_token_limit(
         self,
         user_id: Optional[str],

@@ -3455,18 +3455,32 @@ async def check_limits(request: CheckLimitsRequest, req: Request):
                     }
                 }
             
-            # Check message limit
-            msg_allowed, msg_error, msg_info = supabase_client.check_message_limit(
-                user_id, ip_address, tier_info
-            )
-            if not msg_allowed:
+            # Get message usage (read-only, doesn't increment)
+            msg_info = supabase_client.get_message_usage(user_id, ip_address, tier_info)
+            
+            # Check if message limit would be exceeded (for 429 response)
+            if msg_info["remaining"] <= 0:
+                tier_id = tier_info.get("tier_id", "unpaid")
+                if tier_id == "unpaid":
+                    msg_error = f"Daily message limit exceeded ({msg_info['used']}/{msg_info['limit']}). Upgrade to Lite for 15 messages/day."
+                    next_step = "upgrade_lite"
+                else:
+                    msg_error = f"Daily message limit exceeded ({msg_info['used']}/{msg_info['limit']}). Upgrade your plan for more messages."
+                    next_step = "upgrade"
+                
                 response = JSONResponse(
                     status_code=429,
                     content={
                         "allowed": False,
                         "error": "message_limit",
                         "message": msg_error,
-                        "info": msg_info,
+                        "info": {
+                            "messages": msg_info,
+                            "tokens": {},
+                            "game_reviews": {},
+                            "lessons": {},
+                            "tier_id": tier_id
+                        },
                         "type": "message_limit"
                     }
                 )
@@ -3474,21 +3488,71 @@ async def check_limits(request: CheckLimitsRequest, req: Request):
                 _check_limits_cache[cache_key] = (response, time.time())
                 return response
             
-            # Check token limit
-            token_allowed, token_error, token_info = supabase_client.check_token_limit(
-                user_id, ip_address, tier_info, estimated_tokens=request.estimated_tokens
-            )
-            if not token_allowed:
-                # Include tier_id in response for frontend to customize message
-                token_info_with_tier = token_info.copy() if token_info else {}
-                token_info_with_tier["tier_id"] = tier_info.get("tier_id", "unpaid")
+            # Get token usage (read-only check)
+            today = datetime.now().date()
+            usage = supabase_client._get_daily_usage(user_id, ip_address, today, use_cache=True)
+            tokens_used = usage.get("tokens_used", 0) if usage else 0
+            tier = tier_info.get("tier", {})
+            max_tokens = tier.get("daily_tokens", 15000)
+            
+            token_info = {
+                "used": tokens_used,
+                "limit": max_tokens,
+                "remaining": max(0, max_tokens - tokens_used)
+            }
+            
+            # Check if token limit would be exceeded (for 429 response)
+            if token_info["remaining"] < request.estimated_tokens:
+                tier_id = tier_info.get("tier_id", "unpaid")
+                if tier_id == "unpaid":
+                    if not user_id:
+                        token_error = f"Token limit exceeded ({tokens_used}/{max_tokens}). Sign in to get 15k tokens/day, or upgrade for more."
+                        next_step = "sign_in"
+                    else:
+                        token_error = f"Token limit exceeded ({tokens_used}/{max_tokens}). Upgrade to Lite for 43k tokens/day."
+                        next_step = "upgrade_lite"
+                else:
+                    token_error = f"Token limit exceeded ({tokens_used}/{max_tokens}). Upgrade your plan for more tokens."
+                    next_step = "upgrade"
+                
+                # Get available tools info
+                available_tools = {}
+                max_reviews = tier.get("max_game_reviews_per_day")
+                if max_reviews is None:
+                    available_tools["game_reviews"] = {"available": True, "limit": "unlimited"}
+                elif max_reviews > 0:
+                    reviews_used = usage.get("game_reviews_count", 0) if usage else 0
+                    available_tools["game_reviews"] = {
+                        "available": reviews_used < max_reviews,
+                        "used": reviews_used,
+                        "limit": max_reviews
+                    }
+                else:
+                    available_tools["game_reviews"] = {"available": False, "limit": 0}
+                
+                max_lessons = tier.get("max_lessons_per_day")
+                if max_lessons is None:
+                    available_tools["lessons"] = {"available": True, "limit": "unlimited"}
+                elif max_lessons > 0:
+                    lessons_used = usage.get("lessons_count", 0) if usage else 0
+                    available_tools["lessons"] = {
+                        "available": lessons_used < max_lessons,
+                        "used": lessons_used,
+                        "limit": max_lessons
+                    }
+                else:
+                    available_tools["lessons"] = {"available": False, "limit": 0}
+                
+                token_info["available_tools"] = available_tools
+                token_info["tier_id"] = tier_id
+                
                 response = JSONResponse(
                     status_code=429,
                     content={
                         "allowed": False,
                         "error": "token_limit",
                         "message": token_error,
-                        "info": token_info_with_tier,
+                        "info": token_info,
                         "type": "token_limit"
                     }
                 )
@@ -3537,6 +3601,14 @@ async def check_limits(request: CheckLimitsRequest, req: Request):
                         "limit": max_lessons,
                         "remaining": max(0, max_lessons - used_lessons)
                     }
+            
+            # Ensure token_info has the right structure
+            if not token_info:
+                token_info = {
+                    "used": tokens_used,
+                    "limit": max_tokens,
+                    "remaining": max(0, max_tokens - tokens_used)
+                }
             
             response = {
                 "allowed": True,
