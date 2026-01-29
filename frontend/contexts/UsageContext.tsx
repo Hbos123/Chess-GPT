@@ -71,6 +71,7 @@ export function UsageProvider({ children }: { children: React.ReactNode }) {
       if (response.ok) {
         const data = await response.json();
         console.log('[UsageContext] Response data:', JSON.stringify(data, null, 2));
+        console.log('[UsageContext] Full response object:', data);
         
         if (data.info) {
           const messages = data.info.messages || {};

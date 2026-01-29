@@ -2138,13 +2138,33 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
       // fetchWithRetry now has built-in timeout (8s)
       const data = await fetchProfileOverview(user.id);
       
+      console.log('[ProfileData] Fetched profile overview:', {
+        hasPreferences: !!data.preferences,
+        accountsCount: data.preferences?.accounts?.length || 0,
+        accounts: data.preferences?.accounts || [],
+        status: data.status,
+        gamesCount: data.games?.length || 0,
+        highlightsCount: data.highlights?.length || 0,
+        rawData: data
+      });
+      
       // Update state with new data (don't clear first - causes re-render loops)
       setProfileOverview(data);
       if (data.status) {
         setProfileStatus(data.status);
+        console.log('[ProfileData] Profile status:', {
+          gamesIndexed: data.status.games_indexed,
+          deepAnalyzedGames: data.status.deep_analyzed_games,
+          state: data.status.state,
+          message: data.status.message
+        });
       }
       
       const normalized = normalizeProfilePreferences(data.preferences as any);
+      console.log('[ProfileData] Normalized preferences:', {
+        normalized,
+        accountsAfterNormalize: normalized?.accounts?.length || 0
+      });
       
       if (normalized && normalized.accounts.length > 0) {
         // Create new object to force React update
@@ -2152,9 +2172,13 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
           accounts: [...normalized.accounts],
           timeControls: [...normalized.timeControls]
         });
+        console.log('[ProfileData] ✅ Set profile preferences with', normalized.accounts.length, 'accounts');
         setShowProfileSetupModal(false);
       } else {
-        console.warn("⚠️ No normalized preferences or empty accounts");
+        console.warn("⚠️ No normalized preferences or empty accounts", {
+          normalized,
+          rawPreferences: data.preferences
+        });
         // Don't set to null if we have data, just keep existing
         if (!normalized) {
           setProfilePreferences(null);

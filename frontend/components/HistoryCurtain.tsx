@@ -1737,26 +1737,38 @@ export default function HistoryCurtain({
             <p className="settings-note">
               To link your chess accounts, use the "Personal" area and click "Edit profile setup".
             </p>
-            {profilePreferences?.accounts && profilePreferences.accounts.length > 0 ? (
-              <div className="linked-accounts-list">
-                {profilePreferences.accounts.map((acc, idx) => {
-                  const platformRaw = String((acc as any).platform || "");
-                  const platformLabel =
-                    platformRaw === "chesscom" || platformRaw === "chess.com"
-                      ? "Chess.com"
-                      : "Lichess";
-                  const usernameLabel = maskUsernamesInUI ? maskUsername(acc.username) : (acc.username || "Not set");
-                  return (
-                    <div key={idx} className="linked-account-item">
-                      <span className="account-platform">{platformLabel}</span>
-                      <span className="account-username">{usernameLabel}</span>
-                    </div>
-                  );
-                })}
-              </div>
-            ) : (
-              <p className="settings-empty">No accounts linked yet.</p>
-            )}
+            {(() => {
+              const accounts = profilePreferences?.accounts || [];
+              console.log('[HistoryCurtain] Linked accounts from profilePreferences:', {
+                hasPreferences: !!profilePreferences,
+                accountsCount: accounts.length,
+                accounts: accounts,
+                rawPreferences: profilePreferences
+              });
+              
+              if (accounts.length > 0) {
+                return (
+                  <div className="linked-accounts-list">
+                    {accounts.map((acc, idx) => {
+                      const platformRaw = String((acc as any).platform || "");
+                      const platformLabel =
+                        platformRaw === "chesscom" || platformRaw === "chess.com"
+                          ? "Chess.com"
+                          : "Lichess";
+                      const usernameLabel = maskUsernamesInUI ? maskUsername(acc.username) : (acc.username || "Not set");
+                      return (
+                        <div key={idx} className="linked-account-item">
+                          <span className="account-platform">{platformLabel}</span>
+                          <span className="account-username">{usernameLabel}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              } else {
+                return <p className="settings-empty">No accounts linked yet.</p>;
+              }
+            })()}
           </fieldset>
         </form>
       </div>

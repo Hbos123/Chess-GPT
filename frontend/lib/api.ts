@@ -403,6 +403,7 @@ export async function saveProfilePreferences(
 }
 
 export async function fetchProfileOverview(userId: string): Promise<ProfileOverviewResponse> {
+  console.log('[API] fetchProfileOverview called for user:', userId);
   const params = new URLSearchParams({ user_id: userId });
   const response = await fetchWithRetry(`${getBackendUrl()}/profile/overview?${params.toString()}`);
   if (!response.ok) {

@@ -3469,7 +3469,8 @@ async def check_limits(request: CheckLimitsRequest, req: Request):
                     next_step = "upgrade"
                 
                 # Get full usage info even when message limit is exceeded
-                today = datetime.now().date()
+                from datetime import datetime as dt
+                today = dt.now().date()
                 usage = supabase_client._get_daily_usage(user_id, ip_address, today, use_cache=True)
                 tokens_used = usage.get("tokens_used", 0) if usage else 0
                 tier = tier_info.get("tier", {})
@@ -3528,7 +3529,8 @@ async def check_limits(request: CheckLimitsRequest, req: Request):
                 return response
             
             # Get token usage (read-only check)
-            today = datetime.now().date()
+            from datetime import datetime as dt
+            today = dt.now().date()
             usage = supabase_client._get_daily_usage(user_id, ip_address, today, use_cache=True)
             tokens_used = usage.get("tokens_used", 0) if usage else 0
             tier = tier_info.get("tier", {})
@@ -3647,7 +3649,8 @@ async def check_limits(request: CheckLimitsRequest, req: Request):
         print(f"⚠️ Limit check failed: {e}")
         import traceback
         traceback.print_exc()
-        # On error, allow (backend will check again)
+        # On error, allow (backend will check again) but log the error details
+        print(f"⚠️ [CHECK_LIMITS] Error details - user_id: {request.user_id if hasattr(request, 'user_id') else 'unknown'}, error: {str(e)}")
         return {"allowed": True, "message": "Limit check error, allowing request"}
 
 
