@@ -2,9 +2,19 @@ import type { Metadata, Viewport } from "next";
 import "./styles.css";
 import Providers from "./providers";
 
+// Get canonical URL (the one that doesn't redirect)
+const getCanonicalUrl = (): string => {
+  const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'https://chesster.app';
+  return baseUrl.replace(/\/$/, '');
+};
+
 export const metadata: Metadata = {
   title: "Chesster",
   description: "AI-powered chess analysis and training",
+  metadataBase: new URL(getCanonicalUrl()),
+  alternates: {
+    canonical: '/',
+  },
   icons: {
     icon: [
       // Use PNG for the tab/favicon to avoid browser SVG favicon rendering quirks.
@@ -28,6 +38,7 @@ export const metadata: Metadata = {
     siteName: "Chesster",
     title: "Chesster",
     description: "AI-powered chess analysis and training",
+    url: getCanonicalUrl(),
   },
   twitter: {
     card: "summary",
