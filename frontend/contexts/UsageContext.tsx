@@ -168,7 +168,7 @@ export function UsageProvider({ children }: { children: React.ReactNode }) {
           table: 'daily_usage',
           filter: `user_id=eq.${user.id}`
         },
-        (payload) => {
+        (payload: any) => {
           console.log('[UsageContext] Daily usage changed:', payload);
           // Refresh usage when database changes (syncs across tabs/devices)
           fetchUsage();
