@@ -4523,7 +4523,7 @@ async def llm_chat_stream(request: LLMRequest, http_request: Request):
                     if user_id:
                         tier_info = supabase_client.get_subscription_overview(user_id)
                     else:
-                        tier_info = {"tier_id": "unpaid", "tier": {"daily_tokens": 20000, "max_game_reviews_per_day": 0, "max_lessons_per_day": 0}}  # Unpaid logged-in users get 20000 for 2 messages
+                        tier_info = {"tier_id": "unpaid", "tier": {"daily_tokens": 10000, "max_game_reviews_per_day": 0, "max_lessons_per_day": 0}}  # Anonymous users get 10000 for 1 message
                     
                     # Check token limit (estimate ~5k tokens for a typical request)
                     token_allowed, token_error, token_info = supabase_client.check_token_limit(
