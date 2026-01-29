@@ -9,7 +9,7 @@ async function ensureEngine() {
   if (!engine) {
     engine = await (STOCKFISH as any)();
     engine.onmessage = (line: any) => {
-      const text = typeof line === 'string' ? line : line?.data;
+      const text = typeof line === 'string' ? line : (line?.data || String(line));
       (self as any).postMessage({ type: 'sf', data: text });
     };
   }
@@ -18,13 +18,24 @@ async function ensureEngine() {
 self.onmessage = async (ev: MessageEvent) => {
   const msg = ev.data;
   if (msg?.cmd === 'init') {
-    await ensureEngine();
-    (self as any).postMessage({ type: 'ready' });
+    try {
+      await ensureEngine();
+      (self as any).postMessage({ type: 'ready' });
+    } catch (error) {
+      console.error('[Stockfish Worker] Init failed:', error);
+      (self as any).postMessage({ type: 'error', error: String(error) });
+    }
     return;
   }
   if (msg?.cmd === 'send') {
-    await ensureEngine();
-    engine.postMessage(msg.data);
+    try {
+      await ensureEngine();
+      if (engine && engine.postMessage) {
+        engine.postMessage(msg.data);
+      }
+    } catch (error) {
+      console.error('[Stockfish Worker] Send failed:', error);
+    }
   }
 };
 
