@@ -191,8 +191,6 @@ export default function ProfileDashboard({ onClose, initialTab = 'overview', onC
     };
   }, [user?.id, backendBase, profileStatus?.state]);
 
-  // TEMPORARY: Comment out pattern history fetch - UNCOMMENT AFTER FORMATTING IS DONE
-  /*
   // Fetch pattern history for graphing
   useEffect(() => {
     if (!user?.id) return;
@@ -218,7 +216,7 @@ export default function ProfileDashboard({ onClose, initialTab = 'overview', onC
     fetchPatternHistory();
     
     // Refresh pattern history more frequently when analyzing
-    const isAnalyzing = profileStatus?.state === "analyzing" || profileStatus?.state === "fetching";
+    const isAnalyzing = profileStatus?.state === "analyzing" || profileStatus?.state === "fetching" || profileStatus?.state === "reviewing";
     const refreshInterval = isAnalyzing ? 5000 : 30000; // 5s when analyzing, 30s otherwise
     
     const interval = setInterval(fetchPatternHistory, refreshInterval);
@@ -456,7 +454,7 @@ export default function ProfileDashboard({ onClose, initialTab = 'overview', onC
     const getAnalyticsPollInterval = () => {
       const state = profileStatus?.state;
       // Poll every 3 seconds when analyzing (to catch pattern updates), otherwise 15 seconds
-      return (state === "analyzing" || state === "fetching") ? 3000 : 15000;
+      return (state === "analyzing" || state === "fetching" || state === "reviewing") ? 3000 : 15000;
     };
     
     // Start with initial interval (use debounced version to prevent rapid-fire)
@@ -488,7 +486,6 @@ export default function ProfileDashboard({ onClose, initialTab = 'overview', onC
       clearInterval(statusCheckInterval);
     };
   }, [user?.id, backendBase, profileStatus?.state]);
-  */ // END TEMPORARY COMMENT - UNCOMMENT ABOVE AFTER FORMATTING IS DONE
 
   const tabs: { id: TabType; label: string }[] = [
     { id: 'overview', label: 'Overview' },
