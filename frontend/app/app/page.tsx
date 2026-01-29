@@ -2304,7 +2304,7 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
     };
   }, [user, analysisInProgress]);
 
-  // Auto-start analysis when accounts are linked
+  // Auto-start indexing on tab open when accounts are linked
   const indexingStartedRef = useRef(false);
   useEffect(() => {
     if (!user?.id || !profilePreferences?.accounts?.length) {
@@ -2312,22 +2312,32 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
       return;
     }
     
-    // Check if analysis should start automatically
-    const shouldAutoStart = !indexingStartedRef.current &&
-                           profileStatus?.state === 'idle' && 
-                           (profileStatus?.deep_analyzed_games || 0) < (profileStatus?.target_games || 60);
+    const targetGames = profileStatus?.target_games ?? 0;
+    if (targetGames <= 0) {
+      indexingStartedRef.current = false;
+      return;
+    }
+
+    const state = profileStatus?.state || 'idle';
+    const isIndexingBusy = ['fetching', 'indexing'].includes(state);
+    const indexed = profileStatus?.games_indexed || 0;
+
+    // Kick off indexing once per browser tab load, as long as we're not already indexing.
+    // This ensures profile analysis begins automatically when a new tab is opened.
+    const shouldAutoStart = !indexingStartedRef.current && !isIndexingBusy && indexed < targetGames;
     
     if (shouldAutoStart) {
       indexingStartedRef.current = true;
-      console.log('[AutoAnalysis] Accounts linked, starting analysis automatically', {
-        deepAnalyzed: profileStatus?.deep_analyzed_games,
-        target: profileStatus?.target_games
+      console.log('[AutoAnalysis] Accounts linked, starting indexing automatically', {
+        indexed,
+        target: targetGames,
+        state
       });
-      // Trigger analysis by calling the backend endpoint
+      // Trigger indexing by calling the backend endpoint
       fetch(`${getBackendBase()}/profile/start_indexing?user_id=${user.id}`, { method: 'POST' })
         .then(res => {
           if (res.ok) {
-            console.log('[AutoAnalysis] Analysis started successfully');
+            console.log('[AutoAnalysis] Indexing started successfully');
           } else {
             console.warn('[AutoAnalysis] Failed to start:', res.status);
             indexingStartedRef.current = false; // Reset on failure
@@ -2338,7 +2348,7 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
           indexingStartedRef.current = false; // Reset on error
         });
     }
-  }, [user?.id, profilePreferences?.accounts?.length, profileStatus?.state]); // Removed deep_analyzed_games and target_games from deps to prevent re-triggering
+  }, [user?.id, profilePreferences?.accounts?.length, profileStatus?.state, profileStatus?.games_indexed, profileStatus?.target_games]);
 
   // Lightweight check for up-to-date games on boot
   useEffect(() => {
@@ -2386,9 +2396,8 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
       return;
     }
     
-    // Check if we have indexed games but no analyzed games
-    const hasIndexedGames = (profileStatus?.games_indexed || 0) > 0;
-    const hasAnalyzedGames = (profileStatus?.deep_analyzed_games || 0) > 0;
+    const indexedCount = profileStatus?.games_indexed || 0;
+    const analyzedCount = profileStatus?.deep_analyzed_games || 0;
     // Allow auto-analysis when state is idle, complete, completed, or reviewing (but not actively fetching/indexing)
     const isReadyForAnalysis = ['idle', 'complete', 'completed', 'reviewing'].includes(profileStatus?.state || '');
     const targetGames = profileStatus?.target_games || 60;
@@ -2399,15 +2408,15 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
     }
     
     // Reduced logging - only log when actually triggering
-    const condition1 = hasIndexedGames;
-    const condition2 = !hasAnalyzedGames;
+    const needsAnalysis = indexedCount > analyzedCount && analyzedCount < targetGames;
+    const condition1 = indexedCount > 0;
+    const condition2 = needsAnalysis;
     const condition3 = isReadyForAnalysis;
     const condition4 = !analysisTriggeredRef.current;
     const allConditionsMet = condition1 && condition2 && condition3 && condition4;
     
-    // If we have indexed games but no analyzed games, and we're ready (idle/completed/reviewing), auto-trigger frontend analysis
+    // If we have indexed games that still need analysis, and we're ready (idle/completed/reviewing), auto-trigger frontend analysis
     if (allConditionsMet) {
-      const indexedCount = profileStatus?.games_indexed || 0;
       const gamesToAnalyze = Math.min(indexedCount, targetGames);
       
       // Reduced logging - only log key events
@@ -2511,8 +2520,8 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
         console.warn('[AutoAnalysis] ⚠️ No valid account found for auto-analysis');
         analysisTriggeredRef.current = false;
       }
-    } else if (hasAnalyzedGames) {
-      // Reset if games get analyzed
+    } else if (!needsAnalysis) {
+      // Reset if we're caught up (so future new games can trigger again)
       analysisTriggeredRef.current = false;
     }
   }, [user?.id, profileStatus?.games_indexed, profileStatus?.deep_analyzed_games, profileStatus?.state, profileStatus?.target_games]);
