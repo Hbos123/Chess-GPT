@@ -505,23 +505,12 @@ export default function PersonalReview({ onClose }: PersonalReviewProps) {
         return;
       }
 
-        console.log("[PersonalReview] Tier check passed:", {
-          tierId,
-          maxReviewsPerDay,
-          gameReviewsInfo,
-        });
-      } catch (limitsError: any) {
-        console.error("[PersonalReview] Error checking limits:", limitsError);
-        // If it's a 403/429 error, show the message
-        if (limitsError.message && (limitsError.message.includes("not available") || limitsError.message.includes("limit"))) {
-          setError(limitsError.message);
-          setStep("input");
-          setIsLoading(false);
-          return;
-        }
-        // Otherwise, continue (might be a network error)
-        console.warn("[PersonalReview] Continuing despite limits check error");
-      }
+      console.log("[PersonalReview] Tier check passed:", {
+        tierId,
+        limit,
+        used,
+        gameReviewsInfo,
+      });
 
       setProgress("Running deep analysis...");
 
