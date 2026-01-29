@@ -7502,8 +7502,30 @@ async def profile_overview(user_id: str):
     status = _default_profile_status()
     try:
         prefs = profile_indexer.load_preferences(user_id) or {}
+        # Fallback to Supabase-stored linked accounts if in-memory prefs are empty.
+        # This happens after restarts or if the in-memory cache is cold.
+        if (not prefs or not prefs.get("accounts")) and supabase_client:
+            try:
+                profile_row = supabase_client.get_or_create_profile(user_id)
+                if profile_row:
+                    linked = profile_row.get("linked_accounts") or []
+                    time_controls = profile_row.get("time_controls") or []
+                    if linked or time_controls:
+                        prefs = {"accounts": linked, "time_controls": time_controls}
+            except Exception:
+                pass
     except Exception:
         prefs = {}
+        if supabase_client:
+            try:
+                profile_row = supabase_client.get_or_create_profile(user_id)
+                if profile_row:
+                    linked = profile_row.get("linked_accounts") or []
+                    time_controls = profile_row.get("time_controls") or []
+                    if linked or time_controls:
+                        prefs = {"accounts": linked, "time_controls": time_controls}
+            except Exception:
+                pass
     try:
         full_status = profile_indexer.get_status(user_id) or {}
         

@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, ReactNode } from 'react';
 import type { ProfilePreferences } from './ProfileSetupModal';
 import HabitsDashboard from './HabitsDashboard';
+import DailyUsageDisplay from './DailyUsageDisplay';
 import { getBackendBase } from "@/lib/backendBase";
 import { supabase } from "@/lib/supabase";
 
@@ -1718,6 +1719,16 @@ export default function HistoryCurtain({
                 </button>
               </div>
             </div>
+          </fieldset>
+
+          {/* Daily Usage Section */}
+          <fieldset className="settings-group">
+            <legend>Daily Usage</legend>
+            {!userId ? (
+              <p className="settings-empty">Sign in to view your daily usage.</p>
+            ) : (
+              <DailyUsageDisplay />
+            )}
           </fieldset>
 
           {/* Chess accounts section */}
