@@ -42,6 +42,26 @@ export interface PlyRecord {
   best_move_san?: string;
   best_move_eval_cp?: number;
   phase?: "opening" | "middlegame" | "endgame";
+  // Tag extraction fields (matching backend format)
+  analyse?: {
+    tags?: Array<{ tag_name?: string; tag?: string; name?: string; [key: string]: any }>;
+    [key: string]: any;
+  };
+  raw_before?: {
+    tags?: Array<{ tag_name?: string; tag?: string; name?: string; [key: string]: any }>;
+    [key: string]: any;
+  };
+  raw_after?: {
+    tags?: Array<{ tag_name?: string; tag?: string; name?: string; [key: string]: any }>;
+    [key: string]: any;
+  };
+  side_moved?: "white" | "black";
+  engine?: {
+    played_eval_after_cp?: number;
+    eval_before_cp?: number;
+    best_move_tags?: Array<{ tag_name?: string; tag?: string; name?: string; [key: string]: any }>;
+    [key: string]: any;
+  };
 }
 
 export interface GameReviewStats {

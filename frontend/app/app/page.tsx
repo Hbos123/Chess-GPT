@@ -2446,6 +2446,32 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
             // Refresh immediately
             refreshProfileData();
             
+            // Check for newer games after a short delay (allow backend to update)
+            setTimeout(async () => {
+              try {
+                const updatedStatus = await fetch(`${getBackendBase()}/profile/overview?user_id=${user.id}`).then(r => r.json());
+                const analyzedCount = updatedStatus.deep_analyzed_games || 0;
+                const targetGames = updatedStatus.target_games || 5;
+                const indexedCount = updatedStatus.games_indexed || 0;
+                
+                // Check if there are newer games that need analysis
+                if (indexedCount > analyzedCount && analyzedCount < targetGames) {
+                  const newerGamesCount = indexedCount - analyzedCount;
+                  console.log(`[AutoAnalysis] 🔍 Detected ${newerGamesCount} newer game(s) available for analysis`);
+                  
+                  // Reset trigger to allow re-analysis
+                  analysisTriggeredRef.current = false;
+                  
+                  // Trigger refresh to pick up new state
+                  refreshProfileData();
+                } else if (analyzedCount >= targetGames) {
+                  console.log(`[AutoAnalysis] ✅ Target reached: ${analyzedCount}/${targetGames} games analyzed`);
+                }
+              } catch (error) {
+                console.warn('[AutoAnalysis] Error checking for newer games:', error);
+              }
+            }, 2000);
+            
             // Set up periodic refresh during analysis (every 3 seconds for 60 seconds)
             let refreshCount = 0;
             const maxRefreshes = 20; // 20 * 3s = 60 seconds

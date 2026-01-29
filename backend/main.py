@@ -7659,8 +7659,8 @@ async def profile_overview(user_id: str):
         max_storage = tier.get("max_games_storage", 60)  # Default to 60 if no tier
         tier_id = tier_info.get("tier_id", "unknown") if tier_info else "unknown"
         
-        # Use max_games_storage as target, but cap at 60 for rolling window logic
-        target_games = min(max_storage, 60) if max_storage > 0 else 60
+        # Use max_games_storage as target (respect subscription tier limit, no artificial cap)
+        target_games = max_storage if max_storage > 0 else 60
         
         print(f"🎯 [PROFILE_OVERVIEW] Target games calculation for user {user_id}:")
         print(f"   - Tier ID: {tier_id}")

@@ -132,6 +132,13 @@ export async function reviewGame(
       // Determine phase
       const phase = determinePhase(ply, totalMoves);
 
+      // Extract basic tags based on move quality (matching backend format)
+      const qualityTags: Array<{ tag_name: string }> = [];
+      if (isBlunder) qualityTags.push({ tag_name: "blunder" });
+      if (isMistake) qualityTags.push({ tag_name: "mistake" });
+      if (isInaccuracy) qualityTags.push({ tag_name: "inaccuracy" });
+      if (isMissedWin) qualityTags.push({ tag_name: "missed_win" });
+
       const plyRecord: PlyRecord = {
         ply,
         move_san: move.san,
@@ -147,6 +154,22 @@ export async function reviewGame(
         best_move_san: bestMove,
         best_move_eval_cp: bestMoveEvalCp,
         phase,
+        side_moved: moveColor,
+        // Tag extraction fields (matching backend format)
+        analyse: {
+          tags: qualityTags.length > 0 ? qualityTags : [],
+        },
+        raw_before: {
+          tags: [], // Would need position analysis to extract tags
+        },
+        raw_after: {
+          tags: [], // Would need position analysis to extract tags
+        },
+        engine: {
+          played_eval_after_cp: evalAfterCp,
+          eval_before_cp: evalBeforeCp,
+          best_move_tags: [], // Would need best move analysis to extract tags
+        },
       };
 
       plyRecords.push(plyRecord);
@@ -286,29 +309,73 @@ function detectKeyPoints(
 }
 
 /**
- * Detect all key moments for both sides
+ * Detect all key moments for both sides (enhanced to match backend)
  */
 function detectAllKeyMoments(
   plyRecords: PlyRecord[]
-): Array<{ ply: number; move_san: string; labels?: string[]; category?: string; note?: string }> {
-  const allKeyMoments: Array<{ ply: number; move_san: string; labels?: string[]; category?: string; note?: string }> = [];
+): Array<{ 
+  ply: number; 
+  move_san: string; 
+  labels?: string[]; 
+  category?: string; 
+  note?: string;
+  primary_label?: string;
+  advantage_swing?: number;
+  cp_loss?: number;
+  side?: string;
+}> {
+  const allKeyMoments: Array<{ 
+    ply: number; 
+    move_san: string; 
+    labels?: string[]; 
+    category?: string; 
+    note?: string;
+    primary_label?: string;
+    advantage_swing?: number;
+    cp_loss?: number;
+    side?: string;
+  }> = [];
   
-  for (const record of plyRecords) {
+  for (let i = 0; i < plyRecords.length; i++) {
+    const record = plyRecords[i];
+    const prevRecord = i > 0 ? plyRecords[i - 1] : null;
+    
     const labels: string[] = [];
     let category: string | undefined;
     let note: string | undefined;
     
+    const evalCp = record.engine?.played_eval_after_cp ?? record.eval_after_cp ?? 0;
+    const evalBefore = record.engine?.eval_before_cp ?? record.eval_before_cp ?? 0;
+    const prevEval = prevRecord?.engine?.played_eval_after_cp ?? prevRecord?.eval_after_cp ?? 0;
+    
+    // === Move Quality Labels ===
     if (record.is_blunder) {
       labels.push("blunder");
       category = "blunder";
-      note = `Blunder: ${record.move_san} loses ${record.cp_loss?.toFixed(1)} centipawns`;
+      note = `Blunder: ${record.move_san} loses ${record.cp_loss?.toFixed(1) || 0} centipawns`;
     } else if (record.is_mistake) {
       labels.push("mistake");
       category = "mistake";
-      note = `Mistake: ${record.move_san} loses ${record.cp_loss?.toFixed(1)} centipawns`;
+      note = `Mistake: ${record.move_san} loses ${record.cp_loss?.toFixed(1) || 0} centipawns`;
     } else if (record.is_inaccuracy) {
       labels.push("inaccuracy");
       category = "inaccuracy";
+    }
+    
+    // === Advantage Shift Detection ===
+    const evalSwing = Math.abs(evalCp - prevEval);
+    if (evalSwing > 100) {
+      labels.push("advantage_shift");
+    }
+    
+    // === Missed Critical Win ===
+    // Dropped from winning (>300cp) to not winning (<100cp)
+    if (evalBefore > 300 && evalCp < 100) {
+      labels.push("missed_critical_win");
+      if (!note) note = `Missed critical win: dropped from ${evalBefore.toFixed(0)}cp to ${evalCp.toFixed(0)}cp`;
+    } else if (evalBefore < -300 && evalCp > -100) {
+      labels.push("missed_critical_win");
+      if (!note) note = `Missed critical win: dropped from ${evalBefore.toFixed(0)}cp to ${evalCp.toFixed(0)}cp`;
     }
     
     if (record.is_missed_win) {
@@ -316,19 +383,59 @@ function detectAllKeyMoments(
       if (!note) note = `Missed win: ${record.best_move_san} was much better`;
     }
     
-    // Also detect critical positions (large eval swings)
-    const evalSwing = Math.abs((record.eval_after_cp || 0) - (record.eval_before_cp || 0));
-    if (evalSwing > 300 && !record.is_blunder) {
-      labels.push("critical");
+    // === Tactical Opportunity ===
+    // Check if tags indicate tactical opportunity (if tags are available)
+    const tagsBefore = record.raw_before?.tags || [];
+    const tagNamesBefore = tagsBefore.map((t: any) => t.tag_name || t.tag || t.name || '').filter(Boolean);
+    const tacticalTags = ['fork', 'pin', 'skewer', 'discovered_attack', 'tactic'];
+    const hasTacticalTag = tagNamesBefore.some((name: string) => 
+      tacticalTags.some(t => name.toLowerCase().includes(t))
+    );
+    if (hasTacticalTag && (record.is_mistake || record.is_blunder)) {
+      labels.push("tactical_opportunity");
     }
     
+    // === Phase Transition ===
+    if (prevRecord && prevRecord.phase && record.phase && prevRecord.phase !== record.phase) {
+      labels.push("phase_transition");
+    }
+    
+    // === Theory Exit ===
+    // Note: Frontend doesn't track theory exit yet, but structure is ready
+    // if (record.is_theory === false && prevRecord?.is_theory === true) {
+    //   labels.push("theory_exit");
+    // }
+    
+    // === Threshold Crossings ===
+    for (const threshold of [100, 200, 300]) {
+      if (prevEval < threshold && evalCp >= threshold) {
+        labels.push(`threshold_${threshold}_white`);
+      }
+      if (prevEval > -threshold && evalCp <= -threshold) {
+        labels.push(`threshold_${threshold}_black`);
+      }
+    }
+    
+    // Only create key moment if there are labels
     if (labels.length > 0) {
+      // Determine primary label (most severe)
+      const primaryPriority = [
+        "blunder", "missed_critical_win", "mistake", "advantage_shift",
+        "critical_good_move", "inaccuracy", "tactical_opportunity",
+        "phase_transition", "theory_exit"
+      ];
+      const primary = primaryPriority.find(l => labels.includes(l)) || labels[0];
+      
       allKeyMoments.push({
         ply: record.ply,
         move_san: record.move_san,
         labels,
         category,
         note,
+        primary_label: primary,
+        advantage_swing: evalSwing,
+        cp_loss: record.cp_loss,
+        side: record.side_moved,
       });
     }
   }

@@ -263,6 +263,10 @@ export default function OverviewTab({ data, profileStatus, onOpenPersonalReview,
                       profileStatus?.state === "reviewing" ||
                       (profileStatus?.state === "complete" && (profileStatus?.deep_analyzed_games || 0) < (profileStatus?.target_games || 0));
   
+  // Check for newer games available
+  const newerGamesAvailable = gamesIndexed > activeGames && activeGames >= targetGames;
+  const newerGamesCount = newerGamesAvailable ? gamesIndexed - activeGames : 0;
+  
   // Determine current activity status with real-time progress
   const getActivityStatus = () => {
     if (profileStatus?.state === "fetching") {
@@ -277,9 +281,13 @@ export default function OverviewTab({ data, profileStatus, onOpenPersonalReview,
       }
       return `Analyzing ${total || 'new'} game${total !== 1 ? 's' : ''}...`;
     }
+    // Check for newer games when target is reached
+    if (newerGamesAvailable) {
+      return `${newerGamesCount} newer game${newerGamesCount > 1 ? 's' : ''} available - analyzing...`;
+    }
     if (activeGames > targetGames) {
       const excess = activeGames - targetGames;
-      return `Dropping oldest ${excess} game${excess > 1 ? 's' : ''}...`;
+      return `Compressing oldest ${excess} game${excess > 1 ? 's' : ''}...`;
     }
     if (activeGames < targetGames) {
       const needed = targetGames - activeGames;
@@ -343,6 +351,34 @@ export default function OverviewTab({ data, profileStatus, onOpenPersonalReview,
             </span>
           )}
         </div>
+        {/* Newer games available indicator */}
+        {newerGamesAvailable && !isAnalyzing && (
+          <div style={{ 
+            marginTop: '8px', 
+            padding: '8px 12px', 
+            background: 'rgba(251, 191, 36, 0.15)', 
+            borderRadius: '6px',
+            border: '1px solid rgba(251, 191, 36, 0.3)',
+            fontSize: '12px',
+            color: '#fbbf24'
+          }}>
+            🔄 {newerGamesCount} newer game{newerGamesCount > 1 ? 's' : ''} detected - will analyze and replace oldest
+          </div>
+        )}
+        {/* Compression status indicator */}
+        {activeGames > targetGames && (
+          <div style={{ 
+            marginTop: '8px', 
+            padding: '8px 12px', 
+            background: 'rgba(168, 85, 247, 0.15)', 
+            borderRadius: '6px',
+            border: '1px solid rgba(168, 85, 247, 0.3)',
+            fontSize: '12px',
+            color: '#a855f7'
+          }}>
+            📦 Compressing oldest games to maintain {targetGames}-game window
+          </div>
+        )}
         {/* Move-by-move progress display */}
         {isAnalyzing && analysisProgress && (
           <div style={{ 

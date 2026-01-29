@@ -17,11 +17,22 @@ from utils.personal_review_utils import extract_tags
 class GameWindowManager:
     """Manages rolling window of analyzed games with pattern retention"""
     
-    MAX_ACTIVE_GAMES = 60
+    DEFAULT_MAX_ACTIVE_GAMES = 60  # Fallback if subscription tier not available
     
     def __init__(self, supabase_client):
         self.supabase = supabase_client
-        print(f"✅ GameWindowManager initialized (max_active_games={self.MAX_ACTIVE_GAMES})")
+        print(f"✅ GameWindowManager initialized (dynamic max_active_games based on subscription tier)")
+    
+    def get_max_active_games(self, user_id: str) -> int:
+        """Get max active games from subscription tier, fallback to default"""
+        try:
+            tier_info = self.supabase.get_subscription_overview(user_id, use_cache=True)
+            tier = tier_info.get("tier", {}) if tier_info else {}
+            max_storage = tier.get("max_games_storage", self.DEFAULT_MAX_ACTIVE_GAMES)
+            return max_storage if max_storage > 0 else self.DEFAULT_MAX_ACTIVE_GAMES
+        except Exception as e:
+            print(f"⚠️ Error getting max_active_games for user {user_id}: {e}")
+            return self.DEFAULT_MAX_ACTIVE_GAMES
     
     def count_active_games(self, user_id: str) -> int:
         """Count active (non-compressed) analyzed games for a user"""
@@ -182,13 +193,14 @@ class GameWindowManager:
             return None
     
     async def maintain_window(self, user_id: str) -> int:
-        """Ensure exactly MAX_ACTIVE_GAMES active games, compress oldest if needed"""
+        """Ensure exactly max_active_games (from subscription tier) active games, compress oldest if needed"""
         active_count = self.count_active_games(user_id)
+        max_active_games = self.get_max_active_games(user_id)
         
-        if active_count > self.MAX_ACTIVE_GAMES:
-            # Compress oldest games until we're at MAX_ACTIVE_GAMES
+        if active_count > max_active_games:
+            # Compress oldest games until we're at max_active_games
             compressed = 0
-            while active_count > self.MAX_ACTIVE_GAMES:
+            while active_count > max_active_games:
                 game_id = await self.compress_oldest_game(user_id)
                 if game_id:
                     compressed += 1
@@ -197,7 +209,7 @@ class GameWindowManager:
                     break  # No more games to compress
             
             if compressed > 0:
-                print(f"   🔄 Maintained window: compressed {compressed} game(s), {active_count} active remaining")
+                print(f"   🔄 Maintained window: compressed {compressed} game(s), {active_count}/{max_active_games} active remaining")
             
             return compressed
         
