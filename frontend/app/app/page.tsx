@@ -2383,6 +2383,11 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
     // Allow auto-analysis when state is idle, complete, completed, or reviewing (but not actively fetching/indexing)
     const isReadyForAnalysis = ['idle', 'complete', 'completed', 'reviewing'].includes(profileStatus?.state || '');
     const targetGames = profileStatus?.target_games || 60;
+    // If tier has 0 storage (e.g., unpaid), don't auto-run analysis
+    if (targetGames <= 0) {
+      analysisTriggeredRef.current = false;
+      return;
+    }
     
     // Reduced logging - only log when actually triggering
     const condition1 = hasIndexedGames;

@@ -5,6 +5,7 @@
 
 import { Chess } from "chess.js";
 import { analyzePositionWasm } from "./wasmEngine";
+import { getBackendBase } from "./backendBase";
 import type {
   GameMetadata,
   GameReview,
@@ -58,6 +59,10 @@ export async function reviewGame(
 
   const totalMoves = moves.length;
   let moveIndex = 0;
+
+  // We'll enrich tags using backend light-raw analyzer in one batch at the end
+  // (closest parity to legacy backend tagging, minimal server load).
+  const bestMoveFenAfterByPly: Record<number, string> = {};
 
   for (const move of history) {
     moveIndex++;
@@ -139,6 +144,19 @@ export async function reviewGame(
       if (isInaccuracy) qualityTags.push({ tag_name: "inaccuracy" });
       if (isMissedWin) qualityTags.push({ tag_name: "missed_win" });
 
+      // Try to compute FEN after the best move so we can tag it too (best_move_tags parity)
+      try {
+        if (bestMove && typeof bestMove === "string") {
+          const bestBoard = new Chess(fenBefore);
+          const moved = (bestBoard as any).move(bestMove, { sloppy: true });
+          if (moved) {
+            bestMoveFenAfterByPly[ply] = bestBoard.fen();
+          }
+        }
+      } catch {
+        // ignore best-move fen failures
+      }
+
       const plyRecord: PlyRecord = {
         ply,
         move_san: move.san,
@@ -168,7 +186,7 @@ export async function reviewGame(
         engine: {
           played_eval_after_cp: evalAfterCp,
           eval_before_cp: evalBeforeCp,
-          best_move_tags: [], // Would need best move analysis to extract tags
+          best_move_tags: [], // Filled via backend batch tagger after analysis
         },
       };
 
@@ -182,6 +200,60 @@ export async function reviewGame(
       // Continue with next move
       currentBoard.move(move);
     }
+  }
+
+  // === Backend tag enrichment (closest parity to legacy backend tagging) ===
+  // Fill: raw_before.tags, raw_after.tags, engine.best_move_tags
+  try {
+    const backendBase = getBackendBase();
+    if (backendBase && plyRecords.length > 0) {
+      const fenSet = new Set<string>();
+      for (const r of plyRecords) {
+        if (r?.fen_before) fenSet.add(r.fen_before);
+        if (r?.fen_after) fenSet.add(r.fen_after);
+        const bestFen = bestMoveFenAfterByPly[r.ply];
+        if (bestFen) fenSet.add(bestFen);
+      }
+      const fens = Array.from(fenSet);
+      if (fens.length > 0) {
+        // Chunk for safety
+        const tagsByFen: Record<string, any[]> = {};
+        const chunkSize = 200;
+        for (let i = 0; i < fens.length; i += chunkSize) {
+          const chunk = fens.slice(i, i + chunkSize);
+          const resp = await fetch(`${backendBase.replace(/\/$/, "")}/profile/position_tags`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ fens: chunk, include_extras: false }),
+          });
+          if (resp.ok) {
+            const data = await resp.json();
+            const map = data?.tags_by_fen || {};
+            for (const [k, v] of Object.entries(map)) {
+              tagsByFen[k] = Array.isArray(v) ? (v as any[]) : [];
+            }
+          }
+        }
+
+        // Apply tags back onto ply records
+        for (const r of plyRecords) {
+          const beforeTags = tagsByFen[r.fen_before] || [];
+          const afterTags = tagsByFen[r.fen_after] || [];
+          const bestFen = bestMoveFenAfterByPly[r.ply];
+          const bestTags = bestFen ? (tagsByFen[bestFen] || []) : [];
+
+          r.raw_before = { tags: beforeTags };
+          r.raw_after = { tags: afterTags };
+          r.engine = {
+            ...(r.engine || {}),
+            best_move_tags: bestTags,
+          };
+        }
+      }
+    }
+  } catch (e) {
+    // Non-fatal: proceed without backend tags
+    console.warn("[GameReviewer] Backend tag enrichment failed:", e);
   }
 
   // Calculate statistics for both sides

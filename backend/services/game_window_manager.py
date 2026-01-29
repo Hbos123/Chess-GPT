@@ -27,9 +27,17 @@ class GameWindowManager:
         """Get max active games from subscription tier, fallback to default"""
         try:
             tier_info = self.supabase.get_subscription_overview(user_id, use_cache=True)
+            if not tier_info:
+                return self.DEFAULT_MAX_ACTIVE_GAMES
             tier = tier_info.get("tier", {}) if tier_info else {}
+            # Respect tier limit exactly (including 0 for unpaid)
             max_storage = tier.get("max_games_storage", self.DEFAULT_MAX_ACTIVE_GAMES)
-            return max_storage if max_storage > 0 else self.DEFAULT_MAX_ACTIVE_GAMES
+            if isinstance(max_storage, int):
+                return max_storage
+            try:
+                return int(max_storage)
+            except Exception:
+                return self.DEFAULT_MAX_ACTIVE_GAMES
         except Exception as e:
             print(f"⚠️ Error getting max_active_games for user {user_id}: {e}")
             return self.DEFAULT_MAX_ACTIVE_GAMES

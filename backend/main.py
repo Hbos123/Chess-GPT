@@ -38,6 +38,7 @@ from game_fetcher import GameFetcher
 from profile_indexer import ProfileIndexingManager
 from supabase_client import SupabaseClient
 from profile_analytics.engine import ProfileAnalyticsEngine
+from light_raw_analyzer import compute_light_raw_analysis
 from personal_review_aggregator import PersonalReviewAggregator
 from personal_stats_manager import PersonalStatsManager
 from game_archive_manager import GameArchiveManager
@@ -145,6 +146,52 @@ game_window_manager = None
 # Board tree store for D2/D16 tree-first analysis
 board_tree_store: Optional[BoardTreeStore] = None
 account_init_manager = None
+
+# ============================================================
+# Lightweight position tag cache (frontend analytics parity)
+# ============================================================
+_POSITION_TAGS_CACHE: Dict[str, Tuple[Dict[str, Any], float]] = {}
+_POSITION_TAGS_CACHE_TTL_SECONDS = 24 * 60 * 60  # 24h
+_POSITION_TAGS_LOCKS: Dict[str, asyncio.Lock] = {}
+_POSITION_TAGS_MAX_FENS_PER_REQUEST = 300
+_POSITION_TAGS_POOL = ProcessPoolExecutor(max_workers=4)
+
+
+def _normalize_position_tag(tag: Any) -> Dict[str, Any]:
+    """
+    Normalize a tag object so it always includes `tag_name`.
+    Tags may appear as {"tag": "..."} or {"tag_name": "..."} or strings.
+    """
+    if isinstance(tag, dict):
+        out = dict(tag)
+        tn = out.get("tag_name") or out.get("tag") or out.get("name")
+        if tn and "tag_name" not in out:
+            out["tag_name"] = tn
+        return out
+    s = str(tag) if tag is not None else ""
+    return {"tag_name": s} if s else {}
+
+
+def _compute_light_position_tags_sync(fen: str) -> Dict[str, Any]:
+    """
+    Compute tags/themes for a FEN using the backend light raw analyzer.
+    Runs in a process pool (CPU-bound).
+    """
+    raw = compute_light_raw_analysis(fen)
+    d = raw.to_dict() if hasattr(raw, "to_dict") else (raw or {})
+    tags = d.get("tags", []) if isinstance(d, dict) else []
+    norm_tags: List[Dict[str, Any]] = []
+    for t in tags:
+        nt = _normalize_position_tag(t)
+        if nt and nt.get("tag_name"):
+            norm_tags.append(nt)
+    return {
+        "tags": norm_tags,
+        # Optional extras (useful for future parity)
+        "theme_scores": d.get("theme_scores", {}) if isinstance(d, dict) else {},
+        "top_themes": d.get("top_themes", []) if isinstance(d, dict) else [],
+        "material_balance_cp": d.get("material_balance_cp", 0) if isinstance(d, dict) else 0,
+    }
 
 # Supabase client
 supabase_client: Optional[SupabaseClient] = None
@@ -7659,8 +7706,9 @@ async def profile_overview(user_id: str):
         max_storage = tier.get("max_games_storage", 60)  # Default to 60 if no tier
         tier_id = tier_info.get("tier_id", "unknown") if tier_info else "unknown"
         
-        # Use max_games_storage as target (respect subscription tier limit, no artificial cap)
-        target_games = max_storage if max_storage > 0 else 60
+        # Use max_games_storage as target (respect subscription tier limit, allow 0 for unpaid)
+        # Only fall back to 60 when tier info is missing (cold start / errors).
+        target_games = max_storage if tier_info else 60
         
         print(f"🎯 [PROFILE_OVERVIEW] Target games calculation for user {user_id}:")
         print(f"   - Tier ID: {tier_id}")
@@ -9195,6 +9243,103 @@ class GetGamesToAnalyzeRequest(BaseModel):
     max_opponent_rating: Optional[int] = None
     sort: str = "date_desc"
     offset: int = 0
+
+
+class BatchPositionTagsRequest(BaseModel):
+    fens: List[str] = Field(default_factory=list)
+    include_extras: bool = False  # if True, return theme_scores/top_themes/material too
+
+
+@app.post("/profile/position_tags")
+async def profile_position_tags(request: BatchPositionTagsRequest, req: Request):
+    """
+    Batch endpoint to compute position tags for a list of FENs.
+    Uses backend light-raw analyzer (no Stockfish) to match legacy tagging.
+
+    Returns:
+      {
+        "success": True,
+        "tags_by_fen": { "<fen>": [ {tag_name, ...}, ... ], ... },
+        "extras_by_fen": { "<fen>": {theme_scores, top_themes, material_balance_cp}, ... }  # optional
+      }
+    """
+    try:
+        fens_in = request.fens or []
+        # Basic validation + dedupe while preserving order
+        seen = set()
+        fens: List[str] = []
+        for fen in fens_in:
+            if not isinstance(fen, str):
+                continue
+            f = fen.strip()
+            if not f:
+                continue
+            if f in seen:
+                continue
+            seen.add(f)
+            fens.append(f)
+
+        if len(fens) > _POSITION_TAGS_MAX_FENS_PER_REQUEST:
+            raise HTTPException(
+                status_code=413,
+                detail=f"Too many FENs (max {_POSITION_TAGS_MAX_FENS_PER_REQUEST})"
+            )
+
+        now_ts = datetime.utcnow().timestamp()
+        loop = asyncio.get_event_loop()
+
+        tags_by_fen: Dict[str, Any] = {}
+        extras_by_fen: Dict[str, Any] = {}
+
+        async def get_one(fen: str) -> Dict[str, Any]:
+            # Fast cache
+            cached = _POSITION_TAGS_CACHE.get(fen)
+            if cached:
+                payload, ts = cached
+                if now_ts - ts < _POSITION_TAGS_CACHE_TTL_SECONDS:
+                    return payload
+
+            # Per-FEN lock to dedupe concurrent requests
+            if fen not in _POSITION_TAGS_LOCKS:
+                _POSITION_TAGS_LOCKS[fen] = asyncio.Lock()
+            async with _POSITION_TAGS_LOCKS[fen]:
+                cached2 = _POSITION_TAGS_CACHE.get(fen)
+                if cached2:
+                    payload2, ts2 = cached2
+                    if now_ts - ts2 < _POSITION_TAGS_CACHE_TTL_SECONDS:
+                        return payload2
+
+                payload3 = await loop.run_in_executor(_POSITION_TAGS_POOL, _compute_light_position_tags_sync, fen)
+                _POSITION_TAGS_CACHE[fen] = (payload3, datetime.utcnow().timestamp())
+                return payload3
+
+        # Compute in parallel (bounded)
+        results = await asyncio.gather(*[get_one(f) for f in fens], return_exceptions=True)
+        for fen, res in zip(fens, results):
+            if isinstance(res, Exception):
+                tags_by_fen[fen] = []
+                if request.include_extras:
+                    extras_by_fen[fen] = {}
+                continue
+            tags_by_fen[fen] = res.get("tags", []) if isinstance(res, dict) else []
+            if request.include_extras:
+                extras_by_fen[fen] = {
+                    "theme_scores": res.get("theme_scores", {}) if isinstance(res, dict) else {},
+                    "top_themes": res.get("top_themes", []) if isinstance(res, dict) else [],
+                    "material_balance_cp": res.get("material_balance_cp", 0) if isinstance(res, dict) else 0,
+                }
+
+        out: Dict[str, Any] = {"success": True, "tags_by_fen": tags_by_fen}
+        if request.include_extras:
+            out["extras_by_fen"] = extras_by_fen
+        return out
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Error in /profile/position_tags: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail="Failed to compute position tags")
 
 
 @app.post("/get_games_to_analyze")
