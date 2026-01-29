@@ -1012,43 +1012,71 @@ class SupabaseClient:
         """
         Fetch a small set of fields needed for the Overview snapshot.
         Includes PGN clocks + user_color for true time-style classification.
+        Includes retry logic for transient connection errors.
         """
-        try:
-            select_fields = (
-                "id,game_date,created_at,updated_at,"
-                "pgn,user_color,user_rating,result,opening_name,accuracy_overall,time_control"
-            )
-            query = self.client.table("games")\
-                .select(select_fields)\
-                .eq("user_id", user_id)\
-                .is_("archived_at", "null")\
-                .or_("review_type.eq.full,review_type.is.null")
-
-            # Filter out compressed games unless explicitly requested (best-effort)
+        max_retries = 3
+        for attempt in range(max_retries):
             try:
-                query = query.is_("compressed_at", "null")
-                result = query.order("updated_at", desc=True).limit(int(limit)).execute()
-            except Exception as e:
-                if self._is_missing_column_error(e, "compressed_at"):
-                    result = self.client.table("games")\
-                        .select(select_fields)\
-                        .eq("user_id", user_id)\
-                        .is_("archived_at", "null")\
-                        .or_("review_type.eq.full,review_type.is.null")\
-                        .order("updated_at", desc=True)\
-                        .limit(int(limit))\
-                        .execute()
-                else:
-                    raise
+                select_fields = (
+                    "id,game_date,created_at,updated_at,"
+                    "pgn,user_color,user_rating,result,opening_name,accuracy_overall,time_control"
+                )
+                query = self.client.table("games")\
+                    .select(select_fields)\
+                    .eq("user_id", user_id)\
+                    .is_("archived_at", "null")\
+                    .or_("review_type.eq.full,review_type.is.null")
 
-            return result.data if result.data else []
-        except Exception as e:
-            error_msg = str(e)
-            # On timeout, return empty list to avoid blocking the request
-            if "timeout" in error_msg.lower() or "ReadTimeout" in error_msg:
-                print(f"[supabase] Timeout fetching games for overview snapshot (user_id={user_id[:8]}...), returning empty list")
-                return []
-            return self._handle_supabase_error(e, "fetching overview snapshot games", [])
+                # Filter out compressed games unless explicitly requested (best-effort)
+                try:
+                    query = query.is_("compressed_at", "null")
+                    result = query.order("updated_at", desc=True).limit(int(limit)).execute()
+                except Exception as e:
+                    if self._is_missing_column_error(e, "compressed_at"):
+                        result = self.client.table("games")\
+                            .select(select_fields)\
+                            .eq("user_id", user_id)\
+                            .is_("archived_at", "null")\
+                            .or_("review_type.eq.full,review_type.is.null")\
+                            .order("updated_at", desc=True)\
+                            .limit(int(limit))\
+                            .execute()
+                    else:
+                        raise
+
+                return result.data if result.data else []
+            except Exception as e:
+                error_msg = str(e)
+                error_type = type(e).__name__
+                
+                # Check if it's a transient connection error
+                is_connection_error = (
+                    "Server disconnected" in error_msg or 
+                    "RemoteProtocolError" in error_type or
+                    "timeout" in error_msg.lower() or 
+                    "ReadTimeout" in error_msg or
+                    "Connection" in error_type
+                )
+                
+                if is_connection_error and attempt < max_retries - 1:
+                    # Retry with exponential backoff
+                    import time
+                    wait_time = 0.5 * (attempt + 1)
+                    print(f"[supabase] Connection error (attempt {attempt + 1}/{max_retries}) fetching overview snapshot for user {user_id[:8]}..., retrying in {wait_time}s...")
+                    time.sleep(wait_time)
+                    continue
+                
+                # On timeout or final attempt failure, return empty list to avoid blocking the request
+                if "timeout" in error_msg.lower() or "ReadTimeout" in error_msg:
+                    print(f"[supabase] Timeout fetching games for overview snapshot (user_id={user_id[:8]}...), returning empty list")
+                    return []
+                
+                # For other errors, use centralized error handler
+                return self._handle_supabase_error(e, "fetching overview snapshot games", [])
+        
+        # If we exhausted retries, return empty list
+        print(f"[supabase] Exhausted retries for overview snapshot (user_id={user_id[:8]}...), returning empty list")
+        return []
     
     def get_active_reviewed_games(self, user_id: str, limit: int = 30, include_full_review: bool = False, include_compressed: bool = False) -> List[Dict]:
         """Get active (non-archived) full-review games

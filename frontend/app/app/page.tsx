@@ -2380,8 +2380,8 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
     // Check if we have indexed games but no analyzed games
     const hasIndexedGames = (profileStatus?.games_indexed || 0) > 0;
     const hasAnalyzedGames = (profileStatus?.deep_analyzed_games || 0) > 0;
-    // Allow auto-analysis when state is idle, completed, or reviewing (but not actively fetching/indexing)
-    const isReadyForAnalysis = ['idle', 'completed', 'reviewing'].includes(profileStatus?.state || '');
+    // Allow auto-analysis when state is idle, complete, completed, or reviewing (but not actively fetching/indexing)
+    const isReadyForAnalysis = ['idle', 'complete', 'completed', 'reviewing'].includes(profileStatus?.state || '');
     const targetGames = profileStatus?.target_games || 60;
     
     // Reduced logging - only log when actually triggering
