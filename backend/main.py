@@ -7569,6 +7569,72 @@ async def save_profile_preferences(payload: ProfilePreferencesPayload):
     return _profile_overview_payload(payload.user_id, prefs_override=prefs)
 
 
+@app.post("/profile/start_indexing")
+async def start_profile_indexing(user_id: str):
+    """
+    Manually trigger profile indexing for a user.
+    Used by frontend to auto-start analysis when accounts are linked.
+    """
+    if not profile_indexer:
+        raise HTTPException(status_code=503, detail="Profile indexer not initialized")
+    
+    # Load preferences to get accounts
+    prefs = profile_indexer.load_preferences(user_id) or {}
+    
+    # Also check Supabase if in-memory prefs are empty
+    if (not prefs or not prefs.get("accounts")) and supabase_client:
+        profile_row = supabase_client.get_or_create_profile(user_id)
+        if profile_row:
+            linked = profile_row.get("linked_accounts") or []
+            time_controls = profile_row.get("time_controls") or []
+            if linked or time_controls:
+                prefs = {"accounts": linked, "time_controls": time_controls}
+    
+    accounts = prefs.get("accounts", [])
+    time_controls = prefs.get("time_controls", [])
+    
+    if not accounts:
+        return JSONResponse(
+            status_code=400,
+            content={"error": "No accounts linked", "message": "Please link accounts before starting analysis"}
+        )
+    
+    # Normalize accounts
+    normalized_accounts = []
+    for acc in accounts:
+        if not isinstance(acc, dict):
+            continue
+        platform = acc.get("platform", "").lower()
+        username = acc.get("username", "").strip()
+        if not username:
+            continue
+        platform_normalized = "chess.com" if platform in ["chess.com", "chesscom"] else "lichess"
+        normalized_accounts.append({
+            "platform": platform_normalized,
+            "username": username
+        })
+    
+    if not normalized_accounts:
+        return JSONResponse(
+            status_code=400,
+            content={"error": "No valid accounts", "message": "Please provide valid account usernames"}
+        )
+    
+    # Start indexing
+    try:
+        await profile_indexer.start_indexing(
+            user_id=user_id,
+            accounts=normalized_accounts,
+            time_controls=[tc.lower() for tc in time_controls] if time_controls else [],
+        )
+        return {"success": True, "message": "Indexing started", "accounts": len(normalized_accounts)}
+    except Exception as e:
+        print(f"❌ [START_INDEXING] Error starting indexing: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Failed to start indexing: {str(e)}")
+
+
 @app.get("/profile/overview")
 async def profile_overview(user_id: str):
     """
