@@ -12,6 +12,16 @@ interface TokenLimitModalProps {
       limit?: number;
       next_step?: string;
       tier_id?: string;
+      messages?: {
+        used: number;
+        limit: number | string;
+        remaining?: number | string;
+      };
+      tokens?: {
+        used: number;
+        limit: number;
+        remaining?: number;
+      };
     };
   };
   onOpenProfile?: () => void;
