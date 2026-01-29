@@ -52,7 +52,7 @@ export default function OverviewTab({ data, profileStatus, onOpenPersonalReview,
       
       // Use target_games from profileStatus as the authoritative source for total games
       // This ensures we always show the subscription tier limit, not the backend response
-      const targetGamesFromStatus = profileStatus?.target_games || targetGames || 5;
+      const targetGamesFromStatus = profileStatus?.target_games || 5;
       
       if (gameMatch || moveMatch || (status === "analyzing" && message)) {
         setAnalysisProgress({
@@ -75,7 +75,7 @@ export default function OverviewTab({ data, profileStatus, onOpenPersonalReview,
     return () => {
       window.removeEventListener('analysis-progress' as any, handleProgress as EventListener);
     };
-  }, [profileStatus?.target_games, targetGames]); // Add target_games as dependency
+  }, [profileStatus?.target_games]); // Only depend on profileStatus.target_games
   
   // Load linked accounts from profile overview
   useEffect(() => {
