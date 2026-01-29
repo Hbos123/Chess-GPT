@@ -9309,6 +9309,7 @@ class SaveGameReviewRequest(BaseModel):
     user_id: str
     game: Dict[str, Any]  # GameMetadata
     review: Dict[str, Any]  # GameReview
+    for_personal_analytics: bool = False  # Skip daily limit for personal analytics reviews
 
 
 @app.post("/save_game_review")
@@ -9327,27 +9328,30 @@ async def save_game_review_endpoint(request: SaveGameReviewRequest):
         tier_id = tier_info.get("tier_id", "unpaid")
         tier = tier_info.get("tier", {})
         
-        # Check if game reviews are allowed for this tier
-        max_reviews_per_day = tier.get("max_game_reviews_per_day", 0)
-        if tier_id == "unpaid" and max_reviews_per_day == 0:
-            raise HTTPException(
-                status_code=403,
-                detail="Game reviews are not available for unpaid users. Please upgrade to a paid plan."
+        # Only check daily game review limit if NOT for personal analytics
+        # Personal analytics reviews are for profile storage and don't count toward chat tool limits
+        if not request.for_personal_analytics:
+            # Check if game reviews are allowed for this tier (for chat tool usage)
+            max_reviews_per_day = tier.get("max_game_reviews_per_day", 0)
+            if tier_id == "unpaid" and max_reviews_per_day == 0:
+                raise HTTPException(
+                    status_code=403,
+                    detail="Game reviews are not available for unpaid users. Please upgrade to a paid plan."
+                )
+            
+            # Check daily limit (only for chat tool usage, not personal analytics)
+            allowed, message, usage_info = supabase_client.check_and_increment_usage(
+                request.user_id,
+                None,  # ip_address not needed for authenticated users
+                "game_review",
+                tier_info
             )
-        
-        # Check daily limit
-        allowed, message, usage_info = supabase_client.check_and_increment_usage(
-            request.user_id,
-            None,  # ip_address not needed for authenticated users
-            "game_review",
-            tier_info
-        )
-        
-        if not allowed:
-            raise HTTPException(
-                status_code=429,
-                detail=message or "Daily game review limit exceeded"
-            )
+            
+            if not allowed:
+                raise HTTPException(
+                    status_code=429,
+                    detail=message or "Daily game review limit exceeded"
+                )
         
         # Check storage limit
         max_storage = tier.get("max_games_storage", 0)

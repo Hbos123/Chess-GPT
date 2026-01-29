@@ -156,7 +156,8 @@ export async function fetchAndReviewGamesFrontend(
         }
 
         try {
-          const gameId = await saveGameReview(userId, game, review);
+          // Pass forPersonalAnalytics=true to skip daily game review limit (these are for profile storage)
+          const gameId = await saveGameReview(userId, game, review, true);
           if (gameId) {
             result.games_saved++;
             // Reduced logging - only log every 5th save or errors

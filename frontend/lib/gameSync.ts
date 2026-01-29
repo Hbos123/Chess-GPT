@@ -9,11 +9,13 @@ import type { GameMetadata, GameReview } from "./gameReviewTypes";
 /**
  * Save a game review via backend API
  * Routes through backend to avoid RLS blocking issues
+ * @param forPersonalAnalytics - If true, skips daily game review limit (for profile storage)
  */
 export async function saveGameReview(
   userId: string,
   game: GameMetadata,
-  review: GameReview
+  review: GameReview,
+  forPersonalAnalytics: boolean = true  // Default to true since most saves are for personal analytics
 ): Promise<string | null> {
   // Reduced logging - removed save log
   
@@ -25,7 +27,8 @@ export async function saveGameReview(
       body: JSON.stringify({
         user_id: userId,
         game: game,
-        review: review
+        review: review,
+        for_personal_analytics: forPersonalAnalytics  // Pass flag to skip daily limit
       })
     });
     
