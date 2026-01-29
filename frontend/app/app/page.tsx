@@ -350,7 +350,7 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
   
   // Token usage state for progress bar
   const [tokenUsage, setTokenUsage] = useState<{
-    messages?: { used: number; limit: number; remaining?: number };
+    messages?: { used: number; limit: number | string; remaining?: number | string };
     tokens?: { used: number; limit: number };
     gameReviews?: { used: number; limit: number | string; remaining?: number | string };
     lessons?: { used: number; limit: number | string; remaining?: number | string };
