@@ -2138,10 +2138,15 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
       // fetchWithRetry now has built-in timeout (8s)
       const data = await fetchProfileOverview(user.id);
       
+      // Log immediately after fetch (before any processing)
+      console.log('[ProfileData] Raw response from API:', data);
       console.log('[ProfileData] Fetched profile overview:', {
         hasPreferences: !!data.preferences,
+        preferencesType: typeof data.preferences,
+        preferencesKeys: data.preferences ? Object.keys(data.preferences) : [],
         accountsCount: data.preferences?.accounts?.length || 0,
         accounts: data.preferences?.accounts || [],
+        accountsType: Array.isArray(data.preferences?.accounts) ? 'array' : typeof data.preferences?.accounts,
         status: data.status,
         gamesCount: data.games?.length || 0,
         highlightsCount: data.highlights?.length || 0,
