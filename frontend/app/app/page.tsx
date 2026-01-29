@@ -329,10 +329,12 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
     type: 'message_limit' | 'token_limit';
     message: string;
     info: {
+      tokens?: { used: number; limit: number; remaining: number };
+      messages?: { used: number; limit: number; remaining: number };
+      tier_id?: string;
       used?: number;
       limit?: number;
       next_step?: string;
-      tier_id?: string;
     };
   } | null>(null);
   
