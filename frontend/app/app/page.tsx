@@ -2429,13 +2429,17 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
       // Get the first linked account to use for analysis
       const firstAccount = profilePreferences.accounts?.[0];
       if (firstAccount && firstAccount.username) {
-        // Normalize platform: ProfileAccount uses "chesscom" but frontend analysis expects "chess.com"
-        const platform = firstAccount.platform === "chesscom" ? "chess.com" : "lichess";
+        // Normalize platform: handle both "chess.com" and "chesscom" formats
+        const accountPlatform = firstAccount.platform.toLowerCase();
+        const platform = (accountPlatform === "chesscom" || accountPlatform === "chess.com") 
+          ? "chess.com" 
+          : "lichess";
         
         console.log('[AutoAnalysis] 🚀 Starting frontend analysis automatically', {
           username: firstAccount.username,
           platform,
-          gamesToAnalyze
+          gamesToAnalyze,
+          originalPlatform: firstAccount.platform // Log original for debugging
         });
         
         // Trigger frontend analysis in background (don't await to avoid blocking)
