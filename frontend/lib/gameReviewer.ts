@@ -82,7 +82,10 @@ export async function reviewGame(
     }
 
     const fenBefore = currentBoard.fen();
-    console.log(`[GameReviewer] Analyzing move ${moveIndex}/${totalMoves}: ${move.san} (ply ${ply})`);
+    // Reduce logging - only log every 10 moves or blunders/mistakes
+    if (moveIndex % 10 === 0 || moveIndex === 1 || moveIndex === totalMoves) {
+      console.log(`[GameReviewer] Analyzing move ${moveIndex}/${totalMoves}: ${move.san} (ply ${ply})`);
+    }
 
     // Analyze position before move
     try {
@@ -147,7 +150,10 @@ export async function reviewGame(
       };
 
       plyRecords.push(plyRecord);
-      console.log(`[GameReviewer] Move ${moveIndex}: ${move.san}, CP loss: ${cpLoss.toFixed(1)}, blunder: ${isBlunder}, mistake: ${isMistake}`);
+      // Only log blunders and mistakes to reduce console spam
+      if (isBlunder || isMistake) {
+        console.log(`[GameReviewer] Move ${moveIndex}: ${move.san}, CP loss: ${cpLoss.toFixed(1)}, blunder: ${isBlunder}, mistake: ${isMistake}`);
+      }
     } catch (error) {
       console.error(`[GameReviewer] Error analyzing move ${moveIndex}:`, error);
       // Continue with next move
@@ -157,13 +163,43 @@ export async function reviewGame(
 
   console.log(`[GameReviewer] Completed review: ${plyRecords.length} moves analyzed`);
 
-  // Calculate statistics
-  const stats = calculateStats(plyRecords, playerColor);
+  // Calculate statistics for both sides
+  const whiteStats = calculateStats(plyRecords, "white");
+  const blackStats = calculateStats(plyRecords, "black");
+  const playerStats = calculateStats(plyRecords, playerColor);
+  
+  // Combine stats in backend format
+  const stats = {
+    white: whiteStats,
+    black: blackStats,
+    overall_accuracy: playerStats.overall_accuracy,
+    opening_accuracy: playerStats.opening_accuracy,
+    middlegame_accuracy: playerStats.middlegame_accuracy,
+    endgame_accuracy: playerStats.endgame_accuracy,
+    avg_cp_loss: playerStats.avg_cp_loss,
+    blunders: playerStats.blunders,
+    mistakes: playerStats.mistakes,
+    inaccuracies: playerStats.inaccuracies,
+    missed_wins: playerStats.missed_wins,
+    total_moves: playerStats.total_moves,
+  };
+  
   console.log(`[GameReviewer] Stats calculated: accuracy=${stats.overall_accuracy.toFixed(1)}%, blunders=${stats.blunders}, mistakes=${stats.mistakes}`);
 
   // Determine opening
   const opening = determineOpening(chess, plyRecords);
   console.log(`[GameReviewer] Opening: ${opening.name_final || 'Unknown'}, ECO: ${opening.eco_final || 'N/A'}`);
+
+  // Detect key points and key moments
+  const keyPoints = detectKeyPoints(plyRecords, playerColor, focusColor);
+  const allKeyMoments = detectAllKeyMoments(plyRecords);
+  
+  // Detect phase transitions
+  const phases = detectPhaseTransitions(plyRecords);
+  
+  // Determine game character and endgame type
+  const gameCharacter = determineGameCharacter(plyRecords, stats);
+  const endgameType = determineEndgameType(chess, plyRecords);
 
   // Build review object
   const review: GameReview = {
@@ -171,7 +207,13 @@ export async function reviewGame(
     ply_records: plyRecords,
     stats,
     opening,
+    phases,
+    side_focus: focusColor === "both" ? "both" : focusColor,
+    key_points: keyPoints,
+    all_key_moments: allKeyMoments,
     game_metadata: {
+      game_character: gameCharacter,
+      endgame_type: endgameType,
       player_color: playerColor,
       focus_color: focusColor,
       review_subject,
@@ -191,6 +233,220 @@ export async function reviewGame(
   };
 
   return review;
+}
+
+/**
+ * Detect key points (blunders, mistakes, critical moments)
+ */
+function detectKeyPoints(
+  plyRecords: PlyRecord[],
+  playerColor: "white" | "black",
+  focusColor: "white" | "black" | "both"
+): Array<{ ply: number; move_san: string; labels?: string[]; category?: string; note?: string }> {
+  const keyPoints: Array<{ ply: number; move_san: string; labels?: string[]; category?: string; note?: string }> = [];
+  
+  for (const record of plyRecords) {
+    const isWhiteMove = record.ply % 2 === 1;
+    const moveColor = isWhiteMove ? "white" : "black";
+    
+    // Apply focus color filter
+    if (focusColor !== "both" && moveColor !== focusColor) {
+      continue;
+    }
+    
+    const labels: string[] = [];
+    let category: string | undefined;
+    let note: string | undefined;
+    
+    if (record.is_blunder) {
+      labels.push("blunder");
+      category = "blunder";
+      note = `Blunder: ${record.move_san} loses ${record.cp_loss?.toFixed(1)} centipawns`;
+    } else if (record.is_mistake) {
+      labels.push("mistake");
+      category = "mistake";
+      note = `Mistake: ${record.move_san} loses ${record.cp_loss?.toFixed(1)} centipawns`;
+    } else if (record.is_inaccuracy) {
+      labels.push("inaccuracy");
+      category = "inaccuracy";
+    }
+    
+    if (record.is_missed_win) {
+      labels.push("missed_win");
+      if (!note) note = `Missed win: ${record.best_move_san} was much better`;
+    }
+    
+    if (labels.length > 0) {
+      keyPoints.push({
+        ply: record.ply,
+        move_san: record.move_san,
+        labels,
+        category,
+        note,
+      });
+    }
+  }
+  
+  return keyPoints;
+}
+
+/**
+ * Detect all key moments for both sides
+ */
+function detectAllKeyMoments(
+  plyRecords: PlyRecord[]
+): Array<{ ply: number; move_san: string; labels?: string[]; category?: string; note?: string }> {
+  const allKeyMoments: Array<{ ply: number; move_san: string; labels?: string[]; category?: string; note?: string }> = [];
+  
+  for (const record of plyRecords) {
+    const labels: string[] = [];
+    let category: string | undefined;
+    let note: string | undefined;
+    
+    if (record.is_blunder) {
+      labels.push("blunder");
+      category = "blunder";
+      note = `Blunder: ${record.move_san} loses ${record.cp_loss?.toFixed(1)} centipawns`;
+    } else if (record.is_mistake) {
+      labels.push("mistake");
+      category = "mistake";
+      note = `Mistake: ${record.move_san} loses ${record.cp_loss?.toFixed(1)} centipawns`;
+    } else if (record.is_inaccuracy) {
+      labels.push("inaccuracy");
+      category = "inaccuracy";
+    }
+    
+    if (record.is_missed_win) {
+      labels.push("missed_win");
+      if (!note) note = `Missed win: ${record.best_move_san} was much better`;
+    }
+    
+    // Also detect critical positions (large eval swings)
+    const evalSwing = Math.abs((record.eval_after_cp || 0) - (record.eval_before_cp || 0));
+    if (evalSwing > 300 && !record.is_blunder) {
+      labels.push("critical");
+    }
+    
+    if (labels.length > 0) {
+      allKeyMoments.push({
+        ply: record.ply,
+        move_san: record.move_san,
+        labels,
+        category,
+        note,
+      });
+    }
+  }
+  
+  return allKeyMoments;
+}
+
+/**
+ * Detect phase transitions
+ */
+function detectPhaseTransitions(
+  plyRecords: PlyRecord[]
+): Array<{ from: string; to: string; ply: number }> {
+  const transitions: Array<{ from: string; to: string; ply: number }> = [];
+  let currentPhase: "opening" | "middlegame" | "endgame" = "opening";
+  
+  for (const record of plyRecords) {
+    if (record.phase && record.phase !== currentPhase) {
+      transitions.push({
+        from: currentPhase,
+        to: record.phase,
+        ply: record.ply,
+      });
+      currentPhase = record.phase;
+    }
+  }
+  
+  return transitions;
+}
+
+/**
+ * Determine game character (tactical, positional, etc.)
+ */
+function determineGameCharacter(
+  plyRecords: PlyRecord[],
+  stats: any
+): "tactical_battle" | "dynamic" | "balanced" | "positional" | "unknown" {
+  const blunderRate = stats.blunders / Math.max(stats.total_moves, 1);
+  const avgCpLoss = stats.avg_cp_loss || 0;
+  
+  // High blunder rate and high CP loss = tactical battle
+  if (blunderRate > 0.1 && avgCpLoss > 80) {
+    return "tactical_battle";
+  }
+  
+  // Medium blunder rate = dynamic
+  if (blunderRate > 0.05 && avgCpLoss > 50) {
+    return "dynamic";
+  }
+  
+  // Low blunder rate and low CP loss = positional
+  if (blunderRate < 0.02 && avgCpLoss < 30) {
+    return "positional";
+  }
+  
+  // Medium everything = balanced
+  if (blunderRate > 0.02 && blunderRate < 0.08) {
+    return "balanced";
+  }
+  
+  return "unknown";
+}
+
+/**
+ * Determine endgame type
+ */
+function determineEndgameType(
+  chess: Chess,
+  plyRecords: PlyRecord[]
+): "queen_endgame" | "rook_endgame" | "minor_piece_endgame" | "pawn_endgame" | "none" {
+  // Check last 20 moves for endgame piece composition
+  const endgameRecords = plyRecords.slice(-20);
+  if (endgameRecords.length === 0) {
+    return "none";
+  }
+  
+  // Get final position
+  const finalFen = endgameRecords[endgameRecords.length - 1]?.fen_after;
+  if (!finalFen) {
+    return "none";
+  }
+  
+  // Count pieces in final position
+  const board = new Chess(finalFen);
+  const pieces = board.board();
+  
+  let queens = 0;
+  let rooks = 0;
+  let minorPieces = 0; // knights + bishops
+  let pawns = 0;
+  
+  for (const row of pieces) {
+    for (const piece of row) {
+      if (!piece) continue;
+      if (piece.type === "q") queens++;
+      else if (piece.type === "r") rooks++;
+      else if (piece.type === "n" || piece.type === "b") minorPieces++;
+      else if (piece.type === "p") pawns++;
+    }
+  }
+  
+  // Determine endgame type
+  if (queens > 0) {
+    return "queen_endgame";
+  } else if (rooks > 0) {
+    return "rook_endgame";
+  } else if (minorPieces > 0) {
+    return "minor_piece_endgame";
+  } else if (pawns > 0) {
+    return "pawn_endgame";
+  }
+  
+  return "none";
 }
 
 /**

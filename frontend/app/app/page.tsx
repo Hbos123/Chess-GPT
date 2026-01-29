@@ -2454,7 +2454,11 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
           },
           user.id,
           (status, message, progress) => {
-            console.log('[AutoAnalysis] Progress:', { status, message, progress });
+            // Only log every 10% progress or at key milestones to reduce console spam
+            const progressPercent = Math.floor((progress || 0) * 100);
+            if (progressPercent % 10 === 0 || progress === 0 || progress === 1 || status === "saving") {
+              console.log('[AutoAnalysis] Progress:', { status, message, progress: `${progressPercent}%` });
+            }
           }
         ).then(result => {
           console.log('[AutoAnalysis] ✅ Frontend analysis complete:', {
@@ -2464,11 +2468,27 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
             errors: result.errors
           });
           
-          // Refresh profile status after analysis
+          // Refresh profile status immediately and periodically during analysis
           if (result.success && result.games_saved > 0) {
+            // Refresh immediately
+            refreshProfileData();
+            
+            // Set up periodic refresh during analysis (every 3 seconds for 60 seconds)
+            let refreshCount = 0;
+            const maxRefreshes = 20; // 20 * 3s = 60 seconds
+            const refreshInterval = setInterval(() => {
+              refreshProfileData();
+              refreshCount++;
+              if (refreshCount >= maxRefreshes) {
+                clearInterval(refreshInterval);
+              }
+            }, 3000);
+            
+            // Also refresh after a delay to catch final state
             setTimeout(() => {
               refreshProfileData();
-            }, 2000);
+              clearInterval(refreshInterval);
+            }, 5000);
           }
         }).catch(error => {
           console.error('[AutoAnalysis] ❌ Frontend analysis failed:', error);
