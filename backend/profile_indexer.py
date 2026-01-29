@@ -340,9 +340,11 @@ class ProfileIndexingManager:
         time_controls: Sequence[str],
     ) -> None:
         """Start (or restart) indexing for a user."""
-        print(f"🎯 [START_INDEXING] Called for user {user_id}")
-        print(f"🎯 [START_INDEXING] Input accounts: {accounts}")
-        print(f"🎯 [START_INDEXING] Input time_controls: {time_controls}")
+        import time
+        current_time = time.time()
+        print(f"🎯 [START_INDEXING] Called for user {user_id} at {current_time}")
+        print(f"   - Accounts: {accounts}")
+        print(f"   - Time controls: {time_controls}")
         
         normalized_accounts = [
             {
