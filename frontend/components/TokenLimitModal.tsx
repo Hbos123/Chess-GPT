@@ -92,7 +92,7 @@ export default function TokenLimitModal({ onClose, limitInfo, onOpenProfile, isL
     // Default fallback
     return {
       title: 'Limit Reached',
-      message: 'You've reached your daily limit. Try again tomorrow or upgrade for more.',
+      message: "You've reached your daily limit. Try again tomorrow or upgrade for more.",
       action: 'View Plans',
       actionUrl: null,
       useModal: true,
