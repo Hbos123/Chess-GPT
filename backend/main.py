@@ -3403,7 +3403,7 @@ class CheckLimitsRequest(BaseModel):
 # Request deduplication for check_limits endpoint
 _check_limits_locks: Dict[str, asyncio.Lock] = {}
 _check_limits_cache: Dict[str, Tuple[Dict[str, Any], float]] = {}
-_check_limits_cache_ttl = 10  # 10 seconds cache for responses
+_check_limits_cache_ttl = 30  # 30 seconds cache for responses (reduces duplicate requests)
 
 @app.post("/check_limits")
 async def check_limits(request: CheckLimitsRequest, req: Request):

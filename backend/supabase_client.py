@@ -43,7 +43,7 @@ class SupabaseClient:
         # Caching for subscription and usage data to reduce Supabase queries
         # Subscription cache: user_id -> (data, timestamp)
         self._subscription_cache: Dict[str, Tuple[Dict[str, Any], float]] = {}
-        self._subscription_cache_ttl = 300  # 5 minutes (tier rarely changes)
+        self._subscription_cache_ttl = 3600  # 1 hour (tier rarely changes, only invalidated on Stripe webhook)
         
         # Usage cache: "user_id:date" or "ip:date" -> (data, timestamp)
         self._usage_cache: Dict[str, Tuple[Optional[Dict], float]] = {}

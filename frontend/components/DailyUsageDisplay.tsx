@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { getBackendBase } from '@/lib/backendBase';
 import { useAuth } from '@/contexts/AuthContext';
 
@@ -17,9 +17,19 @@ export default function DailyUsageDisplay({ compact = false }: DailyUsageDisplay
     lessons?: { used: number; limit: number | string; remaining?: number | string };
   } | null>(null);
   const [loading, setLoading] = useState(true);
+  
+  // Client-side cache to avoid redundant state updates
+  const lastFetchedRef = useRef<string | null>(null);
+  const intervalRef = useRef<NodeJS.Timeout | null>(null);
+  const isVisibleRef = useRef(true);
 
   useEffect(() => {
     const fetchUsage = async () => {
+      // Skip if tab is hidden (Page Visibility API)
+      if (!isVisibleRef.current) {
+        return;
+      }
+
       try {
         const response = await fetch(`${getBackendBase()}/check_limits`, {
           method: 'POST',
@@ -40,12 +50,19 @@ export default function DailyUsageDisplay({ compact = false }: DailyUsageDisplay
               remaining: messages.limit - messages.used
             } : undefined;
             
-            setUsage({
+            const newUsage = {
               messages: messagesWithRemaining,
               tokens: data.info.tokens,
               gameReviews: data.info.game_reviews,
               lessons: data.info.lessons
-            });
+            };
+            
+            // Client-side cache: only update if data changed
+            const usageKey = JSON.stringify(newUsage);
+            if (usageKey !== lastFetchedRef.current) {
+              lastFetchedRef.current = usageKey;
+              setUsage(newUsage);
+            }
           }
         } else if (response.status === 429) {
           // Rate limit exceeded - parse error info to show usage
@@ -58,12 +75,19 @@ export default function DailyUsageDisplay({ compact = false }: DailyUsageDisplay
                 remaining: 0 // No remaining when limit exceeded
               } : undefined;
               
-              setUsage({
+              const newUsage = {
                 messages: messagesWithRemaining,
                 tokens: errorData.info.tokens,
                 gameReviews: errorData.info.game_reviews,
                 lessons: errorData.info.lessons
-              });
+              };
+              
+              // Client-side cache: only update if data changed
+              const usageKey = JSON.stringify(newUsage);
+              if (usageKey !== lastFetchedRef.current) {
+                lastFetchedRef.current = usageKey;
+                setUsage(newUsage);
+              }
             }
           } catch (parseErr) {
             console.warn('Failed to parse 429 error response:', parseErr);
@@ -78,10 +102,29 @@ export default function DailyUsageDisplay({ compact = false }: DailyUsageDisplay
       }
     };
 
+    // Initial fetch
     fetchUsage();
-    // Refresh every 30 seconds
-    const interval = setInterval(fetchUsage, 30000);
-    return () => clearInterval(interval);
+    
+    // Page Visibility API: pause polling when tab is hidden
+    const handleVisibilityChange = () => {
+      isVisibleRef.current = !document.hidden;
+      if (!document.hidden) {
+        // Tab became visible - fetch immediately
+        fetchUsage();
+      }
+    };
+    
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    
+    // Refresh every 60 seconds (reduced from 30s to minimize queries)
+    intervalRef.current = setInterval(fetchUsage, 60000);
+    
+    return () => {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+      }
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
   }, [user?.id]);
 
   if (loading) {
