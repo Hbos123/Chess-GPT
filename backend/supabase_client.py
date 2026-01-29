@@ -411,19 +411,19 @@ class SupabaseClient:
         retry_delay = 0.5
         
         for attempt in range(max_retries):
-        try:
-            # Supabase Python v2: filters (eq, etc.) are available on the request builder
-            # returned by .select()/.update()/.delete(), not on .table() directly.
-            query = self.client.table("daily_usage").select("*")
-            if user_id:
-                query = self._apply_eq(query, "user_id", user_id)
-            else:
-                query = self._apply_eq(query, "ip_address", ip_address)
-            query = self._apply_eq(query, "usage_date", date.isoformat())
-            
-            result = query.execute()
-            return result.data[0] if result.data else None
-        except Exception as e:
+            try:
+                # Supabase Python v2: filters (eq, etc.) are available on the request builder
+                # returned by .select()/.update()/.delete(), not on .table() directly.
+                query = self.client.table("daily_usage").select("*")
+                if user_id:
+                    query = self._apply_eq(query, "user_id", user_id)
+                else:
+                    query = self._apply_eq(query, "ip_address", ip_address)
+                query = self._apply_eq(query, "usage_date", date.isoformat())
+                
+                result = query.execute()
+                return result.data[0] if result.data else None
+            except Exception as e:
                 error_str = str(e).lower()
                 is_connection_error = any(term in error_str for term in [
                     "server disconnected", "connection", "timeout", "network", 
@@ -436,8 +436,8 @@ class SupabaseClient:
                     time.sleep(wait_time)
                     continue
                 else:
-            print(f"[daily_usage] Error getting usage: {e}")
-            return None
+                    print(f"[daily_usage] Error getting usage: {e}")
+                    return None
 
     def _increment_daily_usage(self, user_id: Optional[str], ip_address: Optional[str], resource_type: str):
         """Increment daily usage counter with retry logic for connection errors"""
