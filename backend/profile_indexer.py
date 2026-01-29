@@ -217,6 +217,8 @@ class ProfileIndexingManager:
         self._stats_cache: Dict[str, Dict[str, Any]] = {}
         self._lesson_history: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
         self._lock = asyncio.Lock()
+        self._last_indexing_start: Dict[str, float] = {}  # Track when indexing was last started
+        self._indexing_cooldown_seconds = 5.0  # Prevent duplicate requests within 5 seconds
 
         # Use absolute path based on this file's location to ensure consistency
         script_dir = Path(__file__).parent.resolve()
@@ -377,10 +379,32 @@ class ProfileIndexingManager:
         print(f"✅ [START_INDEXING] Status set to queued for user {user_id}")
 
         async with self._lock:
+            # Check cooldown to prevent rapid duplicate requests
+            import time
+            last_start = self._last_indexing_start.get(user_id, 0)
+            time_since_last = time.time() - last_start
+            if time_since_last < self._indexing_cooldown_seconds:
+                print(f"⏸️ [START_INDEXING] Cooldown active for user {user_id} ({time_since_last:.1f}s since last start), skipping duplicate request")
+                return
+            
             existing_task = self._tasks.get(user_id)
             if existing_task and not existing_task.done():
+                # Check if task is actively running (not just queued)
+                status = self._status.get(user_id)
+                if status and status.state in ("fetching", "indexing", "analyzing", "reviewing"):
+                    print(f"⏸️ [START_INDEXING] Indexing already in progress for user {user_id} (state: {status.state}), skipping duplicate request")
+                    return
                 print(f"🔄 [START_INDEXING] Cancelling existing task for user {user_id}")
                 existing_task.cancel()
+                # Wait a moment for cancellation to propagate
+                try:
+                    await asyncio.wait_for(existing_task, timeout=0.1)
+                except (asyncio.CancelledError, asyncio.TimeoutError):
+                    pass
+            
+            # Record when indexing starts
+            self._last_indexing_start[user_id] = time.time()
+            
             print(f"🚀 [START_INDEXING] Creating new indexing task for user {user_id}")
             task = asyncio.create_task(
                 self._run_indexing(

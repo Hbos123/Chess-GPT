@@ -476,7 +476,33 @@ export default function PersonalReview({ onClose }: PersonalReviewProps) {
         });
 
         if (!limitsResponse.ok) {
-          const limitsData = await limitsResponse.json();
+          let limitsData;
+          try {
+            limitsData = await limitsResponse.json();
+          } catch (parseErr) {
+            throw new Error("Failed to check subscription limits");
+          }
+          
+          // Handle 429 (rate limit) specifically
+          if (limitsResponse.status === 429) {
+            const errorType = limitsData.type || limitsData.error || "unknown";
+            const errorMessage = limitsData.message || "Daily limit exceeded";
+            
+            // For message limits, show upgrade message
+            if (errorType === "message_limit") {
+              setError(`${errorMessage}. Please upgrade your plan or try again tomorrow.`);
+            } else if (errorType === "token_limit") {
+              setError(`${errorMessage}. Please upgrade your plan for more tokens.`);
+            } else {
+              setError(errorMessage);
+            }
+            
+            setStep("input");
+            setIsLoading(false);
+            return;
+          }
+          
+          // For other errors (403, 500, etc.)
           throw new Error(limitsData.message || "Failed to check subscription limits");
         }
 

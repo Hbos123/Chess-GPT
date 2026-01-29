@@ -47,9 +47,32 @@ export default function DailyUsageDisplay({ compact = false }: DailyUsageDisplay
               lessons: data.info.lessons
             });
           }
+        } else if (response.status === 429) {
+          // Rate limit exceeded - parse error info to show usage
+          try {
+            const errorData = await response.json();
+            if (errorData.info) {
+              const messages = errorData.info.messages;
+              const messagesWithRemaining = messages ? {
+                ...messages,
+                remaining: 0 // No remaining when limit exceeded
+              } : undefined;
+              
+              setUsage({
+                messages: messagesWithRemaining,
+                tokens: errorData.info.tokens,
+                gameReviews: errorData.info.game_reviews,
+                lessons: errorData.info.lessons
+              });
+            }
+          } catch (parseErr) {
+            console.warn('Failed to parse 429 error response:', parseErr);
+          }
         }
       } catch (err) {
         console.error('Failed to fetch usage:', err);
+        // Don't set loading to false on network errors - keep showing last known state
+        // setLoading(false);
       } finally {
         setLoading(false);
       }

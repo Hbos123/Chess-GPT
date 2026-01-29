@@ -339,64 +339,102 @@ class SupabaseClient:
         }
 
     def _get_daily_usage(self, user_id: Optional[str], ip_address: Optional[str], date) -> Optional[Dict]:
-        """Get today's usage record"""
-        try:
-            # Supabase Python v2: filters (eq, etc.) are available on the request builder
-            # returned by .select()/.update()/.delete(), not on .table() directly.
-            query = self.client.table("daily_usage").select("*")
-            if user_id:
-                query = self._apply_eq(query, "user_id", user_id)
-            else:
-                query = self._apply_eq(query, "ip_address", ip_address)
-            query = self._apply_eq(query, "usage_date", date.isoformat())
-            
-            result = query.execute()
-            return result.data[0] if result.data else None
-        except Exception as e:
-            print(f"[daily_usage] Error getting usage: {e}")
-            return None
+        """Get today's usage record with retry logic for connection errors"""
+        import time
+        max_retries = 3
+        retry_delay = 0.5
+        
+        for attempt in range(max_retries):
+            try:
+                # Supabase Python v2: filters (eq, etc.) are available on the request builder
+                # returned by .select()/.update()/.delete(), not on .table() directly.
+                query = self.client.table("daily_usage").select("*")
+                if user_id:
+                    query = self._apply_eq(query, "user_id", user_id)
+                else:
+                    query = self._apply_eq(query, "ip_address", ip_address)
+                query = self._apply_eq(query, "usage_date", date.isoformat())
+                
+                result = query.execute()
+                return result.data[0] if result.data else None
+            except Exception as e:
+                error_str = str(e).lower()
+                is_connection_error = any(term in error_str for term in [
+                    "server disconnected", "connection", "timeout", "network", 
+                    "pool", "closed", "broken pipe"
+                ])
+                
+                if is_connection_error and attempt < max_retries - 1:
+                    wait_time = retry_delay * (2 ** attempt)  # Exponential backoff
+                    print(f"[daily_usage] Connection error (attempt {attempt + 1}/{max_retries}), retrying in {wait_time}s: {e}")
+                    time.sleep(wait_time)
+                    continue
+                else:
+                    print(f"[daily_usage] Error getting usage: {e}")
+                    return None
 
     def _increment_daily_usage(self, user_id: Optional[str], ip_address: Optional[str], resource_type: str):
-        """Increment daily usage counter"""
-        try:
-            today = datetime.now().date()
-            count_field = "game_reviews_count" if resource_type == "game_review" else "lessons_count"
-            
-            # Try to get existing record
-            query = self.client.table("daily_usage").select("*")
-            if user_id:
-                query = self._apply_eq(query, "user_id", user_id)
-            else:
-                query = self._apply_eq(query, "ip_address", ip_address)
-            query = self._apply_eq(query, "usage_date", today.isoformat())
-            
-            result = query.execute()
-            
-            if result.data:
-                # Update existing
-                current = result.data[0].get(count_field, 0)
-                upd = self.client.table("daily_usage").update({count_field: current + 1})
-                if user_id:
-                    upd = self._apply_eq(upd, "user_id", user_id)
-                else:
-                    upd = self._apply_eq(upd, "ip_address", ip_address)
-                upd = self._apply_eq(upd, "usage_date", today.isoformat())
-                upd.execute()
-            else:
-                # Create new record
-                data = {
-                    "usage_date": today.isoformat(),
-                    count_field: 1
-                }
-                if user_id:
-                    data["user_id"] = user_id
-                else:
-                    data["ip_address"] = ip_address
+        """Increment daily usage counter with retry logic for connection errors"""
+        import time
+        max_retries = 3
+        retry_delay = 0.5
+        
+        for attempt in range(max_retries):
+            try:
+                today = datetime.now().date()
+                count_field = "game_reviews_count" if resource_type == "game_review" else "lessons_count"
                 
-                self.client.table("daily_usage").insert(data).execute()
-        except Exception as e:
-            print(f"[daily_usage] Error incrementing usage: {e}")
-            traceback.print_exc()
+                # Try to get existing record
+                query = self.client.table("daily_usage").select("*")
+                if user_id:
+                    query = self._apply_eq(query, "user_id", user_id)
+                else:
+                    query = self._apply_eq(query, "ip_address", ip_address)
+                query = self._apply_eq(query, "usage_date", today.isoformat())
+                
+                result = query.execute()
+                
+                if result.data:
+                    # Update existing
+                    current = result.data[0].get(count_field, 0)
+                    upd = self.client.table("daily_usage").update({count_field: current + 1})
+                    if user_id:
+                        upd = self._apply_eq(upd, "user_id", user_id)
+                    else:
+                        upd = self._apply_eq(upd, "ip_address", ip_address)
+                    upd = self._apply_eq(upd, "usage_date", today.isoformat())
+                    upd.execute()
+                else:
+                    # Create new record
+                    data = {
+                        "usage_date": today.isoformat(),
+                        count_field: 1
+                    }
+                    if user_id:
+                        data["user_id"] = user_id
+                    else:
+                        data["ip_address"] = ip_address
+                    
+                    self.client.table("daily_usage").insert(data).execute()
+                
+                # Success - break out of retry loop
+                return
+            except Exception as e:
+                error_str = str(e).lower()
+                is_connection_error = any(term in error_str for term in [
+                    "server disconnected", "connection", "timeout", "network", 
+                    "pool", "closed", "broken pipe"
+                ])
+                
+                if is_connection_error and attempt < max_retries - 1:
+                    wait_time = retry_delay * (2 ** attempt)  # Exponential backoff
+                    print(f"[daily_usage] Connection error (attempt {attempt + 1}/{max_retries}), retrying in {wait_time}s: {e}")
+                    time.sleep(wait_time)
+                    continue
+                else:
+                    print(f"[daily_usage] Error incrementing usage: {e}")
+                    traceback.print_exc()
+                    return  # Give up after max retries
 
     def check_message_limit(
         self,
