@@ -6,7 +6,8 @@ import { useAuth } from './AuthContext';
 import { getBackendBase } from '@/lib/backendBase';
 
 interface UsageInfo {
-  messages: { used: number; limit: number; remaining: number };
+  // Message limits are display-only (token-based enforcement). Backend may return "unlimited".
+  messages: { used: number; limit: number | string; remaining: number | string };
   tokens: { used: number; limit: number; remaining: number };
   gameReviews: { used: number; limit: number | string; remaining: number | string };
   lessons: { used: number; limit: number | string; remaining: number | string };
@@ -90,8 +91,8 @@ export function UsageProvider({ children }: { children: React.ReactNode }) {
           setUsage({
             messages: {
               used: messages.used ?? 0,
-              limit: messages.limit ?? 0,
-              remaining: Math.max(0, (messages.limit ?? 0) - (messages.used ?? 0))
+              limit: messages.limit ?? 'unlimited',
+              remaining: messages.remaining ?? 'unlimited'
             },
             tokens: {
               used: tokens.used ?? 0,
@@ -143,8 +144,8 @@ export function UsageProvider({ children }: { children: React.ReactNode }) {
             setUsage({
               messages: {
                 used: messages.used ?? 0,
-                limit: messages.limit ?? 0,
-                remaining: 0
+                limit: messages.limit ?? 'unlimited',
+                remaining: messages.remaining ?? 'unlimited'
               },
               tokens: {
                 used: tokens.used ?? 0,
@@ -227,10 +228,7 @@ export function UsageProvider({ children }: { children: React.ReactNode }) {
   // Check if user can send message (local check only - instant)
   const checkCanSendMessage = useCallback((estimatedTokens: number): boolean => {
     if (!usage) return false;
-    
-    // Check message limit
-    if (usage.messages.remaining <= 0) return false;
-    
+
     // Check token limit
     if (usage.tokens.remaining < estimatedTokens) return false;
     
@@ -242,9 +240,6 @@ export function UsageProvider({ children }: { children: React.ReactNode }) {
     if (!user?.id || !usage) return false;
     
     // Local check first (instant feedback)
-    if (usage.messages.remaining < messageCount) {
-      return false;
-    }
     if (usage.tokens.remaining < tokens) {
       return false;
     }

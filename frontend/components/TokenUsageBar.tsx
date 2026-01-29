@@ -3,7 +3,7 @@
 import { useState } from 'react';
 
 interface TokenUsageBarProps {
-  messages?: { used: number; limit: number };
+  messages?: { used: number; limit: number | string };
   tokens?: { used: number; limit: number };
 }
 
@@ -14,12 +14,13 @@ export default function TokenUsageBar({ messages, tokens }: TokenUsageBarProps) 
     return null;
   }
 
-  // Use messages if available, otherwise tokens
-  const usage = messages || tokens;
+  // Token-based enforcement: always drive the bar from tokens when available
+  const usage = tokens || messages;
   if (!usage) return null;
 
-  const used = usage.used || 0;
-  const limit = usage.limit || 1;
+  const used = (usage as any).used || 0;
+  const limitVal = (usage as any).limit;
+  const limit = typeof limitVal === "number" && limitVal > 0 ? limitVal : 1;
   const percentage = Math.min((used / limit) * 100, 100);
   
   // Color based on usage
@@ -83,7 +84,7 @@ export default function TokenUsageBar({ messages, tokens }: TokenUsageBarProps) 
           </div>
           {messages && (
             <div style={{ marginBottom: '2px' }}>
-              Messages: <strong>{messages.used}/{messages.limit}</strong>
+              Messages: <strong>{messages.used}/{String(messages.limit)}</strong>
             </div>
           )}
           {tokens && (

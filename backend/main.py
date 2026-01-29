@@ -3656,24 +3656,13 @@ async def deduct_usage(request: DeductUsageRequest, req: Request):
     tier_info = supabase_client.get_subscription_overview(user_id, use_cache=True) if user_id else {
         "tier_id": "unpaid",
         "tier": {
-            "daily_messages": 1,
             "daily_tokens": 15000,
             "max_game_reviews_per_day": 0,
             "max_lessons_per_day": 0
         }
     }
     
-    # Check limits BEFORE deducting
-    msg_allowed, msg_error, msg_info = supabase_client.check_message_limit(
-        user_id, ip_address, tier_info
-    )
-    if not msg_allowed:
-        return JSONResponse(
-            status_code=429,
-            content={"error": "message_limit", "message": msg_error, "info": msg_info}
-        )
-    
-    # Check token limit
+    # Check token limit (message limits are NOT enforced; token-based only)
     token_allowed, token_error, token_info = supabase_client.check_token_limit(
         user_id, ip_address, tier_info, estimated_tokens=request.tokens
     )
@@ -3693,7 +3682,6 @@ async def deduct_usage(request: DeductUsageRequest, req: Request):
     
     # Get tier limits for response
     tier = tier_info.get("tier", {})
-    max_messages = tier.get("daily_messages", 1 if not user_id else 2)
     max_tokens = tier.get("daily_tokens", 15000)
     max_reviews = tier.get("max_game_reviews_per_day", 0)
     max_lessons = tier.get("max_lessons_per_day", 0)
@@ -3710,8 +3698,8 @@ async def deduct_usage(request: DeductUsageRequest, req: Request):
         "usage": {
             "messages": {
                 "used": messages_used,
-                "limit": max_messages,
-                "remaining": max(0, max_messages - messages_used)
+                "limit": "unlimited",
+                "remaining": "unlimited"
             },
             "tokens": {
                 "used": tokens_used,
@@ -4413,7 +4401,7 @@ async def llm_chat_stream(request: LLMRequest, http_request: Request):
             # Collect all status messages for final response
             all_status_messages = []
             
-            # Check message and token limits
+            # Check token limits only (message limits are display-only)
             limit_exceeded = False
             limit_info = {}
             available_tools = {}
@@ -4424,35 +4412,22 @@ async def llm_chat_stream(request: LLMRequest, http_request: Request):
                     if user_id:
                         tier_info = supabase_client.get_subscription_overview(user_id)
                     else:
-                        # Anonymous user - default to unpaid (1 message/day)
-                        tier_info = {"tier_id": "unpaid", "tier": {"daily_messages": 1, "daily_tokens": 15000, "max_game_reviews_per_day": 0, "max_lessons_per_day": 0}}
-                    
-                    # Check message limit
-                    msg_allowed, msg_error, msg_info = supabase_client.check_message_limit(user_id, ip_address, tier_info)
-                    if not msg_allowed:
-                        limit_exceeded = True
-                        limit_info = {
-                            "type": "message_limit",
-                            "message": msg_error,
-                            "usage": msg_info,
-                            "next_step": msg_info.get("next_step", "upgrade")
-                        }
+                        tier_info = {"tier_id": "unpaid", "tier": {"daily_tokens": 15000, "max_game_reviews_per_day": 0, "max_lessons_per_day": 0}}
                     
                     # Check token limit (estimate ~5k tokens for a typical request)
-                    if not limit_exceeded:
-                        token_allowed, token_error, token_info = supabase_client.check_token_limit(
-                            user_id, ip_address, tier_info, estimated_tokens=5000
-                        )
-                        if not token_allowed:
-                            limit_exceeded = True
-                            available_tools = token_info.get("available_tools", {})
-                            limit_info = {
-                                "type": "token_limit",
-                                "message": token_error,
-                                "usage": token_info,
-                                "next_step": token_info.get("next_step", "upgrade"),
-                                "available_tools": available_tools
-                            }
+                    token_allowed, token_error, token_info = supabase_client.check_token_limit(
+                        user_id, ip_address, tier_info, estimated_tokens=5000
+                    )
+                    if not token_allowed:
+                        limit_exceeded = True
+                        available_tools = token_info.get("available_tools", {})
+                        limit_info = {
+                            "type": "token_limit",
+                            "message": token_error,
+                            "usage": token_info,
+                            "next_step": token_info.get("next_step", "upgrade"),
+                            "available_tools": available_tools
+                        }
                 except Exception as e:
                     print(f"   ⚠️ Rate limit check failed: {e}")
                     import traceback

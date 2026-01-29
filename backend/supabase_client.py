@@ -548,33 +548,15 @@ class SupabaseClient:
         Returns:
             dict with "used", "limit", "remaining"
         """
-        # Unsigned users: 1 message/day
-        if not user_id:
-            if not ip_address:
-                return {"used": 0, "limit": 1, "remaining": 1}
-            
-            today = datetime.now().date()
-            usage = self._get_daily_usage(None, ip_address, today)
-            messages_count = usage.get("messages_count", 0) if usage else 0
-            
-            return {
-                "used": messages_count,
-                "limit": 1,
-                "remaining": max(0, 1 - messages_count)
-            }
-        
-        # Signed-in users: check tier limits
-        tier = tier_info.get("tier", {})
-        max_messages = tier.get("daily_messages", 2)  # Default to 2 for unpaid
-        
+        # Message limits are NOT enforced anywhere anymore (token-based only).
+        # Keep messages_count as a display-only metric.
         today = datetime.now().date()
-        usage = self._get_daily_usage(user_id, None, today)
+        usage = self._get_daily_usage(user_id, ip_address, today)
         messages_count = usage.get("messages_count", 0) if usage else 0
-        
         return {
             "used": messages_count,
-            "limit": max_messages,
-            "remaining": max(0, max_messages - messages_count)
+            "limit": "unlimited",
+            "remaining": "unlimited"
         }
 
     def check_token_limit(
