@@ -340,7 +340,7 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
     message: string;
     info: {
       tokens?: { used: number; limit: number; remaining: number };
-      messages?: { used: number; limit: number; remaining: number };
+      messages?: { used: number; limit: number | string; remaining: number | string };
       tier_id?: string;
       used?: number;
       limit?: number;
