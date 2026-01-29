@@ -2294,6 +2294,70 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
     };
   }, [user, analysisInProgress]);
 
+  // Auto-start analysis when accounts are linked
+  useEffect(() => {
+    if (!user?.id || !profilePreferences?.accounts?.length) return;
+    
+    // Check if analysis should start automatically
+    const shouldAutoStart = profileStatus?.state === 'idle' && 
+                           (profileStatus?.deep_analyzed_games || 0) < (profileStatus?.target_games || 60);
+    
+    if (shouldAutoStart) {
+      console.log('[AutoAnalysis] Accounts linked, starting analysis automatically', {
+        deepAnalyzed: profileStatus?.deep_analyzed_games,
+        target: profileStatus?.target_games
+      });
+      // Trigger analysis by calling the backend endpoint
+      fetch(`${getBackendBase()}/profile/start_indexing?user_id=${user.id}`, { method: 'POST' })
+        .then(res => {
+          if (res.ok) {
+            console.log('[AutoAnalysis] Analysis started successfully');
+          } else {
+            console.warn('[AutoAnalysis] Failed to start:', res.status);
+          }
+        })
+        .catch(err => console.warn('[AutoAnalysis] Failed to start:', err));
+    }
+  }, [user?.id, profilePreferences?.accounts, profileStatus?.state, profileStatus?.deep_analyzed_games, profileStatus?.target_games]);
+
+  // Lightweight check for up-to-date games on boot
+  useEffect(() => {
+    if (!user?.id || !profilePreferences?.accounts?.length) return;
+    
+    // Only check once on mount
+    let hasRun = false;
+    const checkForUpdates = async () => {
+      if (hasRun) return;
+      hasRun = true;
+      
+      try {
+        // Lightweight check - just ping the accounts to see if there are new games
+        const accounts = profilePreferences.accounts;
+        console.log('[BootCheck] Checking accounts for updates:', accounts);
+        for (const acc of accounts) {
+          // This is lightweight - just validates account exists
+          await fetch(`${getBackendBase()}/profile/validate_account?username=${acc.username}&platform=${acc.platform}`)
+            .then(res => {
+              if (res.ok) {
+                console.log(`[BootCheck] Account ${acc.platform}/${acc.username} validated`);
+              }
+            })
+            .catch(() => {}); // Ignore errors - just a lightweight check
+        }
+        console.log('[BootCheck] Account validation check complete');
+      } catch (err) {
+        console.warn('[BootCheck] Account check failed:', err);
+      }
+    };
+    
+    // Run once after a short delay to not block initial load
+    const timeout = setTimeout(checkForUpdates, 2000);
+    return () => {
+      clearTimeout(timeout);
+      hasRun = true; // Prevent running if component unmounts
+    };
+  }, [user?.id, profilePreferences?.accounts?.length]); // Only run when accounts change
+
   useEffect(() => {
     if (user && showAuthModal) {
       setShowAuthModal(false);

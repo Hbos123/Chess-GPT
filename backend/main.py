@@ -7628,12 +7628,22 @@ async def profile_overview(user_id: str):
             except Exception:
                 pass
         
+        # Get subscription tier to determine target games
+        tier_info = {}
+        if supabase_client and user_id:
+            tier_info = supabase_client.get_subscription_overview(user_id, use_cache=True)
+        
+        tier = tier_info.get("tier", {}) if tier_info else {}
+        max_storage = tier.get("max_games_storage", 60)  # Default to 60 if no tier
+        # Use max_games_storage as target, but cap at 60 for rolling window logic
+        target_games = min(max_storage, 60) if max_storage > 0 else 60
+        
         status = {
             "state": full_status.get("state", "idle"),
             "message": full_status.get("message", ""),
             "games_indexed": full_status.get("games_indexed", 0),
             "deep_analyzed_games": active_games_count or full_status.get("deep_analyzed_games", 0),
-            "target_games": 60,  # Always 60 for rolling window
+            "target_games": target_games,  # Use subscription tier limit
             "total_games_estimate": full_status.get("total_games_estimate", 0),
             "last_error": full_status.get("last_error"),
             "background_active": full_status.get("background_active", False),
