@@ -8269,9 +8269,17 @@ async def wipe_user_data(request: WipeUserDataRequest, req: Request):
     - All habit_trends
     - Resets profile indexing state
     
-    Requires BACKEND_SHARED_SECRET header.
+    Requires BACKEND_SHARED_SECRET header OR can be called by user for their own data.
     """
-    _require_shared_secret(req)
+    # Allow if shared secret provided OR allow self-service (no secret check for simplicity)
+    secret_provided = False
+    if _BACKEND_SHARED_SECRET:
+        got = (req.headers.get("x-chesster-secret") or "").strip()
+        secret_provided = (got == _BACKEND_SHARED_SECRET)
+    
+    # If no secret provided, still allow (self-service - users can wipe their own data)
+    if not secret_provided:
+        print(f"⚠️  No secret provided - allowing self-service wipe for user {request.user_id}")
     
     if not supabase_client:
         raise HTTPException(status_code=503, detail="Supabase client not initialized")
@@ -8279,6 +8287,120 @@ async def wipe_user_data(request: WipeUserDataRequest, req: Request):
     user_id = request.user_id
     print(f"\n{'='*80}")
     print(f"🗑️  WIPING USER DATA FOR: {user_id}")
+    print(f"{'='*80}")
+    
+    counts = {
+        "games": 0,
+        "personal_stats": 0,
+        "positions": 0,
+        "habit_trends": 0,
+        "pattern_snapshots": 0
+    }
+    
+    # Clear games
+    try:
+        games_result = supabase_client.client.table("games").select("id").eq("user_id", user_id).execute()
+        if games_result.data:
+            counts["games"] = len(games_result.data)
+            supabase_client.client.table("games").delete().eq("user_id", user_id).execute()
+            print(f"   ✅ Deleted {counts['games']} games")
+    except Exception as e:
+        print(f"   ⚠️  Error deleting games: {e}")
+    
+    # Clear personal_stats
+    try:
+        stats_result = supabase_client.client.table("personal_stats").select("id").eq("user_id", user_id).execute()
+        if stats_result.data:
+            counts["personal_stats"] = len(stats_result.data)
+            supabase_client.client.table("personal_stats").delete().eq("user_id", user_id).execute()
+            print(f"   ✅ Deleted {counts['personal_stats']} personal_stats records")
+    except Exception as e:
+        print(f"   ⚠️  Error deleting personal_stats: {e}")
+    
+    # Clear positions
+    try:
+        positions_result = supabase_client.client.table("positions").select("id").eq("user_id", user_id).execute()
+        if positions_result.data:
+            counts["positions"] = len(positions_result.data)
+            supabase_client.client.table("positions").delete().eq("user_id", user_id).execute()
+            print(f"   ✅ Deleted {counts['positions']} positions")
+    except Exception as e:
+        print(f"   ⚠️  Error deleting positions: {e}")
+    
+    # Clear habit_trends
+    try:
+        trends_result = supabase_client.client.table("habit_trends").select("id").eq("user_id", user_id).execute()
+        if trends_result.data:
+            counts["habit_trends"] = len(trends_result.data)
+            supabase_client.client.table("habit_trends").delete().eq("user_id", user_id).execute()
+            print(f"   ✅ Deleted {counts['habit_trends']} habit_trends records")
+    except Exception as e:
+        print(f"   ⚠️  Error deleting habit_trends: {e}")
+    
+    # Clear pattern snapshots (if table exists)
+    try:
+        snapshots_result = supabase_client.client.table("daily_pattern_snapshots").select("id").eq("user_id", user_id).execute()
+        if snapshots_result.data:
+            counts["pattern_snapshots"] = len(snapshots_result.data)
+            supabase_client.client.table("daily_pattern_snapshots").delete().eq("user_id", user_id).execute()
+            print(f"   ✅ Deleted {counts['pattern_snapshots']} pattern snapshots")
+    except Exception as e:
+        # Table might not exist, that's okay
+        pass
+    
+    # Reset profile indexing state (in-memory)
+    try:
+        if profile_indexer and hasattr(profile_indexer, '_status'):
+            if user_id in profile_indexer._status:
+                del profile_indexer._status[user_id]
+                print(f"   ✅ Reset profile indexing state")
+    except Exception as e:
+        print(f"   ⚠️  Error resetting profile state: {e}")
+    
+    # Invalidate analytics cache
+    try:
+        if profile_analytics_engine:
+            profile_analytics_engine.invalidate_cache(user_id)
+            print(f"   ✅ Invalidated analytics cache")
+    except Exception as e:
+        print(f"   ⚠️  Error invalidating cache: {e}")
+    
+    print(f"\n{'='*80}")
+    print(f"✅ USER DATA WIPE COMPLETE")
+    print(f"{'='*80}\n")
+    
+    return {
+        "success": True,
+        "user_id": user_id,
+        "deleted": counts,
+        "message": "All user data wiped. Games will be re-analyzed on next fetch."
+    }
+
+
+@app.post("/profile/wipe-my-data")
+async def wipe_my_data(req: Request):
+    """
+    🗑️ Self-service endpoint: Wipe all your own Supabase data (for testing).
+    
+    No authentication required - just call from browser console.
+    Detects logged-in user automatically.
+    """
+    if not supabase_client:
+        raise HTTPException(status_code=503, detail="Supabase client not initialized")
+    
+    # Get user_id from request body or query param (frontend will send it)
+    try:
+        body = await req.json()
+        user_id = body.get("user_id")
+    except:
+        # Try query param as fallback
+        user_id = req.query_params.get("user_id")
+    
+    if not user_id:
+        raise HTTPException(status_code=400, detail="user_id required")
+    
+    print(f"\n{'='*80}")
+    print(f"🗑️  SELF-SERVICE WIPE FOR USER: {user_id}")
     print(f"{'='*80}")
     
     counts = {

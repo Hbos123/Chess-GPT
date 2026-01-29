@@ -60,6 +60,7 @@ import {
 } from "@/lib/api";
 import { getBackendBase } from "@/lib/backendBase";
 import { fetchAndReviewGamesFrontend } from "@/lib/gameReviewOrchestrator";
+import "@/lib/wipeUserData"; // Load console helper
 import "../../styles/chatUI.css";
 import "../styles.css";
 
