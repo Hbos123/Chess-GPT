@@ -9332,10 +9332,18 @@ async def get_games_to_analyze(request: GetGamesToAnalyzeRequest):
         
         # Check which games have already been reviewed
         if games:
-            # Get existing reviewed game IDs
+            # Get existing reviewed game IDs from the games table (where analyzed_at is set)
             reviewed_game_ids = set()
             try:
-                reviewed = supabase_client.client.table("reviewed_games").select("external_id").eq("user_id", request.user_id).eq("platform", request.platform).execute()
+                # Normalize platform for database (chess.com -> chesscom)
+                platform_db = "chesscom" if request.platform.lower() in ("chess.com", "chesscom") else "lichess"
+                
+                reviewed = supabase_client.client.table("games")\
+                    .select("external_id")\
+                    .eq("user_id", request.user_id)\
+                    .eq("platform", platform_db)\
+                    .not_.is_("analyzed_at", "null")\
+                    .execute()
                 if reviewed.data:
                     reviewed_game_ids = {str(g.get("external_id", "")) for g in reviewed.data}
             except Exception as e:
