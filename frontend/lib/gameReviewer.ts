@@ -72,7 +72,7 @@ export async function reviewGame(
 
     // Skip if not focusing on this color
     if (focusColor !== "both" && moveColor !== focusColor) {
-      currentBoard.move(move);
+      currentBoard.move(move.san);
       continue;
     }
 
@@ -99,7 +99,7 @@ export async function reviewGame(
         analysisBefore.candidates?.[0]?.eval_cp || 0;
 
       // Make the move
-      currentBoard.move(move);
+      currentBoard.move(move.san);
       const fenAfter = currentBoard.fen();
 
       // Analyze position after move
@@ -198,7 +198,7 @@ export async function reviewGame(
     } catch (error) {
       console.error(`[GameReviewer] Error analyzing move ${moveIndex}:`, error);
       // Continue with next move
-      currentBoard.move(move);
+      currentBoard.move(move.san);
     }
   }
 
