@@ -3400,120 +3400,161 @@ class CheckLimitsRequest(BaseModel):
     message_count: int = 1
 
 
+# Request deduplication for check_limits endpoint
+_check_limits_locks: Dict[str, asyncio.Lock] = {}
+_check_limits_cache: Dict[str, Tuple[Dict[str, Any], float]] = {}
+_check_limits_cache_ttl = 10  # 10 seconds cache for responses
+
 @app.post("/check_limits")
 async def check_limits(request: CheckLimitsRequest, req: Request):
     """
     Check if user has remaining tokens/messages before processing.
     Returns 200 if allowed, 429 if limit exceeded.
+    Uses caching and request deduplication to reduce Supabase queries.
     """
+    import time
     try:
         user_id = request.user_id
         ip_address = req.headers.get("x-forwarded-for") or req.client.host
+        cache_key = f"{user_id or ip_address}"
         
         if not supabase_client:
             # If no supabase, allow (for development)
             return {"allowed": True, "message": "No rate limiting configured"}
         
-        # Get subscription info
-        if user_id:
-            tier_info = supabase_client.get_subscription_overview(user_id)
-        else:
-            # Anonymous user - default to unpaid
-            tier_info = {
-                "tier_id": "unpaid", 
-                "tier": {
-                    "daily_messages": 1, 
-                    "daily_tokens": 15000, 
-                    "max_game_reviews_per_day": 0, 
-                    "max_lessons_per_day": 0
-                }
-            }
+        # Check response cache first (deduplicate concurrent requests)
+        if cache_key in _check_limits_cache:
+            cached_response, timestamp = _check_limits_cache[cache_key]
+            if time.time() - timestamp < _check_limits_cache_ttl:
+                return cached_response
         
-        # Check message limit
-        msg_allowed, msg_error, msg_info = supabase_client.check_message_limit(
-            user_id, ip_address, tier_info
-        )
-        if not msg_allowed:
-            return JSONResponse(
-                status_code=429,
-                content={
-                    "allowed": False,
-                    "error": "message_limit",
-                    "message": msg_error,
-                    "info": msg_info,
-                    "type": "message_limit"
-                }
-            )
+        # Get or create lock for this user/IP
+        if cache_key not in _check_limits_locks:
+            _check_limits_locks[cache_key] = asyncio.Lock()
         
-        # Check token limit
-        token_allowed, token_error, token_info = supabase_client.check_token_limit(
-            user_id, ip_address, tier_info, estimated_tokens=request.estimated_tokens
-        )
-        if not token_allowed:
-            # Include tier_id in response for frontend to customize message
-            token_info_with_tier = token_info.copy() if token_info else {}
-            token_info_with_tier["tier_id"] = tier_info.get("tier_id", "unpaid")
-            return JSONResponse(
-                status_code=429,
-                content={
-                    "allowed": False,
-                    "error": "token_limit",
-                    "message": token_error,
-                    "info": token_info_with_tier,
-                    "type": "token_limit"
-                }
-            )
-        
-        # Get game review and lesson availability
-        game_review_info = {}
-        lesson_info = {}
-        if user_id or ip_address:
-            tier_info = supabase_client.get_subscription_overview(user_id) if user_id else {
-                "tier_id": "unpaid",
-                "tier": {
-                    "max_game_reviews_per_day": 0,
-                    "max_lessons_per_day": 0
-                }
-            }
+        async with _check_limits_locks[cache_key]:
+            # Double-check cache after acquiring lock (another request might have populated it)
+            if cache_key in _check_limits_cache:
+                cached_response, timestamp = _check_limits_cache[cache_key]
+                if time.time() - timestamp < _check_limits_cache_ttl:
+                    return cached_response
             
-            # Check game review availability (without incrementing)
-            today = datetime.now().date()
-            usage = supabase_client._get_daily_usage(user_id, ip_address, today)
-            tier = tier_info.get("tier", {})
-            
-            max_reviews = tier.get("max_game_reviews_per_day")
-            if max_reviews is None:
-                game_review_info = {"used": 0, "limit": "unlimited", "remaining": "unlimited"}
+            # Process the request
+            # Get subscription info (uses cache internally)
+            if user_id:
+                tier_info = supabase_client.get_subscription_overview(user_id, use_cache=True)
             else:
-                used_reviews = usage.get("game_reviews_count", 0) if usage else 0
-                game_review_info = {
-                    "used": used_reviews,
-                    "limit": max_reviews,
-                    "remaining": max(0, max_reviews - used_reviews)
+                # Anonymous user - default to unpaid
+                tier_info = {
+                    "tier_id": "unpaid", 
+                    "tier": {
+                        "daily_messages": 1, 
+                        "daily_tokens": 15000, 
+                        "max_game_reviews_per_day": 0, 
+                        "max_lessons_per_day": 0
+                    }
                 }
             
-            # Check lesson availability (without incrementing)
-            max_lessons = tier.get("max_lessons_per_day")
-            if max_lessons is None:
-                lesson_info = {"used": 0, "limit": "unlimited", "remaining": "unlimited"}
-            else:
-                used_lessons = usage.get("lessons_count", 0) if usage else 0
-                lesson_info = {
-                    "used": used_lessons,
-                    "limit": max_lessons,
-                    "remaining": max(0, max_lessons - used_lessons)
+            # Check message limit
+            msg_allowed, msg_error, msg_info = supabase_client.check_message_limit(
+                user_id, ip_address, tier_info
+            )
+            if not msg_allowed:
+                response = JSONResponse(
+                    status_code=429,
+                    content={
+                        "allowed": False,
+                        "error": "message_limit",
+                        "message": msg_error,
+                        "info": msg_info,
+                        "type": "message_limit"
+                    }
+                )
+                # Cache error responses too (short TTL)
+                _check_limits_cache[cache_key] = (response, time.time())
+                return response
+            
+            # Check token limit
+            token_allowed, token_error, token_info = supabase_client.check_token_limit(
+                user_id, ip_address, tier_info, estimated_tokens=request.estimated_tokens
+            )
+            if not token_allowed:
+                # Include tier_id in response for frontend to customize message
+                token_info_with_tier = token_info.copy() if token_info else {}
+                token_info_with_tier["tier_id"] = tier_info.get("tier_id", "unpaid")
+                response = JSONResponse(
+                    status_code=429,
+                    content={
+                        "allowed": False,
+                        "error": "token_limit",
+                        "message": token_error,
+                        "info": token_info_with_tier,
+                        "type": "token_limit"
+                    }
+                )
+                # Cache error responses too
+                _check_limits_cache[cache_key] = (response, time.time())
+                return response
+            
+            # Get game review and lesson availability (reuse tier_info from cache)
+            game_review_info = {}
+            lesson_info = {}
+            if user_id or ip_address:
+                # Reuse tier_info (already fetched and cached)
+                if not user_id:
+                    tier_info = {
+                        "tier_id": "unpaid",
+                        "tier": {
+                            "max_game_reviews_per_day": 0,
+                            "max_lessons_per_day": 0
+                        }
+                    }
+                
+                # Check game review availability (uses cache internally)
+                today = datetime.now().date()
+                usage = supabase_client._get_daily_usage(user_id, ip_address, today, use_cache=True)
+                tier = tier_info.get("tier", {})
+                
+                max_reviews = tier.get("max_game_reviews_per_day")
+                if max_reviews is None:
+                    game_review_info = {"used": 0, "limit": "unlimited", "remaining": "unlimited"}
+                else:
+                    used_reviews = usage.get("game_reviews_count", 0) if usage else 0
+                    game_review_info = {
+                        "used": used_reviews,
+                        "limit": max_reviews,
+                        "remaining": max(0, max_reviews - used_reviews)
+                    }
+                
+                # Check lesson availability (without incrementing)
+                max_lessons = tier.get("max_lessons_per_day")
+                if max_lessons is None:
+                    lesson_info = {"used": 0, "limit": "unlimited", "remaining": "unlimited"}
+                else:
+                    used_lessons = usage.get("lessons_count", 0) if usage else 0
+                    lesson_info = {
+                        "used": used_lessons,
+                        "limit": max_lessons,
+                        "remaining": max(0, max_lessons - used_lessons)
+                    }
+            
+            response = {
+                "allowed": True,
+                "message": "Limits OK",
+                "info": {
+                    "messages": msg_info,
+                    "tokens": token_info,
+                    "game_reviews": game_review_info,
+                    "lessons": lesson_info,
+                    "tier_id": tier_info.get("tier_id", "unpaid"),
+                    "tier": tier_info.get("tier", {})
                 }
-        
-        return {
-            "allowed": True,
-            "message": "Limits OK",
-            "info": {
-                "messages": msg_info,
-                "tokens": token_info,
-                "game_reviews": game_review_info,
-                "lessons": lesson_info
             }
-        }
+            
+            # Cache successful response
+            _check_limits_cache[cache_key] = (response, time.time())
+            
+            return response
     except Exception as e:
         print(f"⚠️ Limit check failed: {e}")
         import traceback
@@ -7002,7 +7043,7 @@ async def stripe_webhook(request: Request):
                     "current_period_end": datetime.fromtimestamp(subscription.get("current_period_end", 0)).isoformat() if subscription.get("current_period_end") else None,
                 }
             
-            # Upsert subscription record
+            # Upsert subscription record (this will invalidate cache automatically)
             await asyncio.to_thread(
                 supabase_client.upsert_user_subscription,
                 user_id=user_id,
@@ -7010,6 +7051,7 @@ async def stripe_webhook(request: Request):
                 **subscription_data,
             )
             
+            # Cache invalidation is handled in upsert_user_subscription
             print(f"[STRIPE_WEBHOOK] Created subscription for user {user_id}, customer {customer_id}")
             
         elif event_type == "customer.subscription.created":
@@ -7067,6 +7109,7 @@ async def stripe_webhook(request: Request):
                 else:
                     print(f"[STRIPE_WEBHOOK] Unknown product_id: {product_id}, defaulting to unpaid")
             
+            # Upsert subscription record (this will invalidate cache automatically)
             await asyncio.to_thread(
                 supabase_client.upsert_user_subscription,
                 user_id=user_id,
@@ -7078,6 +7121,7 @@ async def stripe_webhook(request: Request):
                 current_period_end=datetime.fromtimestamp(subscription.get("current_period_end", 0)).isoformat() if subscription.get("current_period_end") else None,
             )
             
+            # Cache invalidation is handled in upsert_user_subscription
             print(f"[STRIPE_WEBHOOK] Created subscription record for user {user_id}")
             
         elif event_type == "customer.subscription.updated":
@@ -7135,6 +7179,7 @@ async def stripe_webhook(request: Request):
                 else:
                     print(f"[STRIPE_WEBHOOK] Unknown product_id: {product_id}, defaulting to unpaid")
             
+            # Upsert subscription record (this will invalidate cache automatically)
             await asyncio.to_thread(
                 supabase_client.upsert_user_subscription,
                 user_id=user_id,
@@ -7146,6 +7191,7 @@ async def stripe_webhook(request: Request):
                 current_period_end=datetime.fromtimestamp(subscription.get("current_period_end", 0)).isoformat() if subscription.get("current_period_end") else None,
             )
             
+            # Cache invalidation is handled in upsert_user_subscription
             print(f"[STRIPE_WEBHOOK] Updated subscription for user {user_id}")
             
         elif event_type == "customer.subscription.deleted":
@@ -7168,15 +7214,18 @@ async def stripe_webhook(request: Request):
                 print(f"[STRIPE_WEBHOOK] No user_id found for subscription {subscription_id}, customer {customer_id}")
                 return {"status": "ok", "message": "No user_id found"}
             
+            # Upsert subscription record (this will invalidate cache automatically)
             await asyncio.to_thread(
                 supabase_client.upsert_user_subscription,
                 user_id=user_id,
                 stripe_customer_id=customer_id,
                 stripe_subscription_id=subscription_id,
+                tier_id="unpaid",  # Downgrade to unpaid when canceled
                 status="canceled",
                 current_period_end=datetime.fromtimestamp(subscription.get("current_period_end", 0)).isoformat() if subscription.get("current_period_end") else None,
             )
             
+            # Cache invalidation is handled in upsert_user_subscription
             print(f"[STRIPE_WEBHOOK] Marked subscription as canceled for user {user_id}")
         
         return {"status": "ok"}

@@ -39,6 +39,18 @@ class SupabaseClient:
     def __init__(self, url: str, service_role_key: str):
         self.client: Client = create_client(url, service_role_key)
         print(f"✅ Supabase client initialized: {url}")
+        
+        # Caching for subscription and usage data to reduce Supabase queries
+        # Subscription cache: user_id -> (data, timestamp)
+        self._subscription_cache: Dict[str, Tuple[Dict[str, Any], float]] = {}
+        self._subscription_cache_ttl = 300  # 5 minutes (tier rarely changes)
+        
+        # Usage cache: "user_id:date" or "ip:date" -> (data, timestamp)
+        self._usage_cache: Dict[str, Tuple[Optional[Dict], float]] = {}
+        self._usage_cache_ttl = 86400  # 24 hours (until date changes or we increment)
+        
+        # Thread-safe cache access
+        self._cache_lock = threading.Lock()
 
     def _apply_eq(self, query, column: str, value):
         """Apply an equality filter across PostgREST client versions.
@@ -99,9 +111,10 @@ class SupabaseClient:
     # SUBSCRIPTIONS
     # ============================================================================
 
-    def get_subscription_overview(self, user_id: str) -> Dict[str, Any]:
+    def get_subscription_overview(self, user_id: str, use_cache: bool = True) -> Dict[str, Any]:
         """
-        Fetch a user's subscription + tier details.
+        Fetch a user's subscription + tier details with caching.
+        Subscription tier rarely changes (only on upgrade/downgrade via Stripe webhook).
 
         Returns a JSON-serializable dict like:
           {
@@ -112,6 +125,18 @@ class SupabaseClient:
             "tier": { ...subscription_tiers... }
           }
         """
+        import time
+        cache_key = f"sub:{user_id}"
+        
+        # Check cache first
+        if use_cache:
+            with self._cache_lock:
+                if cache_key in self._subscription_cache:
+                    data, timestamp = self._subscription_cache[cache_key]
+                    if time.time() - timestamp < self._subscription_cache_ttl:
+                        return data
+        
+        # Fetch from database
         try:
             # PostgREST embedded relationship (FK: user_subscriptions.tier_id -> subscription_tiers.id)
             result = (
@@ -127,7 +152,7 @@ class SupabaseClient:
 
             row = (result.data[0] if result.data else None) or None
             if not row:
-                return {
+                data = {
                     "tier_id": "unpaid",
                     "status": "inactive",
                     "current_period_start": None,
@@ -136,18 +161,25 @@ class SupabaseClient:
                     "stripe_subscription_id": None,
                     "tier": {"id": "unpaid", "name": "Unpaid"},
                 }
-
-            return {
-                "tier_id": row.get("tier_id"),
-                "status": row.get("status"),
-                "current_period_start": row.get("current_period_start"),
-                "current_period_end": row.get("current_period_end"),
-                "stripe_customer_id": row.get("stripe_customer_id"),
-                "stripe_subscription_id": row.get("stripe_subscription_id"),
-                "tier": row.get("subscription_tiers"),
-            }
+            else:
+                data = {
+                    "tier_id": row.get("tier_id"),
+                    "status": row.get("status"),
+                    "current_period_start": row.get("current_period_start"),
+                    "current_period_end": row.get("current_period_end"),
+                    "stripe_customer_id": row.get("stripe_customer_id"),
+                    "stripe_subscription_id": row.get("stripe_subscription_id"),
+                    "tier": row.get("subscription_tiers"),
+                }
+            
+            # Cache the result
+            with self._cache_lock:
+                self._subscription_cache[cache_key] = (data, time.time())
+            
+            return data
         except Exception as e:
             print(f"[subscriptions] get_subscription_overview error: {e}")
+            # Return default on error, but don't cache errors
             return {
                 "tier_id": "unpaid",
                 "status": "error",
@@ -271,6 +303,10 @@ class SupabaseClient:
             )
             
             print(f"[subscriptions] Upserted subscription for user {user_id}: {update_data}")
+            
+            # Invalidate subscription cache when tier changes
+            self.invalidate_subscription_cache(user_id)
+            
             return True
         except Exception as e:
             print(f"[subscriptions] upsert_user_subscription error: {e}")
@@ -416,6 +452,9 @@ class SupabaseClient:
                         data["ip_address"] = ip_address
                     
                     self.client.table("daily_usage").insert(data).execute()
+                
+                # Invalidate usage cache after incrementing
+                self.invalidate_usage_cache(user_id, ip_address, today)
                 
                 # Success - break out of retry loop
                 return
