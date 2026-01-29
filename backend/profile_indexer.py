@@ -1706,7 +1706,9 @@ class ProfileIndexingManager:
 
     async def ensure_background_index(self, user_id: str) -> None:
         """Called when the user is active to keep background indexing humming."""
+        import time
         self._last_activity[user_id] = time.monotonic()
+        print(f"🔍 [ENSURE_BACKGROUND_INDEX] Called for user {user_id}")
         
         # Ensure status exists
         if user_id not in self._status:
