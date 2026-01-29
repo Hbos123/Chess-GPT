@@ -1749,7 +1749,24 @@ class ProfileIndexingManager:
             return
         
         # If we have accounts but no games yet, start indexing
+        # BUT: Check if indexing is already in progress to prevent duplicates
         if total_games == 0 and status.accounts:
+            # Check if indexing is already running
+            existing_task = self._tasks.get(user_id)
+            if existing_task and not existing_task.done():
+                current_state = status.state if status else "unknown"
+                if current_state in ("fetching", "indexing", "analyzing", "reviewing", "queued"):
+                    print(f"⏸️ [MAYBE_SCHEDULE_BACKGROUND] Indexing already in progress for user {user_id} (state: {current_state}), skipping")
+                    return
+            
+            # Check cooldown
+            import time
+            last_start = self._last_indexing_start.get(user_id, 0)
+            time_since_last = time.time() - last_start
+            if time_since_last < self._indexing_cooldown_seconds:
+                print(f"⏸️ [MAYBE_SCHEDULE_BACKGROUND] Cooldown active for user {user_id} ({time_since_last:.1f}s since last start), skipping")
+                return
+            
             # Start initial indexing
             prefs = self.load_preferences(user_id) or {}
             time_controls = prefs.get("time_controls", [])
@@ -1759,13 +1776,13 @@ class ProfileIndexingManager:
                     time_controls = profile.get("time_controls", [])
             
             if status.accounts:
-                # Start indexing in background (do not await; keep loop responsive)
+                print(f"🚀 [MAYBE_SCHEDULE_BACKGROUND] Starting background indexing for user {user_id} (no games yet)")
+                # Use start_indexing to get duplicate prevention logic
                 asyncio.create_task(
-                    self._run_indexing(
+                    self.start_indexing(
                         user_id=user_id,
                         accounts=status.accounts,
                         time_controls=[tc.lower() for tc in time_controls] if time_controls else [],
-                        background=True,
                     )
                 )
             return

@@ -59,6 +59,7 @@ import {
   type OpeningPracticePosition,
 } from "@/lib/api";
 import { getBackendBase } from "@/lib/backendBase";
+import { fetchAndReviewGamesFrontend } from "@/lib/gameReviewOrchestrator";
 import "../../styles/chatUI.css";
 import "../styles.css";
 
@@ -2393,16 +2394,68 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
       alreadyTriggered: analysisTriggeredRef.current
     });
     
-    // If we have indexed games but no analyzed games, and we're idle, log for now
-    // Frontend analysis will be triggered manually via PersonalReview component
+    // If we have indexed games but no analyzed games, and we're idle, auto-trigger frontend analysis
     if (hasIndexedGames && !hasAnalyzedGames && isIdle && !analysisTriggeredRef.current) {
-      console.log('[AutoAnalysis] ✅ Games indexed but not analyzed - ready for frontend analysis', {
-        indexed: profileStatus?.games_indexed,
+      const indexedCount = profileStatus?.games_indexed || 0;
+      const gamesToAnalyze = Math.min(indexedCount, targetGames);
+      
+      console.log('[AutoAnalysis] ✅ Games indexed but not analyzed - auto-triggering frontend analysis', {
+        indexed: indexedCount,
         analyzed: profileStatus?.deep_analyzed_games,
         target: targetGames,
-        message: 'Open Personal Review to analyze games'
+        gamesToAnalyze,
+        accounts: profilePreferences.accounts
       });
-      analysisTriggeredRef.current = true; // Prevent repeated logs
+      
+      analysisTriggeredRef.current = true; // Prevent repeated triggers
+      
+      // Get the first linked account to use for analysis
+      const firstAccount = profilePreferences.accounts?.[0];
+      if (firstAccount && firstAccount.username) {
+        const platform = firstAccount.platform === "chess.com" ? "chess.com" : "lichess";
+        
+        console.log('[AutoAnalysis] 🚀 Starting frontend analysis automatically', {
+          username: firstAccount.username,
+          platform,
+          gamesToAnalyze
+        });
+        
+        // Trigger frontend analysis in background (don't await to avoid blocking)
+        fetchAndReviewGamesFrontend(
+          {
+            username: firstAccount.username,
+            platform: platform as "chess.com" | "lichess",
+            max_games: gamesToAnalyze,
+            depth: 14,
+            focus_color: "both",
+            review_subject: "player",
+          },
+          user.id,
+          (status, message, progress) => {
+            console.log('[AutoAnalysis] Progress:', { status, message, progress });
+          }
+        ).then(result => {
+          console.log('[AutoAnalysis] ✅ Frontend analysis complete:', {
+            success: result.success,
+            gamesAnalyzed: result.games_analyzed,
+            gamesSaved: result.games_saved,
+            errors: result.errors
+          });
+          
+          // Refresh profile status after analysis
+          if (result.success && result.games_saved > 0) {
+            setTimeout(() => {
+              refreshProfileData();
+            }, 2000);
+          }
+        }).catch(error => {
+          console.error('[AutoAnalysis] ❌ Frontend analysis failed:', error);
+          analysisTriggeredRef.current = false; // Reset on error so it can retry
+        });
+      } else {
+        console.warn('[AutoAnalysis] ⚠️ No valid account found for auto-analysis');
+        analysisTriggeredRef.current = false;
+      }
     } else if (hasAnalyzedGames) {
       // Reset if games get analyzed
       analysisTriggeredRef.current = false;
