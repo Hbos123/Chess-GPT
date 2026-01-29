@@ -2380,7 +2380,8 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
     // Check if we have indexed games but no analyzed games
     const hasIndexedGames = (profileStatus?.games_indexed || 0) > 0;
     const hasAnalyzedGames = (profileStatus?.deep_analyzed_games || 0) > 0;
-    const isIdle = profileStatus?.state === 'idle';
+    // Allow auto-analysis when state is idle, completed, or reviewing (but not actively fetching/indexing)
+    const isReadyForAnalysis = ['idle', 'completed', 'reviewing'].includes(profileStatus?.state || '');
     const targetGames = profileStatus?.target_games || 60;
     
     console.log('[AutoAnalysis] Checking if frontend analysis should trigger', {
@@ -2389,13 +2390,14 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
       indexed: profileStatus?.games_indexed,
       hasAnalyzedGames,
       analyzed: profileStatus?.deep_analyzed_games,
-      isIdle,
+      state: profileStatus?.state,
+      isReadyForAnalysis,
       targetGames,
       alreadyTriggered: analysisTriggeredRef.current
     });
     
-    // If we have indexed games but no analyzed games, and we're idle, auto-trigger frontend analysis
-    if (hasIndexedGames && !hasAnalyzedGames && isIdle && !analysisTriggeredRef.current) {
+    // If we have indexed games but no analyzed games, and we're ready (idle/completed/reviewing), auto-trigger frontend analysis
+    if (hasIndexedGames && !hasAnalyzedGames && isReadyForAnalysis && !analysisTriggeredRef.current) {
       const indexedCount = profileStatus?.games_indexed || 0;
       const gamesToAnalyze = Math.min(indexedCount, targetGames);
       
