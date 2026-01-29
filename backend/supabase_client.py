@@ -2301,22 +2301,51 @@ class SupabaseClient:
     # ============================================================================
 
     def save_profile_stats(self, user_id: str, stats: Dict) -> bool:
-        """Upsert aggregated profile statistics - uses personal_stats table"""
-        try:
-            # Use personal_stats table instead of profile_stats
-            # Specify on_conflict to use the unique constraint on user_id
-            self.client.table("personal_stats").upsert(
-                {
-                    "user_id": user_id,
-                    "stats": stats,
-                    "updated_at": datetime.utcnow().isoformat() + "Z"
-                },
-                on_conflict="user_id"
-            ).execute()
-            return True
-        except Exception as e:
-            print(f"Error saving profile stats: {e}")
-            return False
+        """Upsert aggregated profile statistics - uses personal_stats table
+        Includes retry logic for transient connection errors.
+        """
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                # Use personal_stats table instead of profile_stats
+                # Specify on_conflict to use the unique constraint on user_id
+                self.client.table("personal_stats").upsert(
+                    {
+                        "user_id": user_id,
+                        "stats": stats,
+                        "updated_at": datetime.utcnow().isoformat() + "Z"
+                    },
+                    on_conflict="user_id"
+                ).execute()
+                return True
+            except Exception as e:
+                error_msg = str(e)
+                error_type = type(e).__name__
+                
+                # Check if it's a transient connection error
+                is_connection_error = (
+                    "Server disconnected" in error_msg or 
+                    "RemoteProtocolError" in error_type or
+                    "timeout" in error_msg.lower() or 
+                    "ReadTimeout" in error_msg or
+                    "Connection" in error_type
+                )
+                
+                if is_connection_error and attempt < max_retries - 1:
+                    # Retry with exponential backoff
+                    import time
+                    wait_time = 0.5 * (attempt + 1)
+                    print(f"[supabase] Connection error (attempt {attempt + 1}/{max_retries}) saving profile stats for user {user_id[:8]}..., retrying in {wait_time}s...")
+                    time.sleep(wait_time)
+                    continue
+                
+                # If not a connection error or out of retries, log and return False
+                print(f"Error saving profile stats: {e}")
+                return False
+        
+        # If we exhausted retries, return False
+        print(f"[supabase] Exhausted retries for saving profile stats (user_id={user_id[:8]}...)")
+        return False
 
     def get_profile_stats(self, user_id: str) -> Dict:
         """Fetch cached profile statistics"""
