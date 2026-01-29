@@ -3501,6 +3501,32 @@ async def check_limits(request: CheckLimitsRequest, req: Request):
                 "remaining": max(0, max_tokens - tokens_used)
             }
             
+            # Get game review and lesson availability (reuse usage from above)
+            game_review_info = {}
+            lesson_info = {}
+            if user_id or ip_address:
+                max_reviews = tier.get("max_game_reviews_per_day")
+                if max_reviews is None:
+                    game_review_info = {"used": 0, "limit": "unlimited", "remaining": "unlimited"}
+                else:
+                    used_reviews = usage.get("game_reviews_count", 0) if usage else 0
+                    game_review_info = {
+                        "used": used_reviews,
+                        "limit": max_reviews,
+                        "remaining": max(0, max_reviews - used_reviews)
+                    }
+                
+                max_lessons = tier.get("max_lessons_per_day")
+                if max_lessons is None:
+                    lesson_info = {"used": 0, "limit": "unlimited", "remaining": "unlimited"}
+                else:
+                    used_lessons = usage.get("lessons_count", 0) if usage else 0
+                    lesson_info = {
+                        "used": used_lessons,
+                        "limit": max_lessons,
+                        "remaining": max(0, max_lessons - used_lessons)
+                    }
+            
             # Check if token limit would be exceeded (for 429 response)
             if token_info["remaining"] < request.estimated_tokens:
                 tier_id = tier_info.get("tier_id", "unpaid")
@@ -3560,56 +3586,7 @@ async def check_limits(request: CheckLimitsRequest, req: Request):
                 _check_limits_cache[cache_key] = (response, time.time())
                 return response
             
-            # Get game review and lesson availability (reuse tier_info from cache)
-            game_review_info = {}
-            lesson_info = {}
-            if user_id or ip_address:
-                # Reuse tier_info (already fetched and cached)
-                if not user_id:
-                    tier_info = {
-                        "tier_id": "unpaid",
-                        "tier": {
-                            "max_game_reviews_per_day": 0,
-                            "max_lessons_per_day": 0
-                        }
-                    }
-                
-                # Check game review availability (uses cache internally)
-                today = datetime.now().date()
-                usage = supabase_client._get_daily_usage(user_id, ip_address, today, use_cache=True)
-                tier = tier_info.get("tier", {})
-                
-                max_reviews = tier.get("max_game_reviews_per_day")
-                if max_reviews is None:
-                    game_review_info = {"used": 0, "limit": "unlimited", "remaining": "unlimited"}
-                else:
-                    used_reviews = usage.get("game_reviews_count", 0) if usage else 0
-                    game_review_info = {
-                        "used": used_reviews,
-                        "limit": max_reviews,
-                        "remaining": max(0, max_reviews - used_reviews)
-                    }
-                
-                # Check lesson availability (without incrementing)
-                max_lessons = tier.get("max_lessons_per_day")
-                if max_lessons is None:
-                    lesson_info = {"used": 0, "limit": "unlimited", "remaining": "unlimited"}
-                else:
-                    used_lessons = usage.get("lessons_count", 0) if usage else 0
-                    lesson_info = {
-                        "used": used_lessons,
-                        "limit": max_lessons,
-                        "remaining": max(0, max_lessons - used_lessons)
-                    }
-            
-            # Ensure token_info has the right structure
-            if not token_info:
-                token_info = {
-                    "used": tokens_used,
-                    "limit": max_tokens,
-                    "remaining": max(0, max_tokens - tokens_used)
-                }
-            
+            # Success response - all limits OK
             response = {
                 "allowed": True,
                 "message": "Limits OK",
