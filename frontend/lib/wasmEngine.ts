@@ -2,16 +2,41 @@ import { Chess } from 'chess.js';
 
 let worker: Worker | null = null;
 let readyPromise: Promise<void> | null = null;
+let isReady = false;
+let readyQueue: string[] = [];
 
 function initWorker(): Promise<void> {
   if (readyPromise) return readyPromise;
-  readyPromise = new Promise((resolve) => {
-    // @ts-ignore - bundlers handle worker paths
-    worker = new Worker(new URL('../workers/stockfishWorker.ts', import.meta.url), { type: 'module' });
-    worker!.onmessage = (e: MessageEvent) => {
-      if (e.data?.type === 'ready') resolve();
+  readyPromise = new Promise((resolve, reject) => {
+    // Use stockfish-lite.js directly from public folder (same as StockfishAnalysis)
+    // This avoids nested worker issues
+    worker = new Worker('/stockfish-lite.js', { type: 'classic' });
+    
+    worker.onmessage = (e: MessageEvent) => {
+      const text = typeof e.data === 'string' ? e.data : String(e.data || '');
+      if (!text || text.trim() === '') return;
+      
+      // Handle ready response
+      if (text.trim() === 'readyok') {
+        isReady = true;
+        // Process queued messages
+        readyQueue.forEach(msg => {
+          if (worker) worker.postMessage(msg);
+        });
+        readyQueue = [];
+        resolve();
+        return;
+      }
     };
-    worker!.postMessage({ cmd: 'init' });
+    
+    worker.onerror = (e: ErrorEvent) => {
+      console.error('[WasmEngine] Stockfish worker error:', e);
+      reject(e);
+    };
+    
+    // Initialize Stockfish
+    worker.postMessage('uci');
+    worker.postMessage('isready');
   });
   return readyPromise;
 }
@@ -24,9 +49,8 @@ export async function analyzePositionWasm(fen: string, lines: number = 3, depth:
   let bestEval = 0;
   let bestPv: string[] = [];
 
-  const listeners: ((msg: string) => void)[] = [];
   const onMessage = (ev: MessageEvent) => {
-    const text: string = ev.data?.data || '';
+    const text: string = typeof ev.data === 'string' ? ev.data : String(ev.data || '');
     if (!text) return;
     if (text.startsWith('info')) {
       // Parse UCI info
@@ -56,17 +80,26 @@ export async function analyzePositionWasm(fen: string, lines: number = 3, depth:
     }
   };
   worker!.addEventListener('message', onMessage as any);
-  // Send position and go
-  worker!.postMessage({ cmd: 'send', data: `ucinewgame` });
-  worker!.postMessage({ cmd: 'send', data: `isready` });
-  worker!.postMessage({ cmd: 'send', data: `setoption name MultiPV value ${lines}` });
-  worker!.postMessage({ cmd: 'send', data: `position fen ${fen}` });
-  worker!.postMessage({ cmd: 'send', data: `go depth ${depth}` });
+  
+  // Send position and go - use direct string messages (not wrapped in cmd/data)
+  if (!isReady) {
+    readyQueue.push('ucinewgame');
+    readyQueue.push('isready');
+    readyQueue.push(`setoption name MultiPV value ${lines}`);
+    readyQueue.push(`position fen ${fen}`);
+    readyQueue.push(`go depth ${depth}`);
+  } else {
+    worker!.postMessage('ucinewgame');
+    worker!.postMessage('isready');
+    worker!.postMessage(`setoption name MultiPV value ${lines}`);
+    worker!.postMessage(`position fen ${fen}`);
+    worker!.postMessage(`go depth ${depth}`);
+  }
 
   // Wait a bit longer than needed – poll for best pv conclusion using a timeout
   await new Promise((resolve) => setTimeout(resolve, Math.max(800, depth * 80)));
   worker!.removeEventListener('message', onMessage as any);
-  worker!.postMessage({ cmd: 'send', data: 'stop' });
+  worker!.postMessage('stop');
 
   // Convert PV UCIs to SAN
   const toSAN = (uciPv: string[]) => {
