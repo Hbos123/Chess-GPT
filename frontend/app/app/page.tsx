@@ -2368,6 +2368,27 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
     };
   }, [user?.id, profilePreferences?.accounts?.length]); // Only run when accounts change
 
+  // Auto-trigger frontend analysis when games are indexed but not analyzed
+  useEffect(() => {
+    if (!user?.id || !profilePreferences?.accounts?.length) return;
+    
+    // Check if we have indexed games but no analyzed games
+    const hasIndexedGames = (profileStatus?.games_indexed || 0) > 0;
+    const hasAnalyzedGames = (profileStatus?.deep_analyzed_games || 0) > 0;
+    const isIdle = profileStatus?.state === 'idle';
+    
+    // If we have indexed games but no analyzed games, and we're idle, log for now
+    // Frontend analysis will be triggered manually via PersonalReview component
+    if (hasIndexedGames && !hasAnalyzedGames && isIdle) {
+      console.log('[AutoAnalysis] Games indexed but not analyzed', {
+        indexed: profileStatus?.games_indexed,
+        analyzed: profileStatus?.deep_analyzed_games,
+        target: profileStatus?.target_games,
+        message: 'Open Personal Review to analyze games'
+      });
+    }
+  }, [user?.id, profileStatus?.games_indexed, profileStatus?.deep_analyzed_games, profileStatus?.state]);
+
   useEffect(() => {
     if (user && showAuthModal) {
       setShowAuthModal(false);
