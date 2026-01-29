@@ -255,7 +255,7 @@ export default function OverviewTab({ data, profileStatus, onOpenPersonalReview,
 
   // Get active games count from rolling window or profile status
   const activeGames = rolling_window?.games || profileStatus?.deep_analyzed_games || 0;
-  const targetGames = profileStatus?.target_games || 60;
+  // targetGames is already defined at the top of the component (line 21)
   const progressPercent = Math.min((activeGames / targetGames) * 100, 100);
   
   // Reduced logging - removed verbose target games logging
