@@ -175,7 +175,9 @@ class SupabaseClient:
             # - status not active/trialing: treat as unpaid (prevents refresh/bypass with stale tier_id)
             if not row:
                 tier_row = _fetch_tier_row("unpaid") or {"id": "unpaid", "name": "Unpaid", "daily_messages": 2, "daily_tokens": 20000}
-                # Ensure unpaid users get enough tokens for 2 messages
+                # Ensure signed-in unpaid users get enough tokens + correct message limit (2/day)
+                if tier_row.get("daily_messages", 0) < 2:
+                    tier_row["daily_messages"] = 2
                 if tier_row.get("daily_tokens", 0) < 20000:
                     tier_row["daily_tokens"] = 20000
                 data = {
@@ -195,9 +197,13 @@ class SupabaseClient:
 
                 tier_row = row.get("subscription_tiers") or _fetch_tier_row(effective_tier_id) or {"id": effective_tier_id, "name": ("Unpaid" if effective_tier_id == "unpaid" else effective_tier_id.title())}
                 
-                # Ensure unpaid users get enough tokens for 2 messages
-                if effective_tier_id == "unpaid" and tier_row.get("daily_tokens", 0) < 20000:
-                    tier_row["daily_tokens"] = 20000
+                # Ensure signed-in unpaid users get enough tokens + correct message limit (2/day),
+                # even if the DB tier row has older limits.
+                if effective_tier_id == "unpaid":
+                    if tier_row.get("daily_messages", 0) < 2:
+                        tier_row["daily_messages"] = 2
+                    if tier_row.get("daily_tokens", 0) < 20000:
+                        tier_row["daily_tokens"] = 20000
 
                 data = {
                     "tier_id": effective_tier_id,

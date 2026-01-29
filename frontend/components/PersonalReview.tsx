@@ -20,6 +20,7 @@ export default function PersonalReview({ onClose }: PersonalReviewProps) {
   
   const { user, loading: authLoading } = useAuth();
   const { usage, loading: usageLoading } = useUsage();
+  const isUnpaid = !!user?.id && usage?.tier_id === "unpaid";
   console.log("[PersonalReview] 👤 Auth context", { 
     hasUser: !!user, 
     userId: user?.id, 
@@ -93,6 +94,17 @@ export default function PersonalReview({ onClose }: PersonalReviewProps) {
       console.log("[PersonalReview] ⏳ Auth still loading - waiting...");
       setIsLoading(true);
       setProgress("Checking authentication...");
+      return;
+    }
+
+    // Signed-in unpaid users have no stored profile/personal review data.
+    if (isUnpaid) {
+      setGames([]);
+      setGameSource(null);
+      setGamesToAnalyze(0);
+      setProgress("Upgrade to analyze and store games for Personal Review.");
+      setIsLoading(false);
+      setStep("input");
       return;
     }
     

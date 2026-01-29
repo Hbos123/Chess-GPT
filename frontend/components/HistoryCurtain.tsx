@@ -158,6 +158,8 @@ export default function HistoryCurtain({
   userId,
   openSettingsNonce,
 }: HistoryCurtainProps) {
+  const isSignedIn = !!userId;
+  const isUnpaid = profileStatus?.tier_id === "unpaid" || profileStatus?.target_games === 0;
   const user = null; // Auth optional for now
   const backendBase = getBackendBase();
   const [threads, setThreads] = useState<Thread[]>([]);
@@ -1360,9 +1362,25 @@ export default function HistoryCurtain({
                 type="button"
                 className="ghost small"
                 onClick={() => {
+                  if (!isSignedIn) {
+                    window.location.href = "/auth";
+                    return;
+                  }
+                  if (isUnpaid) {
+                    window.location.href = "/app?settings=open";
+                    return;
+                  }
                   onOpenPersonalReview();
                   onClose();
                 }}
+                title={
+                  !isSignedIn
+                    ? "Sign in to use Personal Review"
+                    : isUnpaid
+                      ? "Upgrade to unlock Personal Review"
+                      : undefined
+                }
+                style={!isSignedIn || isUnpaid ? { opacity: 0.55, cursor: "pointer" } : undefined}
               >
                 Personal Review
               </button>

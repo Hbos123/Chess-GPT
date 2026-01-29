@@ -41,109 +41,6 @@ interface DrillSuggestion {
 export default function TrainingTab({ userId, backendBase }: TrainingTabProps) {
   const BACKEND_BASE = backendBase || getBackendBase();
   
-  // TEMPORARY: Dummy data for formatting - REMOVE AFTER FORMATTING IS DONE
-  const DUMMY_SUGGESTIONS: DrillSuggestion[] = [
-    {
-      id: "phase-opening",
-      category: "phase",
-      filter_type: "phase",
-      filter_value: "opening",
-      accuracy: 82.1,
-      position_count: 45,
-      position_avg_accuracy: 82.1,
-      metadata: {
-        phase: { games_won: 45, games_lost: 20, games_drawn: 8, win_rate: 61.6 }
-      },
-      description: "Opening performance: 82.1% accuracy, 73 games",
-      difficulty: "Intermediate"
-    },
-    {
-      id: "phase-endgame",
-      category: "phase",
-      filter_type: "phase",
-      filter_value: "endgame",
-      accuracy: 81.3,
-      position_count: 38,
-      position_avg_accuracy: 81.3,
-      metadata: {
-        phase: { games_won: 38, games_lost: 15, games_drawn: 5, win_rate: 65.5 }
-      },
-      description: "Endgame performance: 81.3% accuracy, 58 games",
-      difficulty: "Intermediate"
-    },
-    {
-      id: "opening-sicilian",
-      category: "opening",
-      filter_type: "opening",
-      filter_value: "Sicilian Defense",
-      accuracy: 79.1,
-      position_count: 45,
-      position_avg_accuracy: 79.1,
-      metadata: {
-        opening: { frequency: 45, wins: 28, losses: 12, win_rate: 62.2 }
-      },
-      description: "Sicilian Defense: 79.1% accuracy, played 45 times",
-      difficulty: "Intermediate"
-    },
-    {
-      id: "opening-queens-gambit",
-      category: "opening",
-      filter_type: "opening",
-      filter_value: "Queen's Gambit",
-      accuracy: 76.8,
-      position_count: 38,
-      position_avg_accuracy: 76.8,
-      metadata: {
-        opening: { frequency: 38, wins: 21, losses: 14, win_rate: 55.3 }
-      },
-      description: "Queen's Gambit: 76.8% accuracy, played 38 times",
-      difficulty: "Advanced"
-    },
-    {
-      id: "piece-knight",
-      category: "piece",
-      filter_type: "piece",
-      filter_value: "Knight",
-      accuracy: 75.8,
-      position_count: 456,
-      position_avg_accuracy: 75.8,
-      metadata: {
-        piece: { count: 456, moves: 456 }
-      },
-      description: "Knight accuracy: 75.8%, 456 moves",
-      difficulty: "Advanced"
-    },
-    {
-      id: "tag-time-pressure",
-      category: "tag_transition",
-      filter_type: "tag_transition",
-      filter_value: "Time Pressure",
-      transition_type: "lost",
-      accuracy: 68.2,
-      position_count: 32,
-      position_avg_accuracy: 68.2,
-      metadata: {
-        tag: { count: 32, blunders: 8, mistakes: 12, significance_score: 0.72 }
-      },
-      description: "Time Pressure: 68.2% accuracy, 32 positions",
-      difficulty: "Advanced"
-    },
-    {
-      id: "time-opening",
-      category: "time_bucket",
-      filter_type: "time_bucket",
-      filter_value: "opening",
-      accuracy: 82.1,
-      position_count: 247,
-      position_avg_accuracy: 82.1,
-      metadata: {
-        time: { count: 247, blunders: 8, mistakes: 15, blunder_rate: 3.2 }
-      },
-      description: "Opening time control: 82.1% accuracy, 247 positions",
-      difficulty: "Intermediate"
-    }
-  ];
-
   const [loading, setLoading] = useState(true); // Start with loading true
   const [suggestions, setSuggestions] = useState<DrillSuggestion[]>([]); // Start with empty array
   const [activeSession, setActiveSession] = useState<any>(null);
@@ -533,9 +430,9 @@ export default function TrainingTab({ userId, backendBase }: TrainingTabProps) {
     }
   };
 
-  // TEMPORARY: Stub function - REMOVE AFTER FORMATTING IS DONE
+  // Stub function for now
   const loadDrillSuggestions = async () => {
-    // Do nothing - using dummy data
+    // TODO: Implement when ready
   };
 
   const handleSessionComplete = (results: any) => {

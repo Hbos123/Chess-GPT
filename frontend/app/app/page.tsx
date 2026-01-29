@@ -5613,8 +5613,11 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
         return false;
       }
       
-      // Estimate tokens (~4 chars per token, add buffer for response)
-      const estimatedTokens = Math.ceil(message.length / 4) + 5000;
+      // Estimate tokens (~4 chars per token, add a response buffer).
+      // Use smaller buffers for anon/unpaid so they can reliably send their 1–2 preview messages.
+      const responseBuffer =
+        !user?.id ? 3000 : (usage?.tier_id === "unpaid" ? 4000 : 5000);
+      const estimatedTokens = Math.ceil(message.length / 4) + responseBuffer;
       
       // Local check first (instant feedback)
       if (!checkCanSendMessage(estimatedTokens)) {

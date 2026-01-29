@@ -17,60 +17,6 @@ export default function DetailedAnalyticsSection({
   backendBase,
   title = "Detailed Analytics",
 }: DetailedAnalyticsSectionProps) {
-  // TEMPORARY: Dummy data for formatting - REMOVE AFTER FORMATTING IS DONE
-  const DUMMY_DETAILED_ANALYTICS = {
-    phase_analytics: {
-      opening: { accuracy: 82.1, games_won: 45, games_lost: 20, games_drawn: 8, win_rate: 61.6 },
-      middlegame: { accuracy: 76.5, games_won: 52, games_lost: 35, games_drawn: 12, win_rate: 52.5 },
-      endgame: { accuracy: 81.3, games_won: 38, games_lost: 15, games_drawn: 5, win_rate: 65.5 }
-    },
-    opening_detailed: {
-      "Sicilian Defense": { frequency: 45, avg_accuracy: 79.1, wins: 28, losses: 12, draws: 5, win_rate: 0.622 },
-      "Queen's Gambit": { frequency: 38, avg_accuracy: 76.8, wins: 21, losses: 14, draws: 3, win_rate: 0.553 },
-      "King's Indian Defense": { frequency: 32, avg_accuracy: 75.2, wins: 16, losses: 12, draws: 4, win_rate: 0.500 },
-      "French Defense": { frequency: 28, avg_accuracy: 77.5, wins: 15, losses: 10, draws: 3, win_rate: 0.536 },
-      "Caro-Kann": { frequency: 24, avg_accuracy: 78.3, wins: 14, losses: 8, draws: 2, win_rate: 0.583 },
-      "Italian Game": { frequency: 22, avg_accuracy: 80.1, wins: 13, losses: 7, draws: 2, win_rate: 0.591 },
-      "Ruy Lopez": { frequency: 18, avg_accuracy: 77.8, wins: 10, losses: 6, draws: 2, win_rate: 0.556 }
-    },
-    piece_accuracy_detailed: {
-      aggregate: {
-        Pawn: { accuracy: 79.2, count: 1245, moves: 1245 },
-        Knight: { accuracy: 75.8, count: 456, moves: 456 },
-        Bishop: { accuracy: 77.3, count: 432, moves: 432 },
-        Rook: { accuracy: 78.9, count: 678, moves: 678 },
-        Queen: { accuracy: 76.1, count: 234, moves: 234 },
-        King: { accuracy: 81.5, count: 189, moves: 189 }
-      }
-    },
-    tag_transitions: {
-      gained: {
-        "Positional Advantage": { accuracy: 82.1, count: 45, blunders: 2, mistakes: 5, inaccuracies: 8, significance_score: 0.85 },
-        "Endgame Technique": { accuracy: 84.3, count: 38, blunders: 1, mistakes: 3, inaccuracies: 6, significance_score: 0.78 },
-        "Pawn Structure": { accuracy: 80.5, count: 32, blunders: 3, mistakes: 4, inaccuracies: 7, significance_score: 0.72 }
-      },
-      lost: {
-        "Time Pressure": { accuracy: 68.2, count: 32, blunders: 8, mistakes: 12, inaccuracies: 15, significance_score: 0.72 },
-        "Tactical Awareness": { accuracy: 71.5, count: 28, blunders: 6, mistakes: 10, inaccuracies: 13, significance_score: 0.65 },
-        "Opening Theory": { accuracy: 73.8, count: 24, blunders: 5, mistakes: 8, inaccuracies: 11, significance_score: 0.58 }
-      }
-    },
-    time_bucket_analytics: {
-      "opening": { accuracy: 82.1, count: 247, blunders: 8, mistakes: 15, blunder_rate: 3.2 },
-      "middlegame": { accuracy: 76.5, count: 247, blunders: 18, mistakes: 28, blunder_rate: 7.3 },
-      "endgame": { accuracy: 81.3, count: 195, blunders: 6, mistakes: 12, blunder_rate: 3.1 }
-    },
-    time_buckets: {
-      "<5s": { accuracy: 65.2, count: 45, blunders: 12, mistakes: 18, blunder_rate: 26.7 },
-      "5-15s": { accuracy: 72.8, count: 128, blunders: 15, mistakes: 25, blunder_rate: 11.7 },
-      "15-30s": { accuracy: 78.5, count: 234, blunders: 18, mistakes: 32, blunder_rate: 7.7 },
-      "30s-1min": { accuracy: 81.2, count: 312, blunders: 12, mistakes: 28, blunder_rate: 3.8 },
-      "1min-2min30": { accuracy: 83.7, count: 456, blunders: 8, mistakes: 22, blunder_rate: 1.8 },
-      "2min30-5min": { accuracy: 85.1, count: 289, blunders: 5, mistakes: 15, blunder_rate: 1.7 },
-      "5min+": { accuracy: 86.3, count: 178, blunders: 3, mistakes: 8, blunder_rate: 1.7 }
-    }
-  };
-
   const [detailedAnalytics, setDetailedAnalytics] = useState<any>(null); // Start with null instead of dummy data
   const [loadingDetailed, setLoadingDetailed] = useState(true); // Start with loading true
 

@@ -15,6 +15,10 @@ export default function OverviewTab({ data, profileStatus, onOpenPersonalReview,
   // Always render the UI structure, even with empty data
   const isComputing = data?.status === "computing";
   const hasError = data?.error;
+
+  const isSignedIn = !!userId;
+  const isUnpaid = profileStatus?.tier_id === "unpaid" || profileStatus?.target_games === 0;
+  const targetGames = typeof profileStatus?.target_games === "number" ? profileStatus.target_games : (isSignedIn ? 5 : 0);
   
   // Linked accounts state
   const [linkedAccounts, setLinkedAccounts] = useState<Array<{platform: string, username: string}>>([]);
@@ -52,7 +56,7 @@ export default function OverviewTab({ data, profileStatus, onOpenPersonalReview,
       
       // Use target_games from profileStatus as the authoritative source for total games
       // This ensures we always show the subscription tier limit, not the backend response
-      const targetGamesFromStatus = profileStatus?.target_games || 5;
+      const targetGamesFromStatus = typeof profileStatus?.target_games === "number" ? profileStatus.target_games : (isSignedIn ? 5 : 0);
       
       if (gameMatch || moveMatch || (status === "analyzing" && message)) {
         setAnalysisProgress({
@@ -75,11 +79,11 @@ export default function OverviewTab({ data, profileStatus, onOpenPersonalReview,
     return () => {
       window.removeEventListener('analysis-progress' as any, handleProgress as EventListener);
     };
-  }, [profileStatus?.target_games]); // Only depend on profileStatus.target_games
+  }, [profileStatus?.target_games, isSignedIn]); // Only depend on target and sign-in state
   
   // Load linked accounts from profile overview
   useEffect(() => {
-    if (!userId || !backendBase) return;
+    if (!userId || !backendBase || isUnpaid) return;
     
     const loadAccounts = async () => {
       try {
@@ -95,7 +99,7 @@ export default function OverviewTab({ data, profileStatus, onOpenPersonalReview,
     };
     
     loadAccounts();
-  }, [userId, backendBase]);
+  }, [userId, backendBase, isUnpaid]);
   
   // Cache diagnostic insights
   useEffect(() => {
@@ -106,7 +110,7 @@ export default function OverviewTab({ data, profileStatus, onOpenPersonalReview,
 
   // Fetch lightweight snapshot for the new Overview layout
   useEffect(() => {
-    if (!userId || !backendBase) return;
+    if (!userId || !backendBase || isUnpaid) return;
     let cancelled = false;
 
     const loadSnapshot = async () => {
@@ -136,7 +140,7 @@ export default function OverviewTab({ data, profileStatus, onOpenPersonalReview,
     return () => {
       cancelled = true;
     };
-  }, [userId, backendBase]);
+  }, [userId, backendBase, isUnpaid]);
   
   // Validate account before adding
   const validateAccount = async (username: string, platform: "chess.com" | "lichess"): Promise<boolean> => {
@@ -742,17 +746,50 @@ export default function OverviewTab({ data, profileStatus, onOpenPersonalReview,
               Ask for a tailored personal review based on any number of recent games
             </div>
           </div>
-          {onOpenPersonalReview && (
-            <button
-              type="button"
-              onClick={onOpenPersonalReview}
-              className="generate-training-btn"
-              style={{ whiteSpace: "nowrap" }}
-            >
-              Personal Review
-            </button>
-          )}
+          <button
+            type="button"
+            onClick={() => {
+              if (!isSignedIn) {
+                window.location.href = "/auth";
+                return;
+              }
+              if (isUnpaid) {
+                // Unpaid users don't have stored analytics; prompt upgrade via settings/profile.
+                window.location.href = "/app?settings=open";
+                return;
+              }
+              onOpenPersonalReview?.();
+            }}
+            className="generate-training-btn"
+            style={{
+              whiteSpace: "nowrap",
+              opacity: (!isSignedIn || isUnpaid) ? 0.55 : 1,
+              cursor: (!isSignedIn || isUnpaid) ? "pointer" : "pointer",
+            }}
+            title={
+              !isSignedIn
+                ? "Sign in to use Personal Review"
+                : isUnpaid
+                  ? "Upgrade to unlock Personal Review"
+                  : undefined
+            }
+          >
+            Personal Review
+          </button>
         </div>
+        {!isSignedIn && (
+          <div style={{ fontSize: 12, color: "#93c5fd", marginTop: -6 }}>
+            <a href="/auth" style={{ color: "#93c5fd", textDecoration: "underline" }}>
+              Sign in
+            </a>{" "}
+            to unlock your Personal Review.
+          </div>
+        )}
+        {isSignedIn && isUnpaid && (
+          <div style={{ fontSize: 12, color: "#93c5fd", marginTop: -6 }}>
+            Upgrade to analyze games and unlock Personal Review.
+          </div>
+        )}
 
         {snapshotError && (
           <div className="error-message" style={{ marginTop: 12 }}>
@@ -760,7 +797,11 @@ export default function OverviewTab({ data, profileStatus, onOpenPersonalReview,
           </div>
         )}
 
-        {snapshotLoading && !snapshot ? (
+        {isUnpaid ? (
+          <div style={{ padding: "12px", color: "#93c5fd" }}>
+            Upgrade to generate a snapshot and track your progress.
+          </div>
+        ) : snapshotLoading && !snapshot ? (
           <div style={{ padding: "20px", textAlign: "center", color: "#93c5fd" }}>
             Loading snapshot...
           </div>
@@ -768,7 +809,7 @@ export default function OverviewTab({ data, profileStatus, onOpenPersonalReview,
           <div className="stats-grid" style={{ marginTop: 12 }}>
             <div className="stat-card">
               <span className="stat-label">Games Analyzed</span>
-              <span className="stat-value">{snapshot?.games_analyzed ?? 0}/{snapshot?.window ?? 60}</span>
+              <span className="stat-value">{snapshot?.games_analyzed ?? 0}/{targetGames}</span>
             </div>
             <div className="stat-card">
               <span className="stat-label">Record</span>

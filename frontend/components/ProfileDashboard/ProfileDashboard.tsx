@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useAuth } from "@/contexts/AuthContext";
+import { useUsage } from "@/contexts/UsageContext";
 import { fetchProfileOverview, fetchProfileStats } from "@/lib/api";
 import { getBackendBase } from "@/lib/backendBase";
 import OverviewTab from "./tabs/OverviewTab";
@@ -22,103 +23,10 @@ export type TabType = 'overview' | 'recent' | 'graphs' | 'habits' | 'training';
 
 export default function ProfileDashboard({ onClose, initialTab = 'overview', onCreateNewTab }: ProfileDashboardProps) {
   const { user } = useAuth();
+  const { usage } = useUsage();
   const normalizedInitialTab = (initialTab === "lifetime" ? "graphs" : initialTab) as TabType;
   const [activeTab, setActiveTab] = useState<TabType>(normalizedInitialTab);
   
-  // TEMPORARY: Dummy data for formatting work - REMOVE AFTER FORMATTING IS DONE
-  const DUMMY_ANALYTICS_DATA = {
-    lifetime_stats: {
-      total_games: 247,
-      wins: 142,
-      losses: 78,
-      draws: 27,
-      win_rate: 57.5,
-      average_accuracy: 78.3,
-      blunder_rate: 4.2,
-      mistake_rate: 8.7,
-      inaccuracy_rate: 12.1
-    },
-    patterns: {
-      top_openings: [
-        { name: "Sicilian Defense", games: 45, win_rate: 62.2, accuracy: 79.1 },
-        { name: "Queen's Gambit", games: 38, win_rate: 55.3, accuracy: 76.8 },
-        { name: "King's Indian Defense", games: 32, win_rate: 50.0, accuracy: 75.2 }
-      ],
-      phase_performance: {
-        opening: 82.1,
-        middlegame: 76.5,
-        endgame: 81.3
-      },
-      piece_accuracy: {
-        Pawn: { accuracy: 79.2, count: 1245 },
-        Knight: { accuracy: 75.8, count: 456 },
-        Bishop: { accuracy: 77.3, count: 432 },
-        Rook: { accuracy: 78.9, count: 678 },
-        Queen: { accuracy: 76.1, count: 234 },
-        King: { accuracy: 81.5, count: 189 }
-      }
-    },
-    strength_profile: {
-      overall_rating_estimate: 1650,
-      diagnostic_insights: [
-        "Strong endgame technique with 81.3% accuracy",
-        "Tendency to blunder in time pressure situations",
-        "Excellent pawn structure understanding"
-      ],
-      tendencies: [
-        { title: "Positional Player", detail: "Prefers strategic play over tactical complications", confidence: "High" },
-        { title: "Time Management", detail: "Struggles in blitz time controls", confidence: "Medium" }
-      ]
-    },
-    rolling_window: {
-      last_30_games: {
-        win_rate: 60.0,
-        average_accuracy: 79.5,
-        trend: "improving"
-      }
-    },
-    deltas: {
-      accuracy_change: 2.3,
-      win_rate_change: 5.2
-    },
-    tag_transitions: {
-      gained: {
-        "Positional Advantage": { accuracy: 82.1, count: 45, blunders: 2, mistakes: 5, inaccuracies: 8, significance_score: 0.85 },
-        "Endgame Technique": { accuracy: 84.3, count: 38, blunders: 1, mistakes: 3, inaccuracies: 6, significance_score: 0.78 }
-      },
-      lost: {
-        "Time Pressure": { accuracy: 68.2, count: 32, blunders: 8, mistakes: 12, inaccuracies: 15, significance_score: 0.72 },
-        "Tactical Awareness": { accuracy: 71.5, count: 28, blunders: 6, mistakes: 10, inaccuracies: 13, significance_score: 0.65 }
-      }
-    }
-  };
-
-  const DUMMY_PROFILE_STATUS = {
-    state: "completed",
-    message: "Profile analysis complete",
-    total_accounts: 2,
-    completed_accounts: 2,
-    total_games_estimate: 247,
-    games_indexed: 247,
-    deep_analyzed_games: 0,
-    target_games: 5, // Default fallback - will be overridden by real data
-    progress_percent: 100,
-    started_at: "2026-01-15T10:00:00Z",
-    finished_at: "2026-01-15T10:45:00Z",
-    last_updated: "2026-01-19T19:00:00Z"
-  };
-
-  const DUMMY_PATTERN_HISTORY = {
-    current: [
-      { pattern_name: "Positional Advantage", pattern_type: "current", accuracy: 82.1, count: 45, trend: "improving" },
-      { pattern_name: "Endgame Technique", pattern_type: "current", accuracy: 84.3, count: 38, trend: "stable" }
-    ],
-    historical: [
-      { pattern_name: "Time Pressure", pattern_type: "historical", accuracy: 68.2, count: 32, trend: "declining" },
-      { pattern_name: "Tactical Awareness", pattern_type: "historical", accuracy: 71.5, count: 28, trend: "declining" }
-    ]
-  };
-
   const [loading, setLoading] = useState(true); // Start with loading true
   const [error, setError] = useState<string | null>(null);
   const [analyticsData, setAnalyticsData] = useState<any>(null); // Start with null instead of dummy data
@@ -127,9 +35,51 @@ export default function ProfileDashboard({ onClose, initialTab = 'overview', onC
   const [patternHistory, setPatternHistory] = useState<{current: any[], historical: any[]}>({ current: [], historical: [] }); // Start with empty arrays
   const backendBase = getBackendBase();
 
+  const isSignedIn = !!user?.id;
+  const tierId = usage?.tier_id;
+  const isUnpaid = isSignedIn && tierId === "unpaid";
+
+  // If user is unsigned in, don't spin forever — show a simple sign-in state.
+  useEffect(() => {
+    if (isSignedIn) return;
+    setLoading(false);
+    setError(null);
+    setAnalyticsData(null);
+    setPatternHistory({ current: [], historical: [] });
+    setProfileStatus({
+      tier_id: "unpaid",
+      state: "idle",
+      message: "Sign in to unlock your profile analytics.",
+      target_games: 0,
+      deep_analyzed_games: 0,
+      games_indexed: 0,
+      total_games_estimate: 0,
+      progress_percent: 0,
+    });
+  }, [isSignedIn]);
+
+  // For signed-in unpaid users, skip all profile/analytics fetches (no stored data) and show a locked state.
+  useEffect(() => {
+    if (!isUnpaid) return;
+    setLoading(false);
+    setError(null);
+    setAnalyticsData(null);
+    setPatternHistory({ current: [], historical: [] });
+    setProfileStatus({
+      tier_id: "unpaid",
+      state: "idle",
+      message: "Upgrade to analyze games and unlock your personal dashboard.",
+      target_games: 0,
+      deep_analyzed_games: 0,
+      games_indexed: 0,
+      total_games_estimate: 0,
+      progress_percent: 0,
+    });
+  }, [isUnpaid]);
+
   // Load profile status to get analyzed games count - poll more frequently when analyzing
   useEffect(() => {
-    if (!user?.id) return;
+    if (!user?.id || isUnpaid) return;
 
     const loadProfileStatus = async () => {
       try {
@@ -189,11 +139,11 @@ export default function ProfileDashboard({ onClose, initialTab = 'overview', onC
       clearInterval(pollInterval);
       clearInterval(statusCheckInterval);
     };
-  }, [user?.id, backendBase, profileStatus?.state]);
+  }, [user?.id, backendBase, profileStatus?.state, isUnpaid]);
 
   // Fetch pattern history for graphing
   useEffect(() => {
-    if (!user?.id) return;
+    if (!user?.id || isUnpaid) return;
 
     const fetchPatternHistory = async () => {
       try {
@@ -222,11 +172,11 @@ export default function ProfileDashboard({ onClose, initialTab = 'overview', onC
     const interval = setInterval(fetchPatternHistory, refreshInterval);
     
     return () => clearInterval(interval);
-  }, [user?.id, backendBase, profileStatus?.state]);
+  }, [user?.id, backendBase, profileStatus?.state, isUnpaid]);
 
   // Background prefetch analytics when component mounts
   useEffect(() => {
-    if (!user?.id || !backendBase) return;
+    if (!user?.id || !backendBase || isUnpaid) return;
     
     // Background prefetch - don't wait for it, just start it
     const prefetchInBackground = async () => {
@@ -245,10 +195,10 @@ export default function ProfileDashboard({ onClose, initialTab = 'overview', onC
     
     // Start prefetch immediately
     prefetchInBackground();
-  }, [user?.id, backendBase]);
+  }, [user?.id, backendBase, isUnpaid]);
 
   useEffect(() => {
-    if (!user?.id) return;
+    if (!user?.id || isUnpaid) return;
 
     let pollInterval: NodeJS.Timeout | null = null;
     let analyticsRefreshInterval: NodeJS.Timeout | null = null;
@@ -485,7 +435,7 @@ export default function ProfileDashboard({ onClose, initialTab = 'overview', onC
       if (analyticsRefreshInterval) clearInterval(analyticsRefreshInterval);
       clearInterval(statusCheckInterval);
     };
-  }, [user?.id, backendBase, profileStatus?.state]);
+  }, [user?.id, backendBase, profileStatus?.state, isUnpaid]);
 
   const tabs: { id: TabType; label: string }[] = [
     { id: 'overview', label: 'Overview' },
@@ -507,15 +457,33 @@ export default function ProfileDashboard({ onClose, initialTab = 'overview', onC
             <h3>Your Profile</h3>
           </div>
           <nav className="sidebar-nav">
-            {tabs.map((tab) => (
-              <button
-                key={tab.id}
-                className={`nav-item ${activeTab === tab.id ? 'active' : ''}`}
-                onClick={() => setActiveTab(tab.id)}
-              >
-                <span className="nav-label">{tab.label}</span>
-              </button>
-            ))}
+            {tabs.map((tab) => {
+              const locked = !isSignedIn || (isUnpaid && tab.id !== "overview");
+              return (
+                <button
+                  key={tab.id}
+                  className={`nav-item ${activeTab === tab.id ? 'active' : ''}`}
+                  onClick={() => {
+                    if (locked) {
+                      if (!isSignedIn) window.location.href = "/auth";
+                      return;
+                    }
+                    setActiveTab(tab.id);
+                  }}
+                  disabled={locked}
+                  title={
+                    !isSignedIn
+                      ? "Sign in to unlock your profile"
+                      : (isUnpaid && tab.id !== "overview")
+                        ? "Upgrade to unlock this tab"
+                        : undefined
+                  }
+                  style={locked ? { opacity: 0.55, cursor: "not-allowed" } : undefined}
+                >
+                  <span className="nav-label">{tab.label}</span>
+                </button>
+              );
+            })}
           </nav>
           <div className="sidebar-footer">
             <button className="close-dashboard-btn" onClick={onClose}>
@@ -540,7 +508,16 @@ export default function ProfileDashboard({ onClose, initialTab = 'overview', onC
           </div>
 
           {/* Content */}
-          {loading ? (
+          {!isSignedIn ? (
+            <div className="dashboard-loading">
+              <p style={{ margin: 0 }}>Sign in to unlock your profile analytics.</p>
+              <div style={{ marginTop: 12 }}>
+                <a href="/auth" className="close-dashboard-btn" style={{ textDecoration: "none" }}>
+                  Sign In / Create Account
+                </a>
+              </div>
+            </div>
+          ) : loading ? (
             <div className="dashboard-loading">
               <div className="spinner"></div>
               <p>Analyzing your chess journey...</p>
@@ -551,15 +528,18 @@ export default function ProfileDashboard({ onClose, initialTab = 'overview', onC
                 <OverviewTab
                   data={analyticsData}
                   profileStatus={profileStatus}
-                  onOpenPersonalReview={() => setShowPersonalReview(true)}
-                  userId={user?.id || ''}
+                  onOpenPersonalReview={() => {
+                    if (isUnpaid) return;
+                    setShowPersonalReview(true);
+                  }}
+                  userId={user?.id}
                   backendBase={backendBase}
                 />
               )}
-              {activeTab === 'recent' && <RecentGamesTab userId={user?.id || ''} onCreateNewTab={onCreateNewTab} />}
-              {activeTab === 'graphs' && <GraphsTab userId={user?.id || ''} backendBase={backendBase} />}
-              {activeTab === 'habits' && <HabitsPatternsTab userId={user?.id || ''} backendBase={backendBase} />}
-              {activeTab === 'training' && <TrainingTab userId={user?.id || ''} backendBase={backendBase} />}
+              {!isUnpaid && activeTab === 'recent' && <RecentGamesTab userId={user?.id || ''} onCreateNewTab={onCreateNewTab} />}
+              {!isUnpaid && activeTab === 'graphs' && <GraphsTab userId={user?.id || ''} backendBase={backendBase} />}
+              {!isUnpaid && activeTab === 'habits' && <HabitsPatternsTab userId={user?.id || ''} backendBase={backendBase} />}
+              {!isUnpaid && activeTab === 'training' && <TrainingTab userId={user?.id || ''} backendBase={backendBase} />}
             </div>
           )}
           {error && <div className="dashboard-error-banner">{error}</div>}
@@ -570,22 +550,31 @@ export default function ProfileDashboard({ onClose, initialTab = 'overview', onC
           className="profile-dashboard-mobile-nav mobile-only"
           onClick={(e) => e.stopPropagation()}
         >
-          {tabs.map((tab) => (
-            <button
-              key={tab.id}
-              className={`profile-dashboard-mobile-nav-item ${
-                activeTab === tab.id ? "active" : ""
-              }`}
-              onClick={() => setActiveTab(tab.id)}
-              type="button"
-            >
-              {tab.label}
-            </button>
-          ))}
+          {tabs.map((tab) => {
+            const locked = !isSignedIn || (isUnpaid && tab.id !== "overview");
+            return (
+              <button
+                key={tab.id}
+                className={`profile-dashboard-mobile-nav-item ${activeTab === tab.id ? "active" : ""}`}
+                onClick={() => {
+                  if (locked) {
+                    if (!isSignedIn) window.location.href = "/auth";
+                    return;
+                  }
+                  setActiveTab(tab.id);
+                }}
+                type="button"
+                disabled={locked}
+                style={locked ? { opacity: 0.55, cursor: "not-allowed" } : undefined}
+              >
+                {tab.label}
+              </button>
+            );
+          })}
         </div>
       </div>
 
-      {showPersonalReview && (
+      {showPersonalReview && isSignedIn && !isUnpaid && (
         <PersonalReview onClose={() => setShowPersonalReview(false)} />
       )}
     </div>
