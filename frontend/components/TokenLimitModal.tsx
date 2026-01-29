@@ -27,13 +27,16 @@ export default function TokenLimitModal({ onClose, limitInfo, onOpenProfile, isL
 
   const getUpgradeMessage = () => {
     const tierId = limitInfo.info.tier_id || 'unpaid';
+    const isMessageLimit = limitInfo.type === 'message_limit';
     
     // Unlogged user
     if (!isLoggedIn) {
       return {
-        title: 'Usage Limit Hit',
-        message: 'Sign in or make an account to keep on trying this out.',
-        action: 'Sign In / Sign Up',
+        title: isMessageLimit ? 'Daily preview used up' : 'Daily limit reached',
+        message: isMessageLimit
+          ? 'Create an account to unlock 2 messages/day and start tracking your progress.'
+          : 'Sign in to get more daily tokens and unlock your chess journey.',
+        action: 'Sign In / Create Account',
         actionUrl: '/auth',
         useModal: false
       };
@@ -42,9 +45,11 @@ export default function TokenLimitModal({ onClose, limitInfo, onOpenProfile, isL
     // Signed in unpaid user
     if (tierId === 'unpaid') {
       return {
-        title: 'Limit Hit',
-        message: 'Upgrade to a paid plan to get more daily tokens and unlock premium features.',
-        action: 'View Plans',
+        title: isMessageLimit ? 'Daily message limit reached' : 'Daily token limit reached',
+        message: isMessageLimit
+          ? 'Upgrade to Lite to keep chatting (token-based limits) and unlock tools.'
+          : 'Upgrade to Lite for more daily tokens and unlock tools.',
+        action: 'Upgrade to Lite',
         actionUrl: null,
         useModal: true
       };
@@ -53,9 +58,9 @@ export default function TokenLimitModal({ onClose, limitInfo, onOpenProfile, isL
     // Lite tier
     if (tierId === 'lite') {
       return {
-        title: 'Limit Hit',
-        message: 'Upgrade to Regular tier for more daily tokens and enhanced features.',
-        action: 'Upgrade',
+        title: 'Lite limit reached',
+        message: 'Move up to Starter for a bigger daily token budget and more features.',
+        action: 'Upgrade to Starter',
         actionUrl: null,
         useModal: true
       };
@@ -64,9 +69,9 @@ export default function TokenLimitModal({ onClose, limitInfo, onOpenProfile, isL
     // Starter tier
     if (tierId === 'starter') {
       return {
-        title: 'Limit Hit',
-        message: 'Consider moving to Full tier for unlimited tokens and all premium features.',
-        action: 'View Plans',
+        title: 'Starter limit reached',
+        message: 'Upgrade to Full for the biggest daily token budget and everything unlocked.',
+        action: 'Upgrade to Full',
         actionUrl: null,
         useModal: true
       };
@@ -75,7 +80,7 @@ export default function TokenLimitModal({ onClose, limitInfo, onOpenProfile, isL
     // Default fallback
     return {
       title: 'Limit Reached',
-      message: 'You\'ve reached your daily limit. Try again tomorrow or upgrade for more.',
+      message: 'You’ve reached your daily limit. Try again tomorrow or upgrade for more.',
       action: 'View Plans',
       actionUrl: null,
       useModal: true
@@ -83,9 +88,14 @@ export default function TokenLimitModal({ onClose, limitInfo, onOpenProfile, isL
   };
 
   const upgradeInfo = getUpgradeMessage();
-  const usage = limitInfo.info.used !== undefined && limitInfo.info.limit !== undefined
-    ? `${limitInfo.info.used} / ${limitInfo.info.limit}`
-    : null;
+  const usage =
+    limitInfo.type === "message_limit" && limitInfo.info.messages && typeof limitInfo.info.messages.limit === "number"
+      ? `${limitInfo.info.messages.used ?? 0} / ${limitInfo.info.messages.limit}`
+      : limitInfo.type === "token_limit" && limitInfo.info.tokens
+        ? `${limitInfo.info.tokens.used ?? 0} / ${limitInfo.info.tokens.limit ?? 0}`
+        : (limitInfo.info.used !== undefined && limitInfo.info.limit !== undefined
+          ? `${limitInfo.info.used} / ${limitInfo.info.limit}`
+          : null);
 
   return (
     <div
@@ -121,7 +131,7 @@ export default function TokenLimitModal({ onClose, limitInfo, onOpenProfile, isL
             {upgradeInfo.title}
           </h2>
           <p style={{ margin: '0 0 16px 0', color: 'var(--text-secondary)', lineHeight: '1.5' }}>
-            {limitInfo.message}
+            {upgradeInfo.message}
           </p>
           {usage && (
             <div style={{

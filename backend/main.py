@@ -3502,10 +3502,8 @@ async def check_limits(request: CheckLimitsRequest, req: Request):
                     }
                 }
             
-            # Get message usage (read-only, for display only - not enforced)
+            # Get message usage (read-only)
             msg_info = supabase_client.get_message_usage(user_id, ip_address, tier_info)
-            
-            # REMOVED: Message limit checks - only token limits are enforced now
             
             # Get token usage (read-only check)
             from datetime import datetime as dt
@@ -3520,6 +3518,38 @@ async def check_limits(request: CheckLimitsRequest, req: Request):
                 "limit": max_tokens,
                 "remaining": max(0, max_tokens - tokens_used)
             }
+
+            # Enforce message limits ONLY for:
+            # - anonymous users (1/day)
+            # - signed-in unpaid users (2/day)
+            tier_id = tier_info.get("tier_id", "unpaid") or "unpaid"
+            enforce_messages = (not user_id) or (tier_id == "unpaid")
+            if enforce_messages and (request.message_count or 0) > 0:
+                remaining = msg_info.get("remaining")
+                if isinstance(remaining, (int, float)) and remaining < request.message_count:
+                    next_step = "sign_in" if not user_id else "upgrade_lite"
+                    message = (
+                        "Daily message limit exceeded. Sign in to get 2 messages/day, or upgrade for more."
+                        if not user_id
+                        else "Daily message limit exceeded. Upgrade to Lite to keep going."
+                    )
+                    response = JSONResponse(
+                        status_code=429,
+                        content={
+                            "allowed": False,
+                            "error": "message_limit",
+                            "message": message,
+                            "info": {
+                                "messages": msg_info,
+                                "tokens": token_info,
+                                "tier_id": tier_id,
+                                "next_step": next_step,
+                            },
+                            "type": "message_limit",
+                        },
+                    )
+                    _check_limits_cache[cache_key] = (response, time.time())
+                    return response
             
             # Get game review and lesson availability (reuse usage from above)
             game_review_info = {}
@@ -3656,13 +3686,34 @@ async def deduct_usage(request: DeductUsageRequest, req: Request):
     tier_info = supabase_client.get_subscription_overview(user_id, use_cache=True) if user_id else {
         "tier_id": "unpaid",
         "tier": {
+            "daily_messages": 1,
             "daily_tokens": 15000,
             "max_game_reviews_per_day": 0,
             "max_lessons_per_day": 0
         }
     }
-    
-    # Check token limit (message limits are NOT enforced; token-based only)
+
+    tier_id = tier_info.get("tier_id", "unpaid") or "unpaid"
+    enforce_messages = (not user_id) or (tier_id == "unpaid")
+    message_count_to_deduct = int(request.message_count or 0) if enforce_messages else 0
+
+    # Enforce message limits for anon/unpaid cohorts
+    if message_count_to_deduct > 0:
+        msg_info = supabase_client.get_message_usage(user_id, ip_address, tier_info)
+        remaining = msg_info.get("remaining")
+        if isinstance(remaining, (int, float)) and remaining < message_count_to_deduct:
+            next_step = "sign_in" if not user_id else "upgrade_lite"
+            message = (
+                "Daily message limit exceeded. Sign in to get 2 messages/day, or upgrade for more."
+                if not user_id
+                else "Daily message limit exceeded. Upgrade to Lite to keep going."
+            )
+            return JSONResponse(
+                status_code=429,
+                content={"error": "message_limit", "message": message, "info": {"messages": msg_info, "tier_id": tier_id, "next_step": next_step}},
+            )
+
+    # Check token limit (primary enforcement for all tiers)
     token_allowed, token_error, token_info = supabase_client.check_token_limit(
         user_id, ip_address, tier_info, estimated_tokens=request.tokens
     )
@@ -3672,9 +3723,9 @@ async def deduct_usage(request: DeductUsageRequest, req: Request):
             content={"error": "token_limit", "message": token_error, "info": token_info}
         )
     
-    # Deduct tokens and messages atomically
+    # Deduct tokens and (optionally) messages atomically
     success, updated_usage = supabase_client.deduct_usage_sync(
-        user_id, ip_address, request.tokens, request.message_count
+        user_id, ip_address, request.tokens, message_count_to_deduct
     )
     
     if not success:
@@ -3698,8 +3749,8 @@ async def deduct_usage(request: DeductUsageRequest, req: Request):
         "usage": {
             "messages": {
                 "used": messages_used,
-                "limit": "unlimited",
-                "remaining": "unlimited"
+                "limit": ("unlimited" if not enforce_messages else (1 if not user_id else int((tier_info.get("tier", {}) or {}).get("daily_messages", 2) or 2))),
+                "remaining": ("unlimited" if not enforce_messages else max(0, (1 if not user_id else int((tier_info.get("tier", {}) or {}).get("daily_messages", 2) or 2)) - messages_used))
             },
             "tokens": {
                 "used": tokens_used,
@@ -3742,7 +3793,32 @@ async def llm_chat(request: LLMRequest, req: Request):
         
         # Build context for tool selection
         context = request.context or {}
-        context["authenticated"] = False  # TODO: Get from auth when integrated
+        context["authenticated"] = bool(user_id)
+
+        # ----------------------------------------------------------------
+        # Tier gating (free vs null vs canceled/unpaid)
+        # - Anonymous users: tools disabled
+        # - Signed-in unpaid users: tools disabled
+        # ----------------------------------------------------------------
+        tier_info = None
+        tier_id = "unpaid"
+        if supabase_client:
+            try:
+                tier_info = supabase_client.get_subscription_overview(user_id, use_cache=True) if user_id else {
+                    "tier_id": "unpaid",
+                    "tier": {"daily_messages": 1, "daily_tokens": 15000, "max_game_reviews_per_day": 0, "max_lessons_per_day": 0}
+                }
+                tier_id = (tier_info or {}).get("tier_id") or "unpaid"
+            except Exception:
+                tier_info = None
+                tier_id = "unpaid"
+
+        tools_locked = (not user_id) or (tier_id == "unpaid")
+        if tools_locked:
+            # Hard-disable tool calls server-side (refresh-proof)
+            request.use_tools = False
+            request.forced_tool_calls = None
+            context["tools_locked"] = True
         
         # Log context details
         print(f"   📍 Context received:")
@@ -4351,14 +4427,34 @@ async def llm_chat_stream(request: LLMRequest, http_request: Request):
         """Generate SSE events with status updates and final response."""
         try:
             context = request.context or {}
-            context["authenticated"] = False
+            context["authenticated"] = bool(request.user_id)
             
             user_messages = [m for m in request.messages if m.get('role') == 'user']
             last_user_message = user_messages[-1].get('content', '') if user_messages else ""
             
             # Get user info for rate limiting
-            user_id = context.get("user_id") or context.get("profile", {}).get("user_id")
-            ip_address = http_request.client.host if http_request else None
+            user_id = request.user_id
+            ip_address = request.ip_address or (http_request.client.host if http_request else None)
+
+            # Tier gating (free/unpaid/anon -> tools locked)
+            tier_info = None
+            tier_id = "unpaid"
+            if supabase_client:
+                try:
+                    tier_info = supabase_client.get_subscription_overview(user_id, use_cache=True) if user_id else {
+                        "tier_id": "unpaid",
+                        "tier": {"daily_messages": 1, "daily_tokens": 15000, "max_game_reviews_per_day": 0, "max_lessons_per_day": 0}
+                    }
+                    tier_id = (tier_info or {}).get("tier_id") or "unpaid"
+                except Exception:
+                    tier_info = None
+                    tier_id = "unpaid"
+
+            tools_locked = (not user_id) or (tier_id == "unpaid")
+            if tools_locked:
+                request.use_tools = False
+                request.forced_tool_calls = None
+                context["tools_locked"] = True
             
             # Helper to send SSE event
             def send_event(event_type: str, data: dict):

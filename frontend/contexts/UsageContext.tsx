@@ -46,47 +46,25 @@ export function UsageProvider({ children }: { children: React.ReactNode }) {
 
   // Fetch usage from backend
   const fetchUsage = useCallback(async () => {
-    if (!user?.id) {
-      setUsage(null);
-      setLoading(false);
-      return;
-    }
-
     try {
       const response = await fetch(`${getBackendBase()}/check_limits`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          user_id: user.id,
+          user_id: user?.id || null,
           estimated_tokens: 0,
           message_count: 0
         })
       });
 
-      console.log('[UsageContext] check_limits response:', {
-        status: response.status,
-        ok: response.ok,
-        statusText: response.statusText
-      });
-
       if (response.ok) {
         const data = await response.json();
-        console.log('[UsageContext] Response data:', JSON.stringify(data, null, 2));
-        console.log('[UsageContext] Full response object:', data);
         
         if (data.info) {
           const messages = data.info.messages || {};
           const tokens = data.info.tokens || {};
           const gameReviews = data.info.game_reviews || {};
           const lessons = data.info.lessons || {};
-          
-          console.log('[UsageContext] Parsed info:', {
-            messages,
-            tokens,
-            gameReviews,
-            lessons,
-            tier_id: data.info.tier_id
-          });
           
           setUsage({
             messages: {
@@ -122,7 +100,6 @@ export function UsageProvider({ children }: { children: React.ReactNode }) {
         // Rate limit exceeded - parse error info to show usage
         try {
           const errorData = await response.json();
-          console.log('[UsageContext] 429 error response:', JSON.stringify(errorData, null, 2));
           
           if (errorData.info) {
             const messages = errorData.info.messages || {};
@@ -131,15 +108,6 @@ export function UsageProvider({ children }: { children: React.ReactNode }) {
             const lessons = errorData.info.lessons || {};
             const tier_id = errorData.info.tier_id || 'unpaid';
             const tier = errorData.info.tier || {};
-            
-            console.log('[UsageContext] Parsed 429 info:', {
-              messages,
-              tokens,
-              gameReviews,
-              lessons,
-              tier_id,
-              tier
-            });
             
             setUsage({
               messages: {
@@ -169,10 +137,10 @@ export function UsageProvider({ children }: { children: React.ReactNode }) {
               tier_id: tier_id
             });
           } else {
-            console.warn('[UsageContext] 429 response missing info:', errorData);
+            // ignore
           }
         } catch (parseErr) {
-          console.error('[UsageContext] Failed to parse 429 error response:', parseErr);
+          // ignore
         }
       }
     } catch (error) {
@@ -184,6 +152,9 @@ export function UsageProvider({ children }: { children: React.ReactNode }) {
 
   // Subscribe to Supabase realtime for daily_usage changes
   useEffect(() => {
+    // Always fetch usage (anon users are IP-based, signed-in users are user_id-based)
+    fetchUsage();
+
     if (!user?.id || !supabase) {
       // Clean up subscription if user logs out
       if (channelRef.current) {
@@ -192,9 +163,6 @@ export function UsageProvider({ children }: { children: React.ReactNode }) {
       }
       return;
     }
-
-    // Fetch initial usage
-    fetchUsage();
 
     // Subscribe to daily_usage table changes
     const channel = supabase
@@ -208,7 +176,6 @@ export function UsageProvider({ children }: { children: React.ReactNode }) {
           filter: `user_id=eq.${user.id}`
         },
         (payload: any) => {
-          console.log('[UsageContext] Daily usage changed:', payload);
           // Refresh usage when database changes (syncs across tabs/devices)
           fetchUsage();
         }
@@ -229,6 +196,11 @@ export function UsageProvider({ children }: { children: React.ReactNode }) {
   const checkCanSendMessage = useCallback((estimatedTokens: number): boolean => {
     if (!usage) return false;
 
+    // Enforce message limit only when backend returns a numeric remaining
+    if (typeof usage.messages.remaining === 'number' && usage.messages.remaining <= 0) {
+      return false;
+    }
+
     // Check token limit
     if (usage.tokens.remaining < estimatedTokens) return false;
     
@@ -237,7 +209,7 @@ export function UsageProvider({ children }: { children: React.ReactNode }) {
 
   // Deduct tokens (call backend, update local state)
   const deductTokens = useCallback(async (tokens: number, messageCount: number = 1): Promise<boolean> => {
-    if (!user?.id || !usage) return false;
+    if (!usage) return false;
     
     // Local check first (instant feedback)
     if (usage.tokens.remaining < tokens) {
@@ -250,7 +222,7 @@ export function UsageProvider({ children }: { children: React.ReactNode }) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          user_id: user.id,
+          user_id: user?.id || null,
           tokens: tokens,
           message_count: messageCount
         })

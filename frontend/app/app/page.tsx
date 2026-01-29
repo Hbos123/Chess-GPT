@@ -2070,6 +2070,7 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
   const layoutRef = useRef<HTMLDivElement | null>(null);
   const { user, loading: authLoading, signOut } = useAuth();
   const { usage, checkCanSendMessage, deductTokens } = useUsage();
+  const toolsLocked = !user?.id || (usage?.tier_id === "unpaid");
   const authUserEmail = user?.email ?? null;
   const authUserName =
     (user?.user_metadata?.username as string | undefined) ||
@@ -5601,13 +5602,17 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
       // Local check first (instant feedback)
       if (!checkCanSendMessage(estimatedTokens)) {
         if (usage) {
+          const isMessageLimit = typeof usage.messages.remaining === "number" && usage.messages.remaining <= 0;
           setTokenLimitInfo({
-            type: 'token_limit',
-            message: 'Daily token limit exceeded',
+            type: isMessageLimit ? 'message_limit' : 'token_limit',
+            message: isMessageLimit ? 'Daily message limit reached' : 'Daily token limit exceeded',
             info: {
               tokens: usage.tokens,
               messages: usage.messages,
-              tier_id: usage.tier_id
+              tier_id: usage.tier_id,
+              used: typeof usage.messages.used === "number" ? usage.messages.used : undefined,
+              limit: typeof usage.messages.limit === "number" ? usage.messages.limit : undefined,
+              next_step: !user?.id ? "sign_in" : (usage.tier_id === "unpaid" ? "upgrade_lite" : "upgrade")
             }
           });
           setShowTokenLimitModal(true);
@@ -5622,13 +5627,17 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
       if (!success) {
         // Limit was exceeded (race condition or limit hit during deduction)
         if (usage) {
+          const isMessageLimit = typeof usage.messages.remaining === "number" && usage.messages.remaining <= 0;
           setTokenLimitInfo({
-            type: 'token_limit',
-            message: 'Daily token limit exceeded',
+            type: isMessageLimit ? 'message_limit' : 'token_limit',
+            message: isMessageLimit ? 'Daily message limit reached' : 'Daily token limit exceeded',
             info: {
               tokens: usage.tokens,
               messages: usage.messages,
-              tier_id: usage.tier_id
+              tier_id: usage.tier_id,
+              used: typeof usage.messages.used === "number" ? usage.messages.used : undefined,
+              limit: typeof usage.messages.limit === "number" ? usage.messages.limit : undefined,
+              next_step: !user?.id ? "sign_in" : (usage.tier_id === "unpaid" ? "upgrade_lite" : "upgrade")
             }
           });
           setShowTokenLimitModal(true);
@@ -14128,9 +14137,9 @@ Provide 2-3 sentences of natural language commentary explaining why this deviati
               disabled={isAnalyzing || isProcessingStep || isGeneratingLesson}
               isProcessing={isAnalyzing || isProcessingStep || isGeneratingLesson}
               onCancel={cancelProcessing}
-              placeholder={isAnalyzing ? "Analyzing position..." : lightningMode ? "Ask or use @tool_name(args)..." : "Ask about the position..."}
-              onOpenOptions={() => setShowRequestOptions(true)}
-              optionsDisabled={isAnalyzing || isLegacyReviewing || isGeneratingLesson}
+              placeholder={isAnalyzing ? "Analyzing position..." : (!toolsLocked && lightningMode) ? "Ask or use @tool_name(args)..." : "Ask about the position..."}
+              onOpenOptions={toolsLocked ? undefined : (() => setShowRequestOptions(true))}
+              optionsDisabled={toolsLocked || isAnalyzing || isLegacyReviewing || isGeneratingLesson}
               lightningMode={lightningMode}
             />
           )}

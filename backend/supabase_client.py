@@ -135,6 +135,23 @@ class SupabaseClient:
                     data, timestamp = self._subscription_cache[cache_key]
                     if time.time() - timestamp < self._subscription_cache_ttl:
                         return data
+
+        def _fetch_tier_row(tier_id: str) -> Optional[Dict[str, Any]]:
+            """
+            Fetch a tier row directly from subscription_tiers.
+            Used as a fallback when an embedded relationship is missing or when we normalize to unpaid.
+            """
+            try:
+                res = (
+                    self.client.table("subscription_tiers")
+                    .select("id,name,daily_messages,daily_tokens,max_games_storage,max_lessons_per_day,max_game_reviews_per_day")
+                    .eq("id", tier_id)
+                    .limit(1)
+                    .execute()
+                )
+                return (res.data[0] if res.data else None) or None
+            except Exception:
+                return None
         
         # Fetch from database
         try:
@@ -151,7 +168,13 @@ class SupabaseClient:
             )
 
             row = (result.data[0] if result.data else None) or None
+
+            # Normalize free/unsubscribed edge-cases into an effective tier:
+            # - No row: unpaid
+            # - NULL tier_id (defensive): unpaid
+            # - status not active/trialing: treat as unpaid (prevents refresh/bypass with stale tier_id)
             if not row:
+                tier_row = _fetch_tier_row("unpaid") or {"id": "unpaid", "name": "Unpaid"}
                 data = {
                     "tier_id": "unpaid",
                     "status": "inactive",
@@ -159,17 +182,24 @@ class SupabaseClient:
                     "current_period_end": None,
                     "stripe_customer_id": None,
                     "stripe_subscription_id": None,
-                    "tier": {"id": "unpaid", "name": "Unpaid"},
+                    "tier": tier_row,
                 }
             else:
+                raw_tier_id = row.get("tier_id") or "unpaid"
+                raw_status = (row.get("status") or "inactive").lower()
+                is_paid_status = raw_status in ("active", "trialing")
+                effective_tier_id = raw_tier_id if is_paid_status else "unpaid"
+
+                tier_row = row.get("subscription_tiers") or _fetch_tier_row(effective_tier_id) or {"id": effective_tier_id, "name": ("Unpaid" if effective_tier_id == "unpaid" else effective_tier_id.title())}
+
                 data = {
-                    "tier_id": row.get("tier_id"),
-                    "status": row.get("status"),
+                    "tier_id": effective_tier_id,
+                    "status": raw_status,
                     "current_period_start": row.get("current_period_start"),
                     "current_period_end": row.get("current_period_end"),
-                    "stripe_customer_id": row.get("stripe_customer_id"),
-                    "stripe_subscription_id": row.get("stripe_subscription_id"),
-                    "tier": row.get("subscription_tiers"),
+                    "stripe_customer_id": row.get("stripe_customer_id") if effective_tier_id != "unpaid" else None,
+                    "stripe_subscription_id": row.get("stripe_subscription_id") if effective_tier_id != "unpaid" else None,
+                    "tier": tier_row,
                 }
             
             # Cache the result
@@ -487,6 +517,12 @@ class SupabaseClient:
         Returns:
             (allowed: bool, message: str, usage_info: dict)
         """
+        # Enforced cohorts:
+        # - Anonymous users: 1/day
+        # - Signed-in unpaid users: 2/day
+        # Paid tiers are token-gated; we do NOT enforce message limits there.
+        tier_id = (tier_info or {}).get("tier_id") or "unpaid"
+
         # Unsigned users: 1 message/day
         if not user_id:
             if not ip_address:
@@ -507,9 +543,16 @@ class SupabaseClient:
             self._increment_message_count(None, ip_address)
             return True, "", {"used": messages_count + 1, "limit": 1}
         
-        # Signed-in users: check tier limits
-        tier = tier_info.get("tier", {})
-        max_messages = tier.get("daily_messages", 2)  # Default to 2 for unpaid
+        # Signed-in, paid tier: do not enforce message limit
+        if tier_id != "unpaid":
+            today = datetime.now().date()
+            usage = self._get_daily_usage(user_id, None, today)
+            messages_count = usage.get("messages_count", 0) if usage else 0
+            return True, "", {"used": messages_count, "limit": "unlimited"}
+
+        # Signed-in unpaid users: check tier limits
+        tier = (tier_info or {}).get("tier", {}) or {}
+        max_messages = int(tier.get("daily_messages", 2) or 2)  # Default to 2 for unpaid
         
         today = datetime.now().date()
         usage = self._get_daily_usage(user_id, None, today)
@@ -548,16 +591,26 @@ class SupabaseClient:
         Returns:
             dict with "used", "limit", "remaining"
         """
-        # Message limits are NOT enforced anywhere anymore (token-based only).
-        # Keep messages_count as a display-only metric.
+        # Messages are enforced only for:
+        # - Anonymous users (1/day)
+        # - Signed-in unpaid users (2/day)
+        # Paid tiers are token-gated (messages are effectively unlimited).
         today = datetime.now().date()
         usage = self._get_daily_usage(user_id, ip_address, today)
         messages_count = usage.get("messages_count", 0) if usage else 0
-        return {
-            "used": messages_count,
-            "limit": "unlimited",
-            "remaining": "unlimited"
-        }
+
+        tier_id = (tier_info or {}).get("tier_id") or "unpaid"
+
+        if not user_id:
+            limit = 1
+            return {"used": messages_count, "limit": limit, "remaining": max(0, limit - messages_count)}
+
+        if tier_id == "unpaid":
+            tier = (tier_info or {}).get("tier", {}) or {}
+            limit = int(tier.get("daily_messages", 2) or 2)
+            return {"used": messages_count, "limit": limit, "remaining": max(0, limit - messages_count)}
+
+        return {"used": messages_count, "limit": "unlimited", "remaining": "unlimited"}
 
     def check_token_limit(
         self,
