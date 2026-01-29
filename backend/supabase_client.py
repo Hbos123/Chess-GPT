@@ -642,7 +642,7 @@ class SupabaseClient:
                     return None
                 p2 = str(p).strip().lower()
                 if p2 in ("chesscom", "chess_com", "chess.com", "chess-com"):
-                    return "chess.com"
+                    return "chesscom"  # Database constraint requires 'chesscom' not 'chess.com'
                 if p2 in ("lichess", "lichess.org"):
                     return "lichess"
                 return str(p).strip()
