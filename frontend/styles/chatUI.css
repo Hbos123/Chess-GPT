@@ -3820,6 +3820,7 @@ html, body {
 .summary-card-head h3 {
   margin: 0;
   font-size: 18px;
+  color: white;
 }
 
 .summary-card-head button {
