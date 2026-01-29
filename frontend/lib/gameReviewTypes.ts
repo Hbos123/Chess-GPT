@@ -60,12 +60,45 @@ export interface GameReviewStats {
 export interface GameReview {
   pgn: string;
   ply_records: PlyRecord[];
-  stats: GameReviewStats;
+  stats: GameReviewStats | {
+    white?: GameReviewStats;
+    black?: GameReviewStats;
+    overall_accuracy?: number;
+    opening_accuracy?: number;
+    middlegame_accuracy?: number;
+    endgame_accuracy?: number;
+    avg_cp_loss?: number;
+    blunders?: number;
+    mistakes?: number;
+    inaccuracies?: number;
+    missed_wins?: number;
+    total_moves?: number;
+  };
   opening?: {
     name_final?: string;
     eco_final?: string;
     theory_exit_ply?: number;
   };
+  phases?: Array<{
+    from: string;
+    to: string;
+    ply: number;
+  }>;
+  side_focus?: "white" | "black" | "both";
+  key_points?: Array<{
+    ply: number;
+    move_san: string;
+    labels?: string[];
+    category?: string;
+    note?: string;
+  }>;
+  all_key_moments?: Array<{
+    ply: number;
+    move_san: string;
+    labels?: string[];
+    category?: string;
+    note?: string;
+  }>;
   game_metadata?: {
     game_character?: string;
     endgame_type?: string;
@@ -78,8 +111,8 @@ export interface GameReview {
     player_rating: number;
     result: string;
     player_color: "white" | "black";
-    focus_color: "white" | "black" | "both";
-    review_subject: "player" | "opponent" | "both";
+    focus_color?: "white" | "black" | "both";
+    review_subject?: "player" | "opponent" | "both";
     time_control?: string | number;
     time_category?: string;
     termination?: string;
