@@ -71,8 +71,8 @@ export default function DetailedAnalyticsSection({
     }
   };
 
-  const [detailedAnalytics, setDetailedAnalytics] = useState<any>(DUMMY_DETAILED_ANALYTICS);
-  const [loadingDetailed, setLoadingDetailed] = useState(false);
+  const [detailedAnalytics, setDetailedAnalytics] = useState<any>(null); // Start with null instead of dummy data
+  const [loadingDetailed, setLoadingDetailed] = useState(true); // Start with loading true
 
   // TEMPORARY: Comment out fetch - UNCOMMENT AFTER FORMATTING IS DONE
   /*

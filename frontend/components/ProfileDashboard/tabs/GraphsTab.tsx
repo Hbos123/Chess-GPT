@@ -148,18 +148,17 @@ export default function GraphsTab({ userId, backendBase }: GraphsTabProps) {
     }
   };
 
-  const [loading, setLoading] = useState(false);
-  const [games, setGames] = useState<GraphGamePoint[]>(DUMMY_GAMES);
+  const [loading, setLoading] = useState(true);
+  const [games, setGames] = useState<GraphGamePoint[]>([]); // Start with empty array
   const [grouping, setGrouping] = useState<GroupingMode>("day");
-  const [detailed, setDetailed] = useState<DetailedAnalytics | null>(DUMMY_DETAILED);
+  const [detailed, setDetailed] = useState<DetailedAnalytics | null>(null); // Start with null
   const [showAddModal, setShowAddModal] = useState(false);
   const [entries, setEntries] = useState<GraphSeriesEntry[]>(() => [
     { id: "kind=win_rate_pct", kind: "win_rate_pct", label: "Win rate (%)", color: colorForIndex(0) },
     { id: "kind=overall_accuracy", kind: "overall_accuracy", label: "Overall accuracy", color: colorForIndex(1) },
   ]);
 
-  // TEMPORARY: Comment out fetch - UNCOMMENT AFTER FORMATTING IS DONE
-  /*
+  // Fetch real graph data
   useEffect(() => {
     if (!userId || !backendBase) return;
     const load = async () => {
@@ -191,7 +190,6 @@ export default function GraphsTab({ userId, backendBase }: GraphsTabProps) {
     };
     load();
   }, [userId, backendBase]);
-  */ // END TEMPORARY COMMENT
 
   useEffect(() => {
     if (!userId || !backendBase) return;

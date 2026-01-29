@@ -119,12 +119,12 @@ export default function ProfileDashboard({ onClose, initialTab = 'overview', onC
     ]
   };
 
-  const [loading, setLoading] = useState(false); // Set to false immediately for dummy data
+  const [loading, setLoading] = useState(true); // Start with loading true
   const [error, setError] = useState<string | null>(null);
-  const [analyticsData, setAnalyticsData] = useState<any>(DUMMY_ANALYTICS_DATA);
-  const [profileStatus, setProfileStatus] = useState<any>(DUMMY_PROFILE_STATUS);
+  const [analyticsData, setAnalyticsData] = useState<any>(null); // Start with null instead of dummy data
+  const [profileStatus, setProfileStatus] = useState<any>(null); // Start with null instead of dummy data
   const [showPersonalReview, setShowPersonalReview] = useState(false);
-  const [patternHistory, setPatternHistory] = useState<{current: any[], historical: any[]}>(DUMMY_PATTERN_HISTORY);
+  const [patternHistory, setPatternHistory] = useState<{current: any[], historical: any[]}>({ current: [], historical: [] }); // Start with empty arrays
   const backendBase = getBackendBase();
 
   // Load profile status to get analyzed games count - poll more frequently when analyzing
@@ -155,7 +155,7 @@ export default function ProfileDashboard({ onClose, initialTab = 'overview', onC
           setProfileStatus(newStatus);
           
           // If actively analyzing, trigger analytics refresh too
-          if (newStatus?.state === "analyzing" || newStatus?.state === "fetching") {
+          if (newStatus?.state === "analyzing" || newStatus?.state === "fetching" || newStatus?.state === "reviewing") {
             // Analytics will auto-refresh, but this ensures we see updates
           }
         }
@@ -170,7 +170,7 @@ export default function ProfileDashboard({ onClose, initialTab = 'overview', onC
     // Poll more frequently when actively analyzing (every 2s), otherwise every 6s
     const getPollInterval = () => {
       const state = profileStatus?.state;
-      return (state === "analyzing" || state === "fetching") ? 2000 : 6000;
+      return (state === "analyzing" || state === "fetching" || state === "reviewing") ? 2000 : 6000;
     };
     
     // Start with initial interval

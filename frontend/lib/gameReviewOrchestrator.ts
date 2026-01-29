@@ -104,7 +104,7 @@ export async function fetchAndReviewGamesFrontend(
         if (progressCallback) {
           progressCallback(
             "analyzing",
-            `Game ${i + 1}/${gamesToAnalyze.length}`,
+            `Analyzing game ${i + 1}/${gamesToAnalyze.length}...`,
             gameProgress
           );
         }
@@ -118,10 +118,14 @@ export async function fetchAndReviewGamesFrontend(
               // Scale progress within this game's range
               const scaledProgress =
                 gameProgress + (progress || 0) * (nextGameProgress - gameProgress);
-              // Parse move info from message
-              const moveMatch = message.match(/move (\d+)\/(\d+)/i);
-              const moveInfo = moveMatch ? `Move ${moveMatch[1]}/${moveMatch[2]}` : message;
-              progressCallback(phase, `Game ${i + 1}/${gamesToAnalyze.length} - ${moveInfo}`, scaledProgress, replace);
+              // Format message to include both game and move info for better parsing
+              const moveMatch = message.match(/move (\d+)\/(\d+)/i) || message.match(/Analyzing move (\d+)\/(\d+)/i);
+              if (moveMatch) {
+                // Include both game and move info in a format that OverviewTab can parse
+                progressCallback(phase, `Game ${i + 1}/${gamesToAnalyze.length} - Move ${moveMatch[1]}/${moveMatch[2]}`, scaledProgress, replace);
+              } else {
+                progressCallback(phase, `Game ${i + 1}/${gamesToAnalyze.length} - ${message}`, scaledProgress, replace);
+              }
             }
           }
         );

@@ -102,29 +102,26 @@ export default function RecentGamesTab({ userId, onStartTraining, onCreateNewTab
     }
   ];
 
-  const [games, setGames] = useState<any[]>(DUMMY_GAMES);
-  const [displayedGames, setDisplayedGames] = useState<any[]>(DUMMY_GAMES);
-  const [loading, setLoading] = useState(false); // Set to false for dummy data
+  const [games, setGames] = useState<any[]>([]); // Start with empty array
+  const [displayedGames, setDisplayedGames] = useState<any[]>([]); // Start with empty array
+  const [loading, setLoading] = useState(true); // Start with loading true
   const [loadingGameId, setLoadingGameId] = useState<string | null>(null);
   const [trainingLesson, setTrainingLesson] = useState<any>(null);
   const [gamesToShow, setGamesToShow] = useState(5);
-  const [hasMore, setHasMore] = useState(true); // Set to true to show "load more" button
+  const [hasMore, setHasMore] = useState(false); // Start with false, will be set based on actual data
   const backendBase = getBackendBase();
 
-  // TEMPORARY: Comment out fetch - UNCOMMENT AFTER FORMATTING IS DONE
-  /*
+  // Fetch real games data
   useEffect(() => {
+    if (!userId) return;
+    
     const loadGames = async () => {
       try {
+        setLoading(true);
         // Only fetch 5 initially for faster loading
         const response = await fetch(`${backendBase}/profile/analyzed_games?user_id=${userId}&limit=5`);
         if (response.ok) {
           const data = await response.json();
-          // Only log in development
-          if (process.env.NODE_ENV === 'development') {
-            console.log("[RecentGamesTab] Loaded games:", data);
-            console.log("[RecentGamesTab] Sample game structure:", data.games?.[0]);
-          }
           const loadedGames = data.games || [];
           setGames(loadedGames);
           setDisplayedGames(loadedGames);
@@ -140,8 +137,7 @@ export default function RecentGamesTab({ userId, onStartTraining, onCreateNewTab
       }
     };
     loadGames();
-  }, [userId]);
-  */ // END TEMPORARY COMMENT
+  }, [userId, backendBase]); // END TEMPORARY COMMENT
 
   const loadMoreGames = async () => {
     try {

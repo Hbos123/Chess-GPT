@@ -144,8 +144,8 @@ export default function TrainingTab({ userId, backendBase }: TrainingTabProps) {
     }
   ];
 
-  const [loading, setLoading] = useState(false); // Set to false for dummy data
-  const [suggestions, setSuggestions] = useState<DrillSuggestion[]>(DUMMY_SUGGESTIONS);
+  const [loading, setLoading] = useState(true); // Start with loading true
+  const [suggestions, setSuggestions] = useState<DrillSuggestion[]>([]); // Start with empty array
   const [activeSession, setActiveSession] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
   

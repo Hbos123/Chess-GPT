@@ -46,20 +46,23 @@ export default function OverviewTab({ data, profileStatus, onOpenPersonalReview,
   useEffect(() => {
     const handleProgress = (e: CustomEvent) => {
       const { status, message, progress } = e.detail;
-      // Parse message to extract game/move info
-      const gameMatch = message.match(/game (\d+)\/(\d+)/i) || message.match(/Game (\d+)\/(\d+)/i);
-      const moveMatch = message.match(/move (\d+)\/(\d+)/i) || message.match(/Move (\d+)\/(\d+)/i);
+      // Parse message to extract game/move info - be more flexible with patterns
+      const gameMatch = message.match(/[Gg]ame (\d+)\/(\d+)/i) || message.match(/[Aa]nalyzing [Gg]ame (\d+)\/(\d+)/i);
+      const moveMatch = message.match(/[Mm]ove (\d+)\/(\d+)/i) || message.match(/[Aa]nalyzing [Mm]ove (\d+)\/(\d+)/i);
       
-      if (gameMatch || moveMatch) {
+      if (gameMatch || moveMatch || (status === "analyzing" && message)) {
         setAnalysisProgress({
-          currentGame: gameMatch ? parseInt(gameMatch[1]) : 0,
-          totalGames: gameMatch ? parseInt(gameMatch[2]) : 0,
-          currentMove: moveMatch ? parseInt(moveMatch[1]) : 0,
-          totalMoves: moveMatch ? parseInt(moveMatch[2]) : 0,
+          currentGame: gameMatch ? parseInt(gameMatch[1]) : (analysisProgress?.currentGame || 0),
+          totalGames: gameMatch ? parseInt(gameMatch[2]) : (analysisProgress?.totalGames || 0),
+          currentMove: moveMatch ? parseInt(moveMatch[1]) : (analysisProgress?.currentMove || 0),
+          totalMoves: moveMatch ? parseInt(moveMatch[2]) : (analysisProgress?.totalMoves || 0),
           message: message,
         });
       } else if (status === "complete" || status === "saving") {
-        setAnalysisProgress(null);
+        // Keep progress visible briefly after completion, then clear
+        setTimeout(() => {
+          setAnalysisProgress(null);
+        }, 2000);
       }
     };
     
@@ -250,7 +253,10 @@ export default function OverviewTab({ data, profileStatus, onOpenPersonalReview,
   
   // Get games being analyzed right now
   const gamesIndexed = profileStatus?.games_indexed || 0;
-  const isAnalyzing = profileStatus?.state === "analyzing" || profileStatus?.state === "fetching";
+  const isAnalyzing = profileStatus?.state === "analyzing" || 
+                      profileStatus?.state === "fetching" || 
+                      profileStatus?.state === "reviewing" ||
+                      (profileStatus?.state === "complete" && (profileStatus?.deep_analyzed_games || 0) < (profileStatus?.target_games || 0));
   
   // Determine current activity status with real-time progress
   const getActivityStatus = () => {
@@ -258,7 +264,7 @@ export default function OverviewTab({ data, profileStatus, onOpenPersonalReview,
       const fetched = profileStatus?.games_indexed || 0;
       return `Fetching games... (${fetched} found so far)`;
     }
-    if (profileStatus?.state === "analyzing") {
+    if (profileStatus?.state === "analyzing" || profileStatus?.state === "reviewing") {
       const analyzed = profileStatus?.deep_analyzed_games || activeGames || 0;
       const total = profileStatus?.games_indexed || analyzed;
       if (total > 0 && analyzed < total) {
