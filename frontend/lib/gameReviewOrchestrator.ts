@@ -120,7 +120,11 @@ export async function fetchAndReviewGamesFrontend(
           }
         );
 
-        console.log(`[GameReviewOrchestrator] Review completed for game ${i + 1}, accuracy: ${review.stats.overall_accuracy.toFixed(1)}%`);
+        // Handle both stats formats (old GameReviewStats or new format with white/black)
+        const accuracy = typeof review.stats === 'object' && 'overall_accuracy' in review.stats
+          ? (review.stats as any).overall_accuracy ?? 0
+          : (review.stats as any).overall_accuracy ?? 0;
+        console.log(`[GameReviewOrchestrator] Review completed for game ${i + 1}, accuracy: ${accuracy.toFixed(1)}%`);
         reviews.push(review);
 
         // Step 3: Save immediately after each game review

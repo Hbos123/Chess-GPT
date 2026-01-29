@@ -184,7 +184,10 @@ export async function reviewGame(
     total_moves: playerStats.total_moves,
   };
   
-  console.log(`[GameReviewer] Stats calculated: accuracy=${stats.overall_accuracy.toFixed(1)}%, blunders=${stats.blunders}, mistakes=${stats.mistakes}`);
+  const accuracy = stats.overall_accuracy ?? 0;
+  const blunders = stats.blunders ?? 0;
+  const mistakes = stats.mistakes ?? 0;
+  console.log(`[GameReviewer] Stats calculated: accuracy=${accuracy.toFixed(1)}%, blunders=${blunders}, mistakes=${mistakes}`);
 
   // Determine opening
   const opening = determineOpening(chess, plyRecords);
