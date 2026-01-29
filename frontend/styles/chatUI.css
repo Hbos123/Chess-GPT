@@ -875,7 +875,7 @@ html, body {
   flex-shrink: 0; /* Never shrink */
   /* Invisible banner: no bar background/border */
   background: transparent;
-  border-bottom: none;
+  border: none;
 }
 
 /* Keep Load game on the left; push Show chessboard to the right */
@@ -914,13 +914,15 @@ html, body {
 /* Desktop toolbar - subtle styling */
 .chat-layout:not(.mobile-mode) .conversation-toolbar {
   padding: 10px 20px;
-  border-bottom: none;
+  border: none;
+  background: transparent;
 }
 
 /* Mobile toolbar */
 .chat-layout.mobile-mode .conversation-toolbar {
   padding: 10px 16px;
-  border-bottom: none;
+  border: none;
+  background: transparent;
 }
 
 .chat-layout.mobile-mode .toolbar-button {
@@ -1151,8 +1153,9 @@ html, body {
 /* Desktop toolbar styling */
 .chat-layout:not(.mobile-mode) .conversation-toolbar {
   padding: 10px 20px;
-  border-bottom: 1px solid var(--border-color);
-  border-radius: var(--radius-lg) var(--radius-lg) 0 0; /* Match card top radius */
+  border: none;
+  border-radius: 0;
+  background: transparent;
 }
 
 /* Mobile mode: Override default styles for rigid layout */
