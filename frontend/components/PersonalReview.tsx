@@ -6,6 +6,9 @@ import PersonalReviewReport from "./PersonalReviewReport";
 import TrainingManager from "./TrainingManager";
 import { useAuth } from "@/contexts/AuthContext";
 import { getBackendBase } from "@/lib/backendBase";
+import { fetchAndReviewGamesFrontend } from "@/lib/gameReviewOrchestrator";
+import { aggregateReviews } from "@/lib/reviewAggregator";
+import type { GameMetadata } from "@/lib/gameReviewTypes";
 
 interface PersonalReviewProps {
   onClose: () => void;
@@ -452,48 +455,219 @@ export default function PersonalReview({ onClose }: PersonalReviewProps) {
         // Continue anyway - progress updates might not work but analysis can continue
       }
 
-      console.log("[PersonalReview] 🔬 Step 2: Starting aggregate analysis...");
-      setProgress("Running deep analysis...");
-      
-      const aggregateUrl = `${backendUrl}/aggregate_personal_review`;
-      console.log("[PersonalReview] 🌐 Fetching aggregate analysis from:", aggregateUrl);
-      
-      const aggregateStartTime = Date.now();
-      const aggregateResponse = await fetch(aggregateUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ plan: finalPlan, games, session_id: sessionId }),
-      });
-      const aggregateDuration = Date.now() - aggregateStartTime;
-      
-      console.log("[PersonalReview] 📡 Aggregate response received", {
-        status: aggregateResponse.status,
-        ok: aggregateResponse.ok,
-        duration: `${aggregateDuration}ms`
-      });
+      console.log("[PersonalReview] 🔬 Step 2: Starting frontend analysis...");
+      setProgress("Checking subscription limits...");
 
-      if (!aggregateResponse.ok) {
-        const errorText = await aggregateResponse.text();
-        console.error("[PersonalReview] Aggregate request failed:", aggregateResponse.status, errorText);
-        throw new Error("Failed to aggregate data");
+      // Check if user is authenticated
+      if (!user?.id) {
+        throw new Error("User not authenticated");
       }
 
-      const responseData = await aggregateResponse.json();
-      console.log("[PersonalReview] Aggregate response received:", {
-        hasSessionId: !!responseData.session_id,
-        totalGamesAnalyzed: responseData.total_games_analyzed,
-        hasError: !!responseData.error
+      // Check tier limits before starting analysis
+      try {
+        const limitsResponse = await fetch(`${backendBase}/check_limits`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            user_id: user.id,
+            estimated_tokens: 0,
+            message_count: 0,
+          }),
+        });
+
+        if (!limitsResponse.ok) {
+          const limitsData = await limitsResponse.json();
+          throw new Error(limitsData.message || "Failed to check subscription limits");
+        }
+
+        const limitsData = await limitsResponse.json();
+        const tierId = limitsData.info?.tier_id || "unpaid";
+        const tier = limitsData.info?.tier || {};
+        const maxReviewsPerDay = tier.max_game_reviews_per_day || 0;
+
+        // Check if game reviews are allowed for this tier
+        if (tierId === "unpaid" && maxReviewsPerDay === 0) {
+          setError("Game reviews are not available for unpaid users. Please upgrade to a paid plan to analyze games.");
+          setStep("input");
+          setIsLoading(false);
+          return;
+        }
+
+        // Check if user has remaining reviews for today
+        const gameReviewsInfo = limitsData.info?.game_reviews;
+        if (gameReviewsInfo) {
+          const used = gameReviewsInfo.used || 0;
+          const limit = gameReviewsInfo.limit;
+          
+          if (limit !== "unlimited" && typeof limit === "number" && used >= limit) {
+            setError(`Daily game review limit exceeded (${used}/${limit}). Limit resets at midnight. Please upgrade for more reviews.`);
+            setStep("input");
+            setIsLoading(false);
+            return;
+          }
+
+          // Check if analyzing more games than remaining
+          if (limit !== "unlimited" && typeof limit === "number" && gamesToAnalyze > (limit - used)) {
+            const remaining = limit - used;
+            setError(`Cannot analyze ${gamesToAnalyze} games. You have ${remaining} review${remaining !== 1 ? 's' : ''} remaining today. Please reduce the number of games or upgrade your plan.`);
+            setStep("input");
+            setIsLoading(false);
+            return;
+          }
+        }
+
+        console.log("[PersonalReview] Tier check passed:", {
+          tierId,
+          maxReviewsPerDay,
+          gameReviewsInfo,
+        });
+      } catch (limitsError: any) {
+        console.error("[PersonalReview] Error checking limits:", limitsError);
+        // If it's a 403/429 error, show the message
+        if (limitsError.message && (limitsError.message.includes("not available") || limitsError.message.includes("limit"))) {
+          setError(limitsError.message);
+          setStep("input");
+          setIsLoading(false);
+          return;
+        }
+        // Otherwise, continue (might be a network error)
+        console.warn("[PersonalReview] Continuing despite limits check error");
+      }
+
+      setProgress("Running deep analysis...");
+
+      // Transform games to GameMetadata format for frontend analysis
+      const gamesToReview = games.slice(0, gamesToAnalyze).map((game): GameMetadata => {
+        // Normalize platform: handle "chesscom" -> "chess.com"
+        let normalizedPlatform: "chess.com" | "lichess" = "chess.com";
+        const gamePlatform = game.platform || platform;
+        if (gamePlatform === "lichess" || gamePlatform === "Lichess") {
+          normalizedPlatform = "lichess";
+        } else if (gamePlatform === "chesscom" || gamePlatform === "chess.com" || gamePlatform === "Chess.com") {
+          normalizedPlatform = "chess.com";
+        }
+
+        return {
+          game_id: game.game_id || game.id || String(Date.now()),
+          platform: normalizedPlatform,
+          url: game.url || "",
+          date: game.date || "",
+          player_color: game.player_color || "white",
+          player_rating: game.player_rating || 0,
+          opponent_rating: game.opponent_rating || 0,
+          opponent_name: game.opponent_name || "Unknown",
+          result: (game.result as "win" | "loss" | "draw" | "unknown") || "unknown",
+          opening: game.opening,
+          eco: game.eco,
+          termination: game.termination,
+          time_control: game.time_control,
+          time_category: game.time_category,
+          pgn: game.pgn || "",
+          has_clock: game.has_clock || false,
+        };
       });
-      
-      const { session_id, ...aggregatedData } = responseData;
-      
-      // Check for errors
-      if (aggregatedData.error) {
-        console.error("[PersonalReview] Aggregate error:", aggregatedData.error);
-        setError(aggregatedData.error);
-        setStep("input");
-        setIsLoading(false);
-        return;
+
+      console.log("[PersonalReview] Transformed games for frontend analysis:", {
+        count: gamesToReview.length,
+        platforms: gamesToReview.map(g => g.platform),
+      });
+
+      // Progress callback for frontend analysis
+      const progressCallback = (phase: string, message: string, progress?: number) => {
+        setProgress(message);
+        if (typeof progress === "number") {
+          const currentGame = Math.floor(progress * gamesToAnalyze);
+          setProgressInfo({
+            current: currentGame,
+            total: gamesToAnalyze,
+            message: message,
+            status: phase,
+          });
+        }
+      };
+
+      let aggregatedData: any;
+      let reviewResult: any;
+
+      try {
+        // Try frontend analysis first
+        console.log("[PersonalReview] Attempting frontend analysis...");
+        reviewResult = await fetchAndReviewGamesFrontend(
+          {
+            username: username,
+            platform: platform === "chesscom" ? "chess.com" : platform,
+            max_games: gamesToAnalyze,
+            depth: analysisDepth,
+            focus_color: finalPlan.focus_color || "both",
+            review_subject: "player",
+            ...finalPlan.filters,
+          },
+          user.id,
+          progressCallback
+        );
+
+        if (!reviewResult.success || !reviewResult.reviews || reviewResult.reviews.length === 0) {
+          throw new Error("Frontend analysis failed or returned no reviews");
+        }
+
+        console.log("[PersonalReview] Frontend analysis complete:", {
+          gamesAnalyzed: reviewResult.games_analyzed,
+          gamesSaved: reviewResult.games_saved,
+          reviewsCount: reviewResult.reviews.length,
+        });
+
+        // Aggregate the reviews
+        aggregatedData = aggregateReviews(reviewResult.reviews, finalPlan.filters);
+
+        if (aggregatedData.error) {
+          throw new Error(aggregatedData.error);
+        }
+
+        console.log("[PersonalReview] Aggregation complete:", {
+          totalGamesAnalyzed: aggregatedData.total_games_analyzed,
+          summary: aggregatedData.summary,
+        });
+      } catch (frontendError) {
+        console.warn("[PersonalReview] Frontend analysis failed, falling back to backend:", frontendError);
+        
+        // Fallback to backend analysis
+        setProgress("Falling back to backend analysis...");
+        const aggregateUrl = `${backendUrl}/aggregate_personal_review`;
+        console.log("[PersonalReview] 🌐 Fetching aggregate analysis from backend:", aggregateUrl);
+        
+        const aggregateStartTime = Date.now();
+        const aggregateResponse = await fetch(aggregateUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ plan: finalPlan, games, session_id: sessionId }),
+        });
+        const aggregateDuration = Date.now() - aggregateStartTime;
+        
+        console.log("[PersonalReview] 📡 Backend aggregate response received", {
+          status: aggregateResponse.status,
+          ok: aggregateResponse.ok,
+          duration: `${aggregateDuration}ms`
+        });
+
+        if (!aggregateResponse.ok) {
+          const errorText = await aggregateResponse.text();
+          console.error("[PersonalReview] Backend aggregate request failed:", aggregateResponse.status, errorText);
+          throw new Error("Both frontend and backend analysis failed");
+        }
+
+        const responseData = await aggregateResponse.json();
+        const { session_id: _, ...backendAggregatedData } = responseData;
+        
+        if (backendAggregatedData.error) {
+          throw new Error(backendAggregatedData.error);
+        }
+        
+        if (backendAggregatedData.total_games_analyzed === 0) {
+          throw new Error("No games could be analyzed");
+        }
+
+        aggregatedData = backendAggregatedData;
+        console.log("[PersonalReview] Backend analysis complete");
       }
       
       if (aggregatedData.total_games_analyzed === 0) {
@@ -505,7 +679,7 @@ export default function PersonalReview({ onClose }: PersonalReviewProps) {
       }
       
       console.log("[PersonalReview] Analysis complete, updating UI...");
-      // Ensure UI reflects completion even if SSE lagged.
+      // Ensure UI reflects completion
       setProgressInfo((prev) => {
         const total = prev?.total ?? aggregatedData?.total_games_analyzed ?? gamesToAnalyze;
         console.log("[PersonalReview] Setting progressInfo to completion:", { current: total, total });

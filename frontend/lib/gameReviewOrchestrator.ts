@@ -144,8 +144,23 @@ export async function fetchAndReviewGamesFrontend(
           }
         } catch (saveError: any) {
           console.error(`[GameReviewOrchestrator] Error saving game ${i + 1}:`, saveError);
-          errors.push(`Failed to save game ${i + 1}: ${saveError.message}`);
-          // Continue with next game
+          // Check if it's a tier limit error
+          const errorMessage = saveError.message || String(saveError);
+          if (errorMessage.includes("not available") || 
+              errorMessage.includes("limit") || 
+              errorMessage.includes("storage") ||
+              errorMessage.includes("403") ||
+              errorMessage.includes("429")) {
+            errors.push(`Cannot save game ${i + 1}: ${errorMessage}`);
+            // Stop trying to save more games if it's a limit issue
+            if (errorMessage.includes("not available") || errorMessage.includes("storage")) {
+              console.warn(`[GameReviewOrchestrator] Stopping saves due to tier limit: ${errorMessage}`);
+              break;
+            }
+          } else {
+            errors.push(`Failed to save game ${i + 1}: ${errorMessage}`);
+          }
+          // Continue with next game for other errors
         }
 
         result.games_analyzed++;

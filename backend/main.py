@@ -369,6 +369,13 @@ async def lifespan(app: FastAPI):
     # This must be defined after profile_indexer is created
     async def on_indexing_complete_callback(user_id: str) -> None:
         """Callback to review and save games after they're fetched"""
+        # Frontend now handles analysis - skip backend analysis to reduce server load
+        print(f"ℹ️ [INDEXING_CALLBACK] Skipping auto-analysis - frontend handles reviews for user {user_id}")
+        return
+        
+        # Original analysis code below (disabled)
+        # Uncomment if you need backend analysis as fallback
+        """
         if not profile_indexer or not supabase_client:
             print(f"⚠️ [INDEXING_CALLBACK] Cannot process games: profile_indexer={profile_indexer is not None}, supabase_client={supabase_client is not None}")
             return
@@ -579,11 +586,12 @@ async def lifespan(app: FastAPI):
                     # Non-fatal - games are still saved
             
             print(f"✅ [INDEXING_CALLBACK] Completed processing games for user {user_id}: {saved_count} saved, {error_count} errors")
-            
+        
         except Exception as e:
             print(f"❌ [INDEXING_CALLBACK] Fatal error in callback for user {user_id}: {e}")
             import traceback
             traceback.print_exc()
+        """
             # Update status to error state
             if user_id in profile_indexer._status:
                 from profile_indexer import _utc_now
@@ -8964,11 +8972,55 @@ async def save_game_review_endpoint(request: SaveGameReviewRequest):
     """
     Save a game review from the frontend.
     Uses backend service role key to bypass RLS and write to correct tables.
+    Checks tier limits before saving.
     """
     if not supabase_client:
         raise HTTPException(status_code=503, detail="Supabase client not initialized")
     
     try:
+        # Check tier limits before saving
+        tier_info = supabase_client.get_subscription_overview(request.user_id)
+        tier_id = tier_info.get("tier_id", "unpaid")
+        tier = tier_info.get("tier", {})
+        
+        # Check if game reviews are allowed for this tier
+        max_reviews_per_day = tier.get("max_game_reviews_per_day", 0)
+        if tier_id == "unpaid" and max_reviews_per_day == 0:
+            raise HTTPException(
+                status_code=403,
+                detail="Game reviews are not available for unpaid users. Please upgrade to a paid plan."
+            )
+        
+        # Check daily limit
+        allowed, message, usage_info = supabase_client.check_and_increment_usage(
+            request.user_id,
+            None,  # ip_address not needed for authenticated users
+            "game_review",
+            tier_info
+        )
+        
+        if not allowed:
+            raise HTTPException(
+                status_code=429,
+                detail=message or "Daily game review limit exceeded"
+            )
+        
+        # Check storage limit
+        max_storage = tier.get("max_games_storage", 0)
+        if max_storage > 0:
+            # Get current game count for user
+            try:
+                games_result = supabase_client.client.table("games").select("id", count="exact").eq("user_id", request.user_id).execute()
+                current_count = games_result.count if hasattr(games_result, 'count') else len(games_result.data or [])
+                
+                if current_count >= max_storage:
+                    raise HTTPException(
+                        status_code=403,
+                        detail=f"Game storage limit reached ({current_count}/{max_storage} games). Please upgrade to increase storage or archive old games."
+                    )
+            except Exception as e:
+                print(f"⚠️ Error checking storage limit: {e}")
+                # Continue anyway - storage check is not critical
         # Convert frontend format to backend format
         game_data = {
             "platform": request.game.get("platform"),
