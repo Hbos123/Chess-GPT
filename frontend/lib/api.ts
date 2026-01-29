@@ -345,6 +345,11 @@ export interface ProfileStatusSummary {
   finished_at?: string | null;
   last_updated?: string | null;
   last_error?: string | null;
+  target_games?: number;
+  next_poll_at?: string | null;
+  background_active?: boolean;
+  light_analyzed_games?: number;
+  deep_analyzed_games?: number;
 }
 
 export interface ProfileHighlight {
