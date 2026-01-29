@@ -3506,12 +3506,12 @@ async def check_limits(request: CheckLimitsRequest, req: Request):
             if user_id:
                 tier_info = supabase_client.get_subscription_overview(user_id, use_cache=True)
             else:
-                # Anonymous user - default to unpaid
+                # Anonymous user - default to unpaid (1 message, need ~10000 tokens for 1 message + response)
                 tier_info = {
                     "tier_id": "unpaid", 
                     "tier": {
                         "daily_messages": 1, 
-                        "daily_tokens": 15000, 
+                        "daily_tokens": 10000, 
                         "max_game_reviews_per_day": 0, 
                         "max_lessons_per_day": 0
                     }
@@ -3526,7 +3526,7 @@ async def check_limits(request: CheckLimitsRequest, req: Request):
             usage = supabase_client._get_daily_usage(user_id, ip_address, today)
             tokens_used = usage.get("tokens_used", 0) if usage else 0
             tier = tier_info.get("tier", {})
-            max_tokens = tier.get("daily_tokens", 15000)
+            max_tokens = tier.get("daily_tokens", 10000)  # Default to 10k for anonymous, 20k for unpaid
             
             token_info = {
                 "used": tokens_used,
@@ -3702,7 +3702,7 @@ async def deduct_usage(request: DeductUsageRequest, req: Request):
         "tier_id": "unpaid",
         "tier": {
             "daily_messages": 1,
-            "daily_tokens": 15000,
+            "daily_tokens": 10000,  # Enough for 1 message + response
             "max_game_reviews_per_day": 0,
             "max_lessons_per_day": 0
         }
@@ -3821,7 +3821,7 @@ async def llm_chat(request: LLMRequest, req: Request):
             try:
                 tier_info = supabase_client.get_subscription_overview(user_id, use_cache=True) if user_id else {
                     "tier_id": "unpaid",
-                    "tier": {"daily_messages": 1, "daily_tokens": 15000, "max_game_reviews_per_day": 0, "max_lessons_per_day": 0}
+                    "tier": {"daily_messages": 1, "daily_tokens": 10000, "max_game_reviews_per_day": 0, "max_lessons_per_day": 0}
                 }
                 tier_id = (tier_info or {}).get("tier_id") or "unpaid"
             except Exception:
@@ -4458,7 +4458,7 @@ async def llm_chat_stream(request: LLMRequest, http_request: Request):
                 try:
                     tier_info = supabase_client.get_subscription_overview(user_id, use_cache=True) if user_id else {
                         "tier_id": "unpaid",
-                        "tier": {"daily_messages": 1, "daily_tokens": 15000, "max_game_reviews_per_day": 0, "max_lessons_per_day": 0}
+                        "tier": {"daily_messages": 1, "daily_tokens": 10000, "max_game_reviews_per_day": 0, "max_lessons_per_day": 0}
                     }
                     tier_id = (tier_info or {}).get("tier_id") or "unpaid"
                 except Exception:
@@ -4523,7 +4523,7 @@ async def llm_chat_stream(request: LLMRequest, http_request: Request):
                     if user_id:
                         tier_info = supabase_client.get_subscription_overview(user_id)
                     else:
-                        tier_info = {"tier_id": "unpaid", "tier": {"daily_tokens": 15000, "max_game_reviews_per_day": 0, "max_lessons_per_day": 0}}
+                        tier_info = {"tier_id": "unpaid", "tier": {"daily_tokens": 10000, "max_game_reviews_per_day": 0, "max_lessons_per_day": 0}}
                     
                     # Check token limit (estimate ~5k tokens for a typical request)
                     token_allowed, token_error, token_info = supabase_client.check_token_limit(

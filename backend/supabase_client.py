@@ -174,7 +174,10 @@ class SupabaseClient:
             # - NULL tier_id (defensive): unpaid
             # - status not active/trialing: treat as unpaid (prevents refresh/bypass with stale tier_id)
             if not row:
-                tier_row = _fetch_tier_row("unpaid") or {"id": "unpaid", "name": "Unpaid"}
+                tier_row = _fetch_tier_row("unpaid") or {"id": "unpaid", "name": "Unpaid", "daily_messages": 2, "daily_tokens": 20000}
+                # Ensure unpaid users get enough tokens for 2 messages
+                if tier_row.get("daily_tokens", 0) < 20000:
+                    tier_row["daily_tokens"] = 20000
                 data = {
                     "tier_id": "unpaid",
                     "status": "inactive",
@@ -191,6 +194,10 @@ class SupabaseClient:
                 effective_tier_id = raw_tier_id if is_paid_status else "unpaid"
 
                 tier_row = row.get("subscription_tiers") or _fetch_tier_row(effective_tier_id) or {"id": effective_tier_id, "name": ("Unpaid" if effective_tier_id == "unpaid" else effective_tier_id.title())}
+                
+                # Ensure unpaid users get enough tokens for 2 messages
+                if effective_tier_id == "unpaid" and tier_row.get("daily_tokens", 0) < 20000:
+                    tier_row["daily_tokens"] = 20000
 
                 data = {
                     "tier_id": effective_tier_id,
@@ -217,8 +224,31 @@ class SupabaseClient:
                 "current_period_end": None,
                 "stripe_customer_id": None,
                 "stripe_subscription_id": None,
-                "tier": {"id": "unpaid", "name": "Unpaid"},
+                "tier": {"id": "unpaid", "name": "Unpaid", "daily_messages": 2, "daily_tokens": 20000},
             }
+
+    def invalidate_subscription_cache(self, user_id: str):
+        """Invalidate subscription cache for a user"""
+        cache_key = f"sub:{user_id}"
+        with self._cache_lock:
+            if cache_key in self._subscription_cache:
+                del self._subscription_cache[cache_key]
+                print(f"[cache] Invalidated subscription cache for user {user_id[:8]}...")
+
+    def invalidate_usage_cache(self, user_id: Optional[str], ip_address: Optional[str], date):
+        """Invalidate usage cache for a user/ip and date"""
+        date_str = date.isoformat() if hasattr(date, 'isoformat') else str(date)
+        if user_id:
+            cache_key = f"usage:{user_id}:{date_str}"
+        elif ip_address:
+            cache_key = f"usage:{ip_address}:{date_str}"
+        else:
+            return
+        
+        with self._cache_lock:
+            if cache_key in self._usage_cache:
+                del self._usage_cache[cache_key]
+                print(f"[cache] Invalidated usage cache for {cache_key}")
 
     def get_stripe_customer_id(self, user_id: str) -> Optional[str]:
         try:
