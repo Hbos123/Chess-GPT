@@ -591,7 +591,6 @@ async def lifespan(app: FastAPI):
             print(f"❌ [INDEXING_CALLBACK] Fatal error in callback for user {user_id}: {e}")
             import traceback
             traceback.print_exc()
-        """
             # Update status to error state
             if user_id in profile_indexer._status:
                 from profile_indexer import _utc_now
@@ -599,6 +598,7 @@ async def lifespan(app: FastAPI):
                 status.state = "error"
                 status.message = f"Analysis failed: {str(e)}"
                 status.last_updated = _utc_now()
+        """
     
     # Now set the callback on the profile_indexer
     if supabase_client:

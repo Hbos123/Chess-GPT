@@ -592,10 +592,19 @@ export default function PersonalReview({ onClose }: PersonalReviewProps) {
       try {
         // Try frontend analysis first
         console.log("[PersonalReview] Attempting frontend analysis...");
+        
+        // Normalize platform for frontend analysis
+        let normalizedPlatform: "chess.com" | "lichess" = "chess.com";
+        if (platform === "lichess") {
+          normalizedPlatform = "lichess";
+        } else {
+          normalizedPlatform = "chess.com"; // handles "chess.com", "combined", or any other value
+        }
+        
         reviewResult = await fetchAndReviewGamesFrontend(
           {
             username: username,
-            platform: platform === "chesscom" ? "chess.com" : platform,
+            platform: normalizedPlatform,
             max_games: gamesToAnalyze,
             depth: analysisDepth,
             focus_color: finalPlan.focus_color || "both",
