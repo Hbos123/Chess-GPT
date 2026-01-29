@@ -3455,78 +3455,10 @@ async def check_limits(request: CheckLimitsRequest, req: Request):
                     }
                 }
             
-            # Get message usage (read-only, doesn't increment)
+            # Get message usage (read-only, for display only - not enforced)
             msg_info = supabase_client.get_message_usage(user_id, ip_address, tier_info)
             
-            # Check if message limit would be exceeded (for 429 response)
-            if msg_info["remaining"] <= 0:
-                tier_id = tier_info.get("tier_id", "unpaid")
-                if tier_id == "unpaid":
-                    msg_error = f"Daily message limit exceeded ({msg_info['used']}/{msg_info['limit']}). Upgrade to Lite for 15 messages/day."
-                    next_step = "upgrade_lite"
-                else:
-                    msg_error = f"Daily message limit exceeded ({msg_info['used']}/{msg_info['limit']}). Upgrade your plan for more messages."
-                    next_step = "upgrade"
-                
-                # Get full usage info even when message limit is exceeded
-                from datetime import datetime as dt
-                today = dt.now().date()
-                usage = supabase_client._get_daily_usage(user_id, ip_address, today)
-                tokens_used = usage.get("tokens_used", 0) if usage else 0
-                tier = tier_info.get("tier", {})
-                max_tokens = tier.get("daily_tokens", 15000)
-                
-                token_info = {
-                    "used": tokens_used,
-                    "limit": max_tokens,
-                    "remaining": max(0, max_tokens - tokens_used)
-                }
-                
-                # Get game review and lesson info
-                game_review_info = {}
-                lesson_info = {}
-                max_reviews = tier.get("max_game_reviews_per_day")
-                if max_reviews is None:
-                    game_review_info = {"used": 0, "limit": "unlimited", "remaining": "unlimited"}
-                else:
-                    used_reviews = usage.get("game_reviews_count", 0) if usage else 0
-                    game_review_info = {
-                        "used": used_reviews,
-                        "limit": max_reviews,
-                        "remaining": max(0, max_reviews - used_reviews)
-                    }
-                
-                max_lessons = tier.get("max_lessons_per_day")
-                if max_lessons is None:
-                    lesson_info = {"used": 0, "limit": "unlimited", "remaining": "unlimited"}
-                else:
-                    used_lessons = usage.get("lessons_count", 0) if usage else 0
-                    lesson_info = {
-                        "used": used_lessons,
-                        "limit": max_lessons,
-                        "remaining": max(0, max_lessons - used_lessons)
-                    }
-                
-                response = JSONResponse(
-                    status_code=429,
-                    content={
-                        "allowed": False,
-                        "error": "message_limit",
-                        "message": msg_error,
-                        "info": {
-                            "messages": msg_info,
-                            "tokens": token_info,
-                            "game_reviews": game_review_info,
-                            "lessons": lesson_info,
-                            "tier_id": tier_id,
-                            "tier": tier
-                        },
-                        "type": "message_limit"
-                    }
-                )
-                # Cache error responses too (short TTL)
-                _check_limits_cache[cache_key] = (response, time.time())
-                return response
+            # REMOVED: Message limit checks - only token limits are enforced now
             
             # Get token usage (read-only check)
             from datetime import datetime as dt

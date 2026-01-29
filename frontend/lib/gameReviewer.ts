@@ -28,7 +28,7 @@ export async function reviewGame(
     review_subject = "player",
   } = options;
 
-  console.log(`[GameReviewer] Starting review for game ${game.game_id} (${game.platform}), depth: ${depth}, focus: ${focus_color || game.player_color}`);
+  // Reduced logging - removed startup log
 
   const pgn = game.pgn;
   if (!pgn) {
@@ -161,8 +161,6 @@ export async function reviewGame(
     }
   }
 
-  console.log(`[GameReviewer] Completed review: ${plyRecords.length} moves analyzed`);
-
   // Calculate statistics for both sides
   const whiteStats = calculateStats(plyRecords, "white");
   const blackStats = calculateStats(plyRecords, "black");
@@ -183,15 +181,9 @@ export async function reviewGame(
     missed_wins: playerStats.missed_wins,
     total_moves: playerStats.total_moves,
   };
-  
-  const accuracy = stats.overall_accuracy ?? 0;
-  const blunders = stats.blunders ?? 0;
-  const mistakes = stats.mistakes ?? 0;
-  console.log(`[GameReviewer] Stats calculated: accuracy=${accuracy.toFixed(1)}%, blunders=${blunders}, mistakes=${mistakes}`);
 
   // Determine opening
   const opening = determineOpening(chess, plyRecords);
-  console.log(`[GameReviewer] Opening: ${opening.name_final || 'Unknown'}, ECO: ${opening.eco_final || 'N/A'}`);
 
   // Detect key points and key moments
   const keyPoints = detectKeyPoints(plyRecords, playerColor, focusColor);

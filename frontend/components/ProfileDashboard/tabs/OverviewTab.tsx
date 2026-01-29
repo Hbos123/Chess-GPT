@@ -33,6 +33,42 @@ export default function OverviewTab({ data, profileStatus, onOpenPersonalReview,
   const [snapshotLoading, setSnapshotLoading] = useState(false);
   const [snapshotError, setSnapshotError] = useState<string | null>(null);
   
+  // Analysis progress state (for move-by-move updates)
+  const [analysisProgress, setAnalysisProgress] = useState<{
+    currentGame: number;
+    totalGames: number;
+    currentMove: number;
+    totalMoves: number;
+    message: string;
+  } | null>(null);
+  
+  // Listen for analysis progress updates from window events
+  useEffect(() => {
+    const handleProgress = (e: CustomEvent) => {
+      const { status, message, progress } = e.detail;
+      // Parse message to extract game/move info
+      const gameMatch = message.match(/game (\d+)\/(\d+)/i) || message.match(/Game (\d+)\/(\d+)/i);
+      const moveMatch = message.match(/move (\d+)\/(\d+)/i) || message.match(/Move (\d+)\/(\d+)/i);
+      
+      if (gameMatch || moveMatch) {
+        setAnalysisProgress({
+          currentGame: gameMatch ? parseInt(gameMatch[1]) : 0,
+          totalGames: gameMatch ? parseInt(gameMatch[2]) : 0,
+          currentMove: moveMatch ? parseInt(moveMatch[1]) : 0,
+          totalMoves: moveMatch ? parseInt(moveMatch[2]) : 0,
+          message: message,
+        });
+      } else if (status === "complete" || status === "saving") {
+        setAnalysisProgress(null);
+      }
+    };
+    
+    window.addEventListener('analysis-progress' as any, handleProgress as EventListener);
+    return () => {
+      window.removeEventListener('analysis-progress' as any, handleProgress as EventListener);
+    };
+  }, []);
+  
   // Load linked accounts from profile overview
   useEffect(() => {
     if (!userId || !backendBase) return;
@@ -307,6 +343,32 @@ export default function OverviewTab({ data, profileStatus, onOpenPersonalReview,
             </span>
           )}
         </div>
+        {/* Move-by-move progress display */}
+        {isAnalyzing && analysisProgress && (
+          <div style={{ 
+            marginTop: '12px', 
+            padding: '10px', 
+            background: 'rgba(59, 130, 246, 0.15)', 
+            borderRadius: '6px',
+            border: '1px solid rgba(59, 130, 246, 0.3)'
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+              <span style={{ fontSize: '12px', fontWeight: 600, color: '#93c5fd' }}>
+                Game {analysisProgress.currentGame}/{analysisProgress.totalGames}
+              </span>
+              {analysisProgress.currentMove > 0 && (
+                <span style={{ fontSize: '12px', color: '#cbd5e1' }}>
+                  Move {analysisProgress.currentMove}/{analysisProgress.totalMoves}
+                </span>
+              )}
+            </div>
+            {analysisProgress.message && (
+              <div style={{ fontSize: '11px', color: '#cbd5e1', opacity: 0.8 }}>
+                {analysisProgress.message}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Daily Usage Section */}

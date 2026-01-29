@@ -2384,45 +2384,20 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
     const isReadyForAnalysis = ['idle', 'completed', 'reviewing'].includes(profileStatus?.state || '');
     const targetGames = profileStatus?.target_games || 60;
     
-    console.log('[AutoAnalysis] Checking if frontend analysis should trigger', {
-      userId: user.id,
-      hasIndexedGames,
-      indexed: profileStatus?.games_indexed,
-      hasAnalyzedGames,
-      analyzed: profileStatus?.deep_analyzed_games,
-      state: profileStatus?.state,
-      isReadyForAnalysis,
-      targetGames,
-      alreadyTriggered: analysisTriggeredRef.current
-    });
-    
-    // Add explicit condition breakdown for debugging
+    // Reduced logging - only log when actually triggering
     const condition1 = hasIndexedGames;
     const condition2 = !hasAnalyzedGames;
     const condition3 = isReadyForAnalysis;
     const condition4 = !analysisTriggeredRef.current;
     const allConditionsMet = condition1 && condition2 && condition3 && condition4;
     
-    console.log('[AutoAnalysis] Condition breakdown:', {
-      'hasIndexedGames': condition1,
-      '!hasAnalyzedGames': condition2,
-      'isReadyForAnalysis': condition3,
-      '!alreadyTriggered': condition4,
-      'ALL_MET': allConditionsMet
-    });
-    
     // If we have indexed games but no analyzed games, and we're ready (idle/completed/reviewing), auto-trigger frontend analysis
     if (allConditionsMet) {
       const indexedCount = profileStatus?.games_indexed || 0;
       const gamesToAnalyze = Math.min(indexedCount, targetGames);
       
-      console.log('[AutoAnalysis] ✅ Games indexed but not analyzed - auto-triggering frontend analysis', {
-        indexed: indexedCount,
-        analyzed: profileStatus?.deep_analyzed_games,
-        target: targetGames,
-        gamesToAnalyze,
-        accounts: profilePreferences.accounts
-      });
+      // Reduced logging - only log key events
+      console.log('[AutoAnalysis] Starting analysis:', { gamesToAnalyze, target: targetGames });
       
       analysisTriggeredRef.current = true; // Prevent repeated triggers
       
@@ -2434,13 +2409,6 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
         const platform = (accountPlatform === "chesscom" || accountPlatform === "chess.com") 
           ? "chess.com" 
           : "lichess";
-        
-        console.log('[AutoAnalysis] 🚀 Starting frontend analysis automatically', {
-          username: firstAccount.username,
-          platform,
-          gamesToAnalyze,
-          originalPlatform: firstAccount.platform // Log original for debugging
-        });
         
         // Trigger frontend analysis in background (don't await to avoid blocking)
         fetchAndReviewGamesFrontend(
@@ -2454,19 +2422,24 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
           },
           user.id,
           (status, message, progress) => {
-            // Only log every 10% progress or at key milestones to reduce console spam
+            // Dispatch progress event for UI updates
+            window.dispatchEvent(new CustomEvent('analysis-progress', {
+              detail: { status, message, progress }
+            }));
+            
+            // Reduced logging - only log major milestones (0%, 50%, 100%, saving)
             const progressPercent = Math.floor((progress || 0) * 100);
-            if (progressPercent % 10 === 0 || progress === 0 || progress === 1 || status === "saving") {
-              console.log('[AutoAnalysis] Progress:', { status, message, progress: `${progressPercent}%` });
+            if (progress === 0 || progressPercent === 50 || progress === 1 || status === "saving") {
+              console.log('[AutoAnalysis]', { status, progress: `${progressPercent}%` });
             }
           }
         ).then(result => {
-          console.log('[AutoAnalysis] ✅ Frontend analysis complete:', {
-            success: result.success,
-            gamesAnalyzed: result.games_analyzed,
-            gamesSaved: result.games_saved,
-            errors: result.errors
-          });
+          // Reduced logging - only log summary
+          if (result.success) {
+            console.log('[AutoAnalysis] Complete:', { saved: result.games_saved, errors: result.errors.length });
+          } else {
+            console.warn('[AutoAnalysis] Failed:', result.errors);
+          }
           
           // Refresh profile status immediately and periodically during analysis
           if (result.success && result.games_saved > 0) {
