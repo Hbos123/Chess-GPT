@@ -7686,12 +7686,42 @@ async def profile_overview(user_id: str):
         except Exception as e:
             print(f"⚠️ Error ensuring background index: {e}")
 
-    return {
+    result = {
         "preferences": prefs,
         "status": status,
         "highlights": highlights,
         "games": games,
     }
+    
+    # Log connected accounts for debugging
+    accounts = prefs.get("accounts", [])
+    print(f"📋 [PROFILE_OVERVIEW] User {user_id}: {len(accounts)} linked accounts")
+    if accounts:
+        for acc in accounts:
+            platform = acc.get("platform", "unknown") if isinstance(acc, dict) else "unknown"
+            username = acc.get("username", "unknown") if isinstance(acc, dict) else str(acc)
+            print(f"   - {platform}: {username}")
+    else:
+        print(f"   - No linked accounts found")
+        # Also check what profile_indexer returned
+        if profile_indexer:
+            in_memory_prefs = profile_indexer.load_preferences(user_id)
+            print(f"   - In-memory prefs: {in_memory_prefs}")
+        if supabase_client:
+            try:
+                profile_row = supabase_client.get_or_create_profile(user_id)
+                supabase_linked = profile_row.get("linked_accounts") if profile_row else None
+                print(f"   - Supabase linked_accounts: {supabase_linked}")
+            except Exception as e:
+                print(f"   - Error fetching from Supabase: {e}")
+    
+    # Log game counts
+    games_count = len(games) if games else 0
+    indexed_count = status.get("games_indexed", 0)
+    analyzed_count = status.get("deep_analyzed_games", 0)
+    print(f"📊 [PROFILE_OVERVIEW] Games: {games_count} cached, {indexed_count} indexed, {analyzed_count} analyzed")
+    
+    return result
 
 
 @app.get("/profile/overview/snapshot")
