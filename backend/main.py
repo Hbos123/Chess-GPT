@@ -3471,7 +3471,7 @@ async def check_limits(request: CheckLimitsRequest, req: Request):
                 # Get full usage info even when message limit is exceeded
                 from datetime import datetime as dt
                 today = dt.now().date()
-                usage = supabase_client._get_daily_usage(user_id, ip_address, today, use_cache=True)
+                usage = supabase_client._get_daily_usage(user_id, ip_address, today)
                 tokens_used = usage.get("tokens_used", 0) if usage else 0
                 tier = tier_info.get("tier", {})
                 max_tokens = tier.get("daily_tokens", 15000)
@@ -3531,7 +3531,7 @@ async def check_limits(request: CheckLimitsRequest, req: Request):
             # Get token usage (read-only check)
             from datetime import datetime as dt
             today = dt.now().date()
-            usage = supabase_client._get_daily_usage(user_id, ip_address, today, use_cache=True)
+            usage = supabase_client._get_daily_usage(user_id, ip_address, today)
             tokens_used = usage.get("tokens_used", 0) if usage else 0
             tier = tier_info.get("tier", {})
             max_tokens = tier.get("daily_tokens", 15000)

@@ -554,7 +554,7 @@ class SupabaseClient:
                 return {"used": 0, "limit": 1, "remaining": 1}
             
             today = datetime.now().date()
-            usage = self._get_daily_usage(None, ip_address, today, use_cache=True)
+            usage = self._get_daily_usage(None, ip_address, today)
             messages_count = usage.get("messages_count", 0) if usage else 0
             
             return {
@@ -568,7 +568,7 @@ class SupabaseClient:
         max_messages = tier.get("daily_messages", 2)  # Default to 2 for unpaid
         
         today = datetime.now().date()
-        usage = self._get_daily_usage(user_id, None, today, use_cache=True)
+        usage = self._get_daily_usage(user_id, None, today)
         messages_count = usage.get("messages_count", 0) if usage else 0
         
         return {
