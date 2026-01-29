@@ -69,7 +69,7 @@ export async function fetchAndReviewGamesFrontend(
       userId,
       username,
       platform,
-      fetchOptions
+      { ...fetchOptions, max_games }  // Include max_games from subscription tier
     );
     
     // Limit to max_games from subscription tier (this is the authoritative source)
