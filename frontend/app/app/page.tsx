@@ -2295,14 +2295,20 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
   }, [user, analysisInProgress]);
 
   // Auto-start analysis when accounts are linked
+  const indexingStartedRef = useRef(false);
   useEffect(() => {
-    if (!user?.id || !profilePreferences?.accounts?.length) return;
+    if (!user?.id || !profilePreferences?.accounts?.length) {
+      indexingStartedRef.current = false;
+      return;
+    }
     
     // Check if analysis should start automatically
-    const shouldAutoStart = profileStatus?.state === 'idle' && 
+    const shouldAutoStart = !indexingStartedRef.current &&
+                           profileStatus?.state === 'idle' && 
                            (profileStatus?.deep_analyzed_games || 0) < (profileStatus?.target_games || 60);
     
     if (shouldAutoStart) {
+      indexingStartedRef.current = true;
       console.log('[AutoAnalysis] Accounts linked, starting analysis automatically', {
         deepAnalyzed: profileStatus?.deep_analyzed_games,
         target: profileStatus?.target_games
@@ -2314,11 +2320,15 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
             console.log('[AutoAnalysis] Analysis started successfully');
           } else {
             console.warn('[AutoAnalysis] Failed to start:', res.status);
+            indexingStartedRef.current = false; // Reset on failure
           }
         })
-        .catch(err => console.warn('[AutoAnalysis] Failed to start:', err));
+        .catch(err => {
+          console.warn('[AutoAnalysis] Failed to start:', err);
+          indexingStartedRef.current = false; // Reset on error
+        });
     }
-  }, [user?.id, profilePreferences?.accounts, profileStatus?.state, profileStatus?.deep_analyzed_games, profileStatus?.target_games]);
+  }, [user?.id, profilePreferences?.accounts?.length, profileStatus?.state]); // Removed deep_analyzed_games and target_games from deps to prevent re-triggering
 
   // Lightweight check for up-to-date games on boot
   useEffect(() => {
@@ -2336,7 +2346,7 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
         console.log('[BootCheck] Checking accounts for updates:', accounts);
         for (const acc of accounts) {
           // This is lightweight - just validates account exists
-          await fetch(`${getBackendBase()}/profile/validate_account?username=${acc.username}&platform=${acc.platform}`)
+          await fetch(`${getBackendBase()}/profile/validate-account?username=${acc.username}&platform=${acc.platform}`)
             .then(res => {
               if (res.ok) {
                 console.log(`[BootCheck] Account ${acc.platform}/${acc.username} validated`);
