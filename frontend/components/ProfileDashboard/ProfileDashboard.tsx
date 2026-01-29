@@ -142,13 +142,15 @@ export default function ProfileDashboard({ onClose, initialTab = 'overview', onC
           const data = await response.json();
           const newStatus = data.status || null;
           
-          console.log('[ProfileDashboard] Loaded profile status:', {
-            target_games: newStatus?.target_games,
-            games_indexed: newStatus?.games_indexed,
-            deep_analyzed_games: newStatus?.deep_analyzed_games,
-            state: newStatus?.state,
-            fullStatus: newStatus
-          });
+          // Reduced logging - only log when state changes significantly
+          if (newStatus?.state !== profileStatus?.state || 
+              newStatus?.deep_analyzed_games !== profileStatus?.deep_analyzed_games) {
+            console.log('[ProfileDashboard] Status update:', {
+              state: newStatus?.state,
+              analyzed: newStatus?.deep_analyzed_games,
+              target: newStatus?.target_games
+            });
+          }
           
           setProfileStatus(newStatus);
           

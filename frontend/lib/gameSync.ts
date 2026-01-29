@@ -15,7 +15,7 @@ export async function saveGameReview(
   game: GameMetadata,
   review: GameReview
 ): Promise<string | null> {
-  console.log(`[GameSync] Saving game review for game ${game.game_id} (${game.platform}) via backend API`);
+  // Reduced logging - removed save log
   
   try {
     const backendBase = getBackendBase();
@@ -37,10 +37,8 @@ export async function saveGameReview(
     const result = await response.json();
     const gameId = result.game_id || null;
     
-    if (gameId) {
-      console.log(`[GameSync] Game saved successfully via backend, ID: ${gameId}`);
-    } else {
-      console.warn(`[GameSync] Backend returned success but no game_id`);
+    if (!gameId) {
+      console.warn(`[GameSync] Save succeeded but no game_id returned`);
     }
     
     return gameId;
