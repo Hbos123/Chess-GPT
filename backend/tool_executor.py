@@ -332,6 +332,8 @@ class ToolExecutor:
             return {"error": f"compare_moves: invalid FEN: {str(e)}"}
 
         cleaned_moves: list[str] = []
+        illegal_moves: list[dict] = []
+
         for ms in moves_san:
             mss = (ms or "").strip()
             if not mss:
@@ -339,10 +341,33 @@ class ToolExecutor:
             try:
                 mv = board.parse_san(mss)
                 if mv not in board.legal_moves:
-                    return {"error": f"compare_moves: illegal move {mss} for provided FEN."}
+                    # Get some legal moves as suggestions
+                    legal_sample = [board.san(m) for m in list(board.legal_moves)[:5]]
+                    illegal_moves.append({
+                        "move": mss,
+                        "reason": "illegal",
+                        "legal_alternatives": legal_sample
+                    })
+                    continue
             except Exception as e:
-                return {"error": f"compare_moves: could not parse SAN {mss}: {str(e)}"}
+                # Get some legal moves as suggestions
+                legal_sample = [board.san(m) for m in list(board.legal_moves)[:5]]
+                illegal_moves.append({
+                    "move": mss,
+                    "reason": f"parse_error: {str(e)[:80]}",
+                    "legal_alternatives": legal_sample
+                })
+                continue
             cleaned_moves.append(mss)
+
+        if illegal_moves:
+            # Build a helpful error message
+            error_parts = [f"compare_moves: {len(illegal_moves)} illegal move(s):"]
+            for im in illegal_moves:
+                error_parts.append(f"  - {im['move']}: {im['reason']}")
+                if im.get('legal_alternatives'):
+                    error_parts.append(f"    Legal alternatives: {', '.join(im['legal_alternatives'][:3])}")
+            return {"error": "\n".join(error_parts), "illegal_moves": illegal_moves}
 
         if len(cleaned_moves) != 2:
             return {"error": "compare_moves: need exactly two non-empty SAN moves."}
