@@ -1500,7 +1500,7 @@ Return ONLY valid JSON in this exact format:
 
             def call_openai():
                 return self.openai_client.chat.completions.create(
-                    model="gpt-5",
+                    model="gpt-5-mini",
                     messages=[
                         {"role": "system", "content": "Return only valid JSON. No markdown. Follow constraints strictly."},
                         {"role": "user", "content": prompt},
@@ -1517,7 +1517,7 @@ Return ONLY valid JSON in this exact format:
                         system_prompt="Return only valid JSON. No markdown. Follow constraints strictly.",
                         user_text=prompt,
                         temperature=0.4,
-                        model="gpt-5",
+                        model="gpt-5-mini",
                     )
                 
                 loop = asyncio.get_event_loop()

@@ -189,6 +189,19 @@ export default function Chat({
     // This ensures we catch any edge cases we missed
     cleaned = cleaned.replace(/\n\s*\*\*/g, ' **');
     
+    // Remove line breaks AFTER bold text
+    // Step 7: Remove newlines immediately after bold when followed by text
+    cleaned = cleaned.replace(/\*\*([^*]+?)\*\*\s*\n\s*([^\n])/g, '**$1** $2');
+    
+    // Step 8: Remove double newlines after bold (when bold is on its own line)
+    cleaned = cleaned.replace(/\*\*([^*]+?)\*\*\s*\n\s*\n/g, '**$1** ');
+    
+    // Step 9: Remove single newline after bold at end of line (when followed by more content)
+    cleaned = cleaned.replace(/\*\*([^*]+?)\*\*\s*\n([^\n])/g, '**$1** $2');
+    
+    // Step 10: Final catch-all for newlines after bold
+    cleaned = cleaned.replace(/\*\*([^*]+?)\*\*\s*\n/g, '**$1** ');
+    
     // Process markdown bold text first (**text** or *text*)
     const processBoldText = (text: string): (string | JSX.Element)[] => {
       const parts: (string | JSX.Element)[] = [];
