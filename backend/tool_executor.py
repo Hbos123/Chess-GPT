@@ -1291,6 +1291,10 @@ class ToolExecutor:
             # === NEW: Statistics-first key moment selection ===
             first_game = analyzed_games[0] if analyzed_games else None
             first_game_meta = first_game.get("metadata", {}) if first_game else {}
+            # Ensure PGN is included in first_game (it should be from review["pgn"] = pgn, but double-check)
+            if first_game and not first_game.get("pgn") and analyzed_games:
+                # Try to get PGN from the original game data if missing
+                first_game["pgn"] = analyzed_games[0].get("pgn", "")
             # Select moments for the focused side (player/opponent/both)
             player_color = first_game_meta.get("focus_color", first_game_meta.get("player_color", "white"))
             game_result = first_game_meta.get("result", "")

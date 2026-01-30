@@ -10512,11 +10512,14 @@ Write 1–2 sentences of pre-analysis coach commentary that:
   // Determine whether this walkthrough is focused on the player, opponent, or both.
   // When reviewing opponent performance, NEVER show "Retry Move" (that's only for the player's training flow).
   const meta = (walkData?.game_metadata || walkData?.gameMetadata || {}) as any;
-  const playerColor: 'white' | 'black' | null = meta.player_color || null;
+  const playerColor: 'white' | 'black' | null = meta.player_color || meta.focus_color || null;
   const focusColor: 'white' | 'black' | 'both' | null = meta.focus_color || meta.focusColor || null;
-  const reviewSubject: 'player' | 'opponent' | 'both' | null = meta.review_subject || meta.reviewSubject || null;
+  const reviewSubject: 'player' | 'opponent' | 'both' | null = meta.review_subject || meta.reviewSubject || 'player'; // Default to 'player'
   const moveColor: 'white' | 'black' = move.color === 'w' ? 'white' : 'black';
-  const allowRetry = !!playerColor && (focusColor ? focusColor === playerColor : reviewSubject !== 'opponent') && moveColor === playerColor;
+  // Fix: Allow retry if reviewing player (not opponent) and move is player's move
+  // If playerColor is not set, infer from focusColor or default to white
+  const inferredPlayerColor = playerColor || (focusColor && focusColor !== 'both' ? focusColor : 'white');
+  const allowRetry = reviewSubject !== 'opponent' && moveColor === inferredPlayerColor;
     
     console.log('🎬 [executeWalkthroughStep] Move data:', {
       moveNumber: move.moveNumber,

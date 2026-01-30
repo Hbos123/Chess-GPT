@@ -508,6 +508,13 @@ function detectAllKeyMoments(
         advantage_swing: evalSwing,
         cp_loss: record.cp_loss,
         side: record.side_moved,
+        // Add evalBefore/evalAfter for advantage shift display
+        evalBefore: labels.includes("advantage_shift") ? evalBefore : undefined,
+        evalAfter: labels.includes("advantage_shift") ? evalCp : undefined,
+        // Add threshold crossing flags for advantage shift messages
+        crossed100: labels.includes("threshold_100_white") || labels.includes("threshold_100_black"),
+        crossed200: labels.includes("threshold_200_white") || labels.includes("threshold_200_black"),
+        crossed300: labels.includes("threshold_300_white") || labels.includes("threshold_300_black"),
       });
     }
   }
