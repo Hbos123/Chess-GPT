@@ -1565,8 +1565,8 @@ export default function HistoryCurtain({
                 <h3 style={{ margin: '0 0 8px 0', fontSize: '18px', fontWeight: '600' }}>Lite</h3>
                 <p style={{ margin: '0 0 12px 0', color: 'var(--text-secondary)', fontSize: '14px' }}>Perfect for casual players</p>
                 <div style={{ marginBottom: '16px', fontSize: '12px', color: 'var(--text-secondary)', lineHeight: '1.6' }}>
-                  <div>1.29M tokens/month (~$1 USD)</div>
-                  <div>15 messages/day</div>
+                  <div>100,000 tokens/day</div>
+                  <div>~50 messages/day (estimated)</div>
                   <div>Game reviews: 1 per day</div>
                   <div>Lessons: 1 per day</div>
                   <div>Storage: 5 games</div>
@@ -1632,8 +1632,8 @@ export default function HistoryCurtain({
                 <h3 style={{ margin: '0 0 8px 0', fontSize: '18px', fontWeight: '600' }}>Starter</h3>
                 <p style={{ margin: '0 0 12px 0', color: 'var(--text-secondary)', fontSize: '14px' }}>For serious players</p>
                 <div style={{ marginBottom: '16px', fontSize: '12px', color: 'var(--text-secondary)', lineHeight: '1.6' }}>
-                  <div>5.8M tokens/month (~$4.50 USD)</div>
-                  <div>65 messages/day</div>
+                  <div>500,000 tokens/day</div>
+                  <div>~250 messages/day (estimated)</div>
                   <div>Game reviews: 5 per day</div>
                   <div>Lessons: 5 per day</div>
                   <div>Storage: 40 games</div>
@@ -1699,8 +1699,8 @@ export default function HistoryCurtain({
                 <h3 style={{ margin: '0 0 8px 0', fontSize: '18px', fontWeight: '600' }}>Full</h3>
                 <p style={{ margin: '0 0 12px 0', color: 'var(--text-secondary)', fontSize: '14px' }}>Unlimited access</p>
                 <div style={{ marginBottom: '16px', fontSize: '12px', color: 'var(--text-secondary)', lineHeight: '1.6' }}>
-                  <div>11.6M tokens/month (~$9 USD)</div>
-                  <div>130 messages/day</div>
+                  <div>1,000,000 tokens/day</div>
+                  <div>~500 messages/day (estimated)</div>
                   <div>Game reviews: Unlimited</div>
                   <div>Lessons: Unlimited</div>
                   <div>Storage: 400 games</div>
