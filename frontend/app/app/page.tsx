@@ -3301,8 +3301,8 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
             isTheoryMove: record.is_theory,
             phase: record.phase,
             color,
-            evalBefore: engineInfo.eval_before_cp ?? 0,
-            evalAfter: engineInfo.played_eval_after_cp ?? 0,
+            evalBefore: engineInfo.eval_before_cp ?? record.eval_before_cp ?? 0,
+            evalAfter: engineInfo.played_eval_after_cp ?? record.eval_after_cp ?? 0,
             cpLoss: record.cp_loss ?? 0,
             accuracy: record.accuracy_pct ?? 100,
             bestMove: engineInfo.best_move_san || '',
@@ -3383,6 +3383,8 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
           queryIntent: transformedData.queryIntent
         });
         setWalkthroughData(transformedData);
+        // Start background, sequential pre-commentary generation immediately (before user presses Start).
+        kickoffWalkthroughCommentaryPrefetch(transformedData);
         
         // Suppress LLM response and trigger walkthrough immediately
         console.log('🎬 Starting walkthrough with data...');
@@ -3473,8 +3475,8 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
                     isTheoryMove: record.is_theory,
                     phase: record.phase,
                     color,
-                    evalBefore: engineInfo.eval_before_cp ?? 0,
-                    evalAfter: engineInfo.played_eval_after_cp ?? 0,
+                    evalBefore: engineInfo.eval_before_cp ?? record.eval_before_cp ?? 0,
+                    evalAfter: engineInfo.played_eval_after_cp ?? record.eval_after_cp ?? 0,
                     cpLoss: record.cp_loss ?? 0,
                     accuracy: record.accuracy_pct ?? 100,
                     bestMove: engineInfo.best_move_san || '',
@@ -3509,6 +3511,8 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
                 setTimeout(() => {
                   setWalkthroughData(walkthroughDataTransformed);
                   startWalkthroughWithData(walkthroughDataTransformed);
+                  // Start background, sequential pre-commentary generation immediately (before user presses Start).
+                  kickoffWalkthroughCommentaryPrefetch(walkthroughDataTransformed);
                 }, 500);
               }
           }
@@ -6762,8 +6766,9 @@ If they ask about the game, refer to this data.
               move: record.san || record.move || '',
               quality: record.category,
               color: record.side_moved === 'white' ? 'w' : 'b',
-              evalBefore: engineInfo.eval_before_cp ?? 0,
-              evalAfter: engineInfo.played_eval_after_cp ?? 0,
+              // Prefer engine sub-object if present, otherwise fall back to record-level evals.
+              evalBefore: engineInfo.eval_before_cp ?? record.eval_before_cp ?? 0,
+              evalAfter: engineInfo.played_eval_after_cp ?? record.eval_after_cp ?? 0,
               cpLoss: record.cp_loss ?? 0,
               accuracy: record.accuracy_pct ?? 100,
               bestMove: engineInfo.best_move_san || '',
@@ -6837,6 +6842,8 @@ If they ask about the game, refer to this data.
           setTimeout(() => {
             setWalkthroughData(walkthroughData);
             startWalkthroughWithData(walkthroughData);
+            // Start background, sequential pre-commentary generation immediately (before user presses Start).
+            kickoffWalkthroughCommentaryPrefetch(walkthroughData);
           }, 500);
           
           // Add walkthrough button after narrative (if narrative exists)
@@ -10444,25 +10451,29 @@ ${formatAnalysisCard(analysis.bestMoveReport.analysisAfter)}
       return preByPly[plyKey].trim();
     }
 
+    // Only invite "try again" on actual error moments.
+    const isErrorStep =
+      stepType === "blunder" ||
+      stepType === "mistake" ||
+      stepType === "inaccuracy" ||
+      stepType === "missed_win" ||
+      stepType === "left_theory";
+    const inviteRetry = allowRetry && isErrorStep;
+
     const prompt = `
-We are in a guided chess walkthrough.
+We are guiding the user through a key moment in their game.
 
 Context:
-- Review subject: ${reviewSubject || 'unknown'} (focus_color=${focusColor || 'unknown'}, player_color=${playerColor || 'unknown'})
-- Step type: ${stepType}
-- Mover: ${moverLabel} (${moverColor})
+- Subject: ${reviewSubject || "unknown"} (player_color=${playerColor || "unknown"}, focus_color=${focusColor || "unknown"})
+- Moment type: ${stepType}
 - Move: ${moveNumber ? `Move ${moveNumber}: ${moveSan}` : moveSan}
-- CP loss (if applicable): ${cpLoss}
-- Eval before: ${evalBefore === null ? 'N/A' : (evalBefore / 100).toFixed(2)}
-- Eval after: ${evalAfter === null ? 'N/A' : (evalAfter / 100).toFixed(2)}
-- Retry allowed: ${allowRetry}
+- Who played it: ${moverLabel}
 
-Write 1–2 sentences of pre-analysis coach commentary that:
-- Explains why this moment matters / what to watch for
-- Does NOT reveal the best move or suggest any specific move
-- If Retry allowed, end with a short invitation like "Try to find a better continuation" (no move names)
-- Avoid "10. Qb3" formatting; if you mention move number, use "Move 10: …"
-`;
+Write 1–2 natural sentences explaining why this moment matters and what to watch for.
+Do NOT recommend any specific move and do NOT name a best move.
+${inviteRetry ? "End with a short invitation to try again (no move names)." : ""}
+(If you mention the move number, format as "Move 10: ..." not "10. ...")
+`.trim();
 
     try {
       // Show loading indicator while generating commentary (unless batch generation is handling it)
@@ -10473,7 +10484,7 @@ Write 1–2 sentences of pre-analysis coach commentary that:
             {
               role: "system",
               content:
-                "You are a concise chess coach. Write 1–2 sentences. No move spoilers. Never name the best move. Never output SAN suggestions. Avoid lists."
+                "You are a chess coach. Write 1–2 sentences. No spoilers. Do not suggest specific moves. Be natural (no lists)."
             },
             { role: "user", content: prompt }
           ],
@@ -10540,7 +10551,16 @@ Write 1–2 sentences of pre-analysis coach commentary that:
       case 'left_theory': {
         // First show the context message with review table
         const evalAtTheory = move.evalBefore ? `${move.evalBefore > 0 ? '+' : ''}${(move.evalBefore / 100).toFixed(2)}` : '0.00';
-        const pre = await generateWalkthroughPreCommentary(type, move, walkData, allowRetry, false, stepIndex);
+        // If batch prefetch is still running and this step isn't ready, show a tiny hint.
+        const hasPrefetched =
+          !!walkData?.preGeneratedCommentary &&
+          typeof stepIndex === "number" &&
+          walkData.preGeneratedCommentary instanceof Map &&
+          walkData.preGeneratedCommentary.has(stepIndex);
+        if (walkData?.commentary_prefetching && !hasPrefetched) {
+          addSystemMessage("Generating the next step’s commentary…");
+        }
+        const pre = await generateWalkthroughPreCommentary(type, move, walkData, allowRetry, !!walkData?.commentary_prefetching, stepIndex);
         // Use ":" (not ".") to avoid triggering PGN sequence parsing on messages like "10. Qb3"
         const theoryMessage = `**Move ${move.moveNumber}: ${move.move} - Left Opening Theory**\n\n${pre}\n\n${move.color === 'w' ? 'White' : 'Black'} played **${move.move}**, departing from known opening theory. The evaluation was ${evalAtTheory} before this move.`;
         
@@ -13361,52 +13381,158 @@ Provide 2-3 sentences of natural language commentary explaining why this deviati
       return commentaryMap;
     }
     
-    addSystemMessage(`Generating commentary for ${stepsNeedingCommentary.length} key moments...`);
-    
-    // Generate all commentary in parallel with progress updates
-    const commentaryPromises = stepsNeedingCommentary.map(async ({ step, index }) => {
+    addSystemMessage(`Preparing walkthrough commentary (${stepsNeedingCommentary.length} moments)…`);
+
+    // Generate sequentially so early steps are ready immediately and we avoid bursty LLM calls.
+    for (let i = 0; i < stepsNeedingCommentary.length; i++) {
+      const { step, index } = stepsNeedingCommentary[i];
       const move = step.move;
+
       const meta = (walkData?.game_metadata || walkData?.gameMetadata || {}) as any;
-      const playerColor: 'white' | 'black' | null = meta.player_color || null;
+      const playerColor: 'white' | 'black' | null = meta.player_color || meta.focus_color || null;
       const focusColor: 'white' | 'black' | 'both' | null = meta.focus_color || meta.focusColor || null;
-      const reviewSubject: 'player' | 'opponent' | 'both' | null = meta.review_subject || meta.reviewSubject || null;
+      const reviewSubject: 'player' | 'opponent' | 'both' | null = meta.review_subject || meta.reviewSubject || 'player';
       const moveColor: 'white' | 'black' = move?.color === 'w' ? 'white' : 'black';
-      const allowRetry = !!playerColor && (focusColor ? focusColor === playerColor : reviewSubject !== 'opponent') && moveColor === playerColor;
-      
-      const moveNumber = move?.moveNumber || '?';
-      const moveSan = move?.move || move?.san || '?';
-      
-      // Update status for this specific move
-      addSystemMessage(`Generating commentary for Move ${moveNumber}: ${moveSan}...`);
-      
+      const inferredPlayerColor = playerColor || (focusColor && focusColor !== 'both' ? focusColor : 'white');
+      const allowRetry = reviewSubject !== 'opponent' && moveColor === inferredPlayerColor;
+
       try {
         const commentary = await generateWalkthroughPreCommentary(
           step.type,
           move,
           walkData,
           allowRetry,
-          true, // skipLoadingIndicator = true (we're showing batch progress instead)
-          index // Pass step index for lookup
+          true, // skipLoadingIndicator
+          index
         );
-        return { index, commentary };
+        commentaryMap.set(index, commentary);
       } catch (err) {
         console.error(`❌ [Batch Commentary] Failed for step ${index}:`, err);
-        // Fallback commentary
-        const fallback = allowRetry 
+        const fallback = allowRetry
           ? "This is a key turning point—see if you can find a cleaner continuation from here."
-          : "This is a key moment—let's see what it changed in the position.";
-        return { index, commentary: fallback };
+          : "This is a key moment—let’s see what it changed in the position.";
+        commentaryMap.set(index, fallback);
       }
-    });
-    
-    // Wait for all to complete
-    const results = await Promise.all(commentaryPromises);
-    results.forEach(({ index, commentary }) => {
-      commentaryMap.set(index, commentary);
-    });
-    
-    addSystemMessage(`✅ Commentary generation complete for ${results.length} moves`);
+    }
+
+    addSystemMessage(`✅ Commentary ready.`);
     return commentaryMap;
+  }
+
+  // Default walkthrough: show user's mistakes + critical moves.
+  // If user asked a custom review criteria (queryIntent !== "general"), keep whatever the selector chose.
+  function filterSelectedKeyMoments(selected: any[], queryIntent: string, walkData: any): any[] {
+    if (!Array.isArray(selected)) return [];
+
+    const meta = (walkData?.game_metadata || walkData?.gameMetadata || {}) as any;
+    const playerColor: 'white' | 'black' | null = meta.player_color || meta.focus_color || null;
+    const focusColor: 'white' | 'black' | 'both' | null = meta.focus_color || meta.focusColor || null;
+    const reviewSubject: 'player' | 'opponent' | 'both' | null = meta.review_subject || meta.reviewSubject || 'player';
+    const inferredPlayerColor = playerColor || (focusColor && focusColor !== 'both' ? focusColor : 'white');
+
+    // Custom criteria → allow everything (including advantage shifts, themes, etc.)
+    if (queryIntent && queryIntent !== "general") return selected;
+
+    return selected.filter((m: any) => {
+      const labels: string[] = Array.isArray(m?.labels) ? m.labels : [];
+      const primary = String(m?.primary_label || "").toLowerCase();
+
+      const isError =
+        labels.includes("blunder") ||
+        labels.includes("mistake") ||
+        labels.includes("inaccuracy") ||
+        labels.includes("missed_win") ||
+        labels.includes("missed_critical_win") ||
+        ["blunder", "mistake", "inaccuracy", "missed_win", "missed_critical_win"].includes(primary);
+
+      const isCritical =
+        labels.includes("critical_best") ||
+        ["critical_best", "critical"].includes(primary);
+
+      if (!(isError || isCritical)) return false;
+
+      // Player-only defaults: don't show opponent-only moments unless review_subject says opponent.
+      const side = String(m?.side || "").toLowerCase(); // may be "white"/"black"
+      if (reviewSubject === "opponent") return true;
+      if (!side) return true; // can't determine; keep
+      return side === inferredPlayerColor;
+    });
+  }
+
+  function buildWalkthroughSequence(walkData: any): any[] {
+    const moves = Array.isArray(walkData?.moves) ? walkData.moves : [];
+    const rawSelected = Array.isArray(walkData?.selectedKeyMoments) ? walkData.selectedKeyMoments : [];
+    const queryIntent = walkData?.queryIntent || 'general';
+    const selectedKeyMoments = filterSelectedKeyMoments(rawSelected, queryIntent, walkData);
+    const sequence: any[] = [];
+
+    if (selectedKeyMoments.length > 0) {
+      selectedKeyMoments.forEach((moment: any) => {
+        const ply = moment.ply;
+        const moveData = moves.find((m: any) => m.ply === ply);
+        if (!moveData) return;
+
+        const labels = moment.labels || [];
+        const primaryLabel = moment.primary_label || moveData.quality || '';
+        const category = moveData.category || primaryLabel;
+
+        let stepType = 'highlight';
+        if (category === 'blunder' || labels.includes('blunder')) stepType = 'blunder';
+        else if (category === 'mistake' || labels.includes('mistake')) stepType = 'mistake';
+        else if (category === 'inaccuracy' || labels.includes('inaccuracy')) stepType = 'inaccuracy';
+        else if (labels.includes('missed_critical_win') || labels.includes('missed_win')) stepType = 'missed_win';
+        else if (category === 'critical_best' || labels.includes('critical_best')) stepType = 'critical';
+        else if (category === 'best' || labels.includes('best')) stepType = 'best_move';
+        else if (labels.includes('tactical_opportunity')) stepType = 'tactical';
+        else if (labels.includes('phase_transition')) stepType = 'phase_transition';
+        // Keep advantage shifts only when included by custom criteria
+        else if (labels.includes('advantage_shift')) stepType = 'advantage_shift';
+
+        sequence.push({ type: stepType, move: moveData, moment, queryIntent });
+      });
+
+      const lastMomentPly = selectedKeyMoments[selectedKeyMoments.length - 1]?.ply;
+      const finalMove = moves[moves.length - 1];
+      if (finalMove && lastMomentPly !== finalMove.ply) sequence.push({ type: 'final', move: finalMove });
+    }
+
+    return sequence;
+  }
+
+  async function kickoffWalkthroughCommentaryPrefetch(walkData: any) {
+    if (!walkData) return;
+    // Avoid duplicate runs
+    if (walkData.commentary_prefetch_started) return;
+
+    const sequence = buildWalkthroughSequence(walkData);
+    if (!sequence || sequence.length === 0) return;
+
+    // Mark as started + store sequence early so UI can use it
+    setWalkthroughData((prev: any) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        sequence,
+        commentary_prefetch_started: true,
+        commentary_prefetching: true,
+        preGeneratedCommentary: prev.preGeneratedCommentary || new Map<number, string>(),
+      };
+    });
+
+    try {
+      const commentaryMap = await generateBatchWalkthroughCommentary(sequence, walkData);
+      setWalkthroughData((prev: any) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          preGeneratedCommentary: commentaryMap,
+          sequence,
+          commentary_prefetching: false,
+        };
+      });
+    } catch (e) {
+      setWalkthroughData((prev: any) => (prev ? { ...prev, commentary_prefetching: false } : prev));
+    }
   }
 
   async function startWalkthrough() {
@@ -13486,13 +13612,10 @@ Provide 2-3 sentences of natural language commentary explaining why this deviati
         if (finalMove) sequence.push({ type: 'final', move: finalMove });
       }
       
-      // Generate all commentary in parallel BEFORE starting walkthrough
-      console.log('📝 [startWalkthrough] Generating batch commentary for', sequence.length, 'steps');
-      const commentaryMap = await generateBatchWalkthroughCommentary(sequence, walkthroughData);
-      
-      // Store commentary map in walkthroughData for use during execution
-      walkthroughData.preGeneratedCommentary = commentaryMap;
-      walkthroughData.sequence = sequence; // Store sequence too
+      // Store sequence so we can run steps immediately.
+      walkthroughData.sequence = sequence;
+      // Kickoff background prefetch if it hasn't started yet (does not block).
+      kickoffWalkthroughCommentaryPrefetch(walkthroughData);
       
       // Now actually start the walkthrough
       console.log('🎬 [startWalkthrough] Setting active and step 0');
