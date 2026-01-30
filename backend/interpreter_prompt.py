@@ -1086,6 +1086,7 @@ This service integrates with Chess.com and Lichess accounts. Users can:
 **Available Tools:**
 - `analyze_position` - Deep position analysis
 - `analyze_move` - Evaluate specific move quality
+- `compare_moves` - Compare two candidate moves (fast, evidence-grounded)
 - `review_full_game` - Complete game review (needs PGN)
 - `fetch_and_review_games` - Profile analysis (needs username/platform)
 - `generate_training_session` - Create drills
@@ -1099,9 +1100,10 @@ This service integrates with Chess.com and Lichess accounts. Users can:
 1. For "review my profile" + username → `fetch_and_review_games`
 2. For "review this game" + PGN in context → `review_full_game`
 3. For "is this move good" → `analyze_move` (extract move from message)
-4. For "what's the best move" → `analyze_position`
-5. For "train my endgames" → `generate_training_session`
-6. For simple questions ("what is a fork?") → skip_tools: true
+4. For "compare A vs B" / "A or B?" / "is A better than B" → `compare_moves` with moves_san=[A,B]
+5. For "what's the best move" → `analyze_position`
+6. For "train my endgames" → `generate_training_session`
+7. For simple questions ("what is a fork?") → skip_tools: true
 
 ## Frontend Commands
 

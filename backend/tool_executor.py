@@ -234,6 +234,8 @@ class ToolExecutor:
                 return await self._analyze_position(arguments, context)
             elif tool_name == "analyze_move":
                 return await self._analyze_move(arguments, context)
+            elif tool_name == "compare_moves":
+                return await self._compare_moves(arguments, context)
             elif tool_name == "review_full_game":
                 return await self._review_full_game(arguments, status_callback, context)
             elif tool_name == "fetch_and_review_games":
@@ -291,6 +293,121 @@ class ToolExecutor:
             import traceback
             traceback.print_exc()
             return {"error": str(e), "tool": tool_name}
+
+    async def _compare_moves(self, args: Dict, context: Dict) -> Dict[str, Any]:
+        """
+        Compare exactly two SAN moves from the same starting position.
+
+        Strong structure output:
+        {
+          "success": true,
+          "fen": "...",
+          "depth": 10,
+          "moves_san": ["Qe2","Qa4"],
+          "winner": "Qe2",
+          "scored": [{"move":"Qe2","score":0,"by":"cp_loss",...}, ...],
+          "candidates": [
+             {"move":"Qe2","cp_loss":0,"tag_delta":{...},"evidence_line_san":"Qe2 ...","rebuttal_line_san":"Qe2 ..."},
+             {"move":"Qa4","cp_loss":80,"tag_delta":{...},"evidence_line_san":"Qa4 ...","rebuttal_line_san":"Qa4 ..."}
+          ]
+        }
+        """
+        import chess
+        from skills.compare import compare_moves as _compare_moves_fn
+        from judges.move_compare_judge import judge_compare_moves as _judge
+
+        fen = (args or {}).get("fen") or (context or {}).get("board_state") or (context or {}).get("fen")
+        moves_san = (args or {}).get("moves_san")
+        depth = int((args or {}).get("depth") or 10)
+
+        if not fen or not isinstance(fen, str):
+            return {"error": "compare_moves: missing fen (provide fen or ensure context.fen is available)."}
+        if not isinstance(moves_san, list) or len(moves_san) != 2:
+            return {"error": "compare_moves: moves_san must be an array of exactly two SAN moves."}
+
+        # Validate legality from the starting position up-front (fail fast, stable errors).
+        try:
+            board = chess.Board(fen)
+        except Exception as e:
+            return {"error": f"compare_moves: invalid FEN: {str(e)}"}
+
+        cleaned_moves: list[str] = []
+        for ms in moves_san:
+            mss = (ms or "").strip()
+            if not mss:
+                continue
+            try:
+                mv = board.parse_san(mss)
+                if mv not in board.legal_moves:
+                    return {"error": f"compare_moves: illegal move {mss} for provided FEN."}
+            except Exception as e:
+                return {"error": f"compare_moves: could not parse SAN {mss}: {str(e)}"}
+            cleaned_moves.append(mss)
+
+        if len(cleaned_moves) != 2:
+            return {"error": "compare_moves: need exactly two non-empty SAN moves."}
+
+        comp = await _compare_moves_fn(tool_executor=self, context=(context or {}), fen=fen, moves_san=cleaned_moves, depth=depth)
+        judged = _judge(comp)
+
+        def _pv_from_endpoint(ep: Dict[str, Any]) -> list[str]:
+            try:
+                analysis = (ep or {}).get("analysis") or {}
+                af_played = analysis.get("af_played") or {}
+                cands = af_played.get("candidate_moves") or []
+                if not cands:
+                    return []
+                pv = cands[0].get("pv_san")
+                if isinstance(pv, list):
+                    return [x.strip() for x in pv if isinstance(x, str) and x.strip()][:6]
+                if isinstance(pv, str):
+                    return [x for x in pv.split() if x.strip()][:6]
+            except Exception:
+                pass
+            return []
+
+        def _tag_delta_from_endpoint(ep: Dict[str, Any]) -> Dict[str, Any]:
+            d = (ep or {}).get("played_move_description") or {}
+            return {
+                "summary": (d.get("summary") or "").strip(),
+                "tags_gained": (d.get("tags_gained") or [])[:2],
+                "tags_lost": (d.get("tags_lost") or [])[:2],
+                "theme_changes": (d.get("theme_changes") or {}),
+            }
+
+        candidates: list[Dict[str, Any]] = []
+        for r in (comp.get("moves") or []):
+            if not isinstance(r, dict):
+                continue
+            mv = (r.get("move") or r.get("move_san") or r.get("moveSAN") or "").strip()
+            ep = r.get("endpoint_response") if isinstance(r.get("endpoint_response"), dict) else {}
+            pv = _pv_from_endpoint(ep)
+            evidence_line = (mv + (" " + " ".join(pv) if pv else "")).strip()
+            rebuttal_line = (mv + (" " + pv[0] if pv else "")).strip()
+
+            candidates.append(
+                {
+                    "move": mv,
+                    "cp_loss": r.get("cp_loss"),
+                    "quality": r.get("quality"),
+                    "eval_before": r.get("eval_before"),
+                    "eval_after": r.get("eval_after"),
+                    "tag_delta": _tag_delta_from_endpoint(ep),
+                    "evidence_line_san": evidence_line,
+                    "rebuttal_line_san": rebuttal_line,
+                }
+            )
+
+        return {
+            "success": True,
+            "fen": fen,
+            "depth": depth,
+            "moves_san": cleaned_moves,
+            "winner": judged.get("winner"),
+            "scored": judged.get("scored", []),
+            "candidates": candidates[:2],
+            "raw_compare": comp,
+        }
     
     def _track_tool_call(self, user_id: Optional[str], ip_address: Optional[str], tool_name: str, success: bool):
         """Track tool call in database"""

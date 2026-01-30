@@ -64,6 +64,36 @@ TOOL_ANALYZE_MOVE = {
     }
 }
 
+TOOL_COMPARE_MOVES = {
+    "type": "function",
+    "function": {
+        "name": "compare_moves",
+        "description": "Compare two candidate moves from the SAME starting position. Returns winner (by cp_loss), plus per-move evidence lines (PV after the move) and tag-delta summaries. Use when user asks 'Qe2 or Qa4?', 'compare X vs Y', or 'is X better than Y?'.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "fen": {
+                    "type": "string",
+                    "description": "FEN string BEFORE either move. If omitted, uses current board position from context."
+                },
+                "moves_san": {
+                    "type": "array",
+                    "description": "Exactly two SAN moves to compare.",
+                    "items": {"type": "string"},
+                    "minItems": 2,
+                    "maxItems": 2
+                },
+                "depth": {
+                    "type": "integer",
+                    "description": "Analysis depth. Default 10 for fast comparisons.",
+                    "default": 10
+                }
+            },
+            "required": ["moves_san"]
+        }
+    }
+}
+
 TOOL_REVIEW_FULL_GAME = {
     "type": "function",
     "function": {
@@ -931,11 +961,12 @@ ALL_TOOLS = [
     TOOL_ADD_PERSONAL_REVIEW_GRAPH,
     # Investigation tools
     TOOL_INVESTIGATE,
-    TOOL_WEB_SEARCH
+    TOOL_WEB_SEARCH,
+    TOOL_COMPARE_MOVES,
 ]
 
 # Tool categories for selective availability
-ANALYSIS_TOOLS = [TOOL_ANALYZE_POSITION, TOOL_ANALYZE_MOVE, TOOL_REVIEW_FULL_GAME, TOOL_EXTEND_BASELINE_INTUITION, TOOL_TREE_SEARCH]
+ANALYSIS_TOOLS = [TOOL_ANALYZE_POSITION, TOOL_ANALYZE_MOVE, TOOL_COMPARE_MOVES, TOOL_REVIEW_FULL_GAME, TOOL_EXTEND_BASELINE_INTUITION, TOOL_TREE_SEARCH]
 WORKFLOW_TOOLS = [TOOL_FETCH_AND_REVIEW_GAMES, TOOL_SELECT_GAMES, TOOL_GENERATE_TRAINING, TOOL_GET_LESSON, TOOL_GENERATE_OPENING_LESSON, TOOL_SET_AI_GAME, TOOL_ADD_PERSONAL_REVIEW_GRAPH]
 DATA_TOOLS = [TOOL_QUERY_GAMES, TOOL_GET_GAME_DETAILS, TOOL_QUERY_POSITIONS, TOOL_GET_TRAINING_STATS]
 WRITE_TOOLS = [TOOL_SAVE_POSITION, TOOL_CREATE_COLLECTION]

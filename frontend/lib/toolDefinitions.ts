@@ -25,6 +25,15 @@ export const AVAILABLE_TOOLS: ToolDefinition[] = [
     ]
   },
   {
+    name: "compare_moves",
+    description: "Compare two candidate SAN moves from the same starting position (fast, evidence-grounded)",
+    args: [
+      { name: "moves_san", type: "array", required: true, description: "Exactly two SAN moves to compare (e.g., ['Qe2','Qa4'])" },
+      { name: "fen", type: "string", required: false, description: "FEN string before either move (uses current board if not provided)" },
+      { name: "depth", type: "integer", required: false, description: "Analysis depth (default 10)" }
+    ]
+  },
+  {
     name: "review_full_game",
     description: "Perform complete analysis of a chess game",
     args: [

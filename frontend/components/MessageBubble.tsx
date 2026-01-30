@@ -729,13 +729,25 @@ export default function MessageBubble({ role, content, rawData, timestamp, curre
     // 2. Replace ## with double line break (simple - just insert <br/><br/> and remove ##)
     html = html.replace(/##\s*/g, '<br/><br/>');
     
-    // 3. Replace **text** with <strong>text</strong> (toggle bold on/off)
+    // 3. Normalize whitespace around bold text to prevent unwanted line breaks
+    // Remove newlines immediately before bold text
+    html = html.replace(/\n\s*\*\*/g, ' **');
+    // Remove newlines immediately after bold text when followed by text
+    html = html.replace(/\*\*([^*]+)\*\*\s*\n\s*([^\n])/g, '**$1** $2');
+    
+    // 4. Replace **text** with <strong>text</strong> (toggle bold on/off)
     html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
     
-    // 4. Convert newlines to breaks
-    html = html.replace(/\n/g, '<br/>');
+    // 5. Convert intentional line breaks (double newlines) to <br/><br/>
+    html = html.replace(/\n\s*\n/g, '<br/><br/>');
     
-    // 5. Clean up multiple consecutive line breaks
+    // 6. Remove single newlines (convert to spaces) - these are formatting artifacts
+    html = html.replace(/\n/g, ' ');
+    
+    // 7. Clean up multiple consecutive spaces
+    html = html.replace(/\s{2,}/g, ' ');
+    
+    // 8. Clean up multiple consecutive line breaks
     html = html.replace(/(<br\/>){3,}/g, '<br/><br/>');
     
     return { __html: html };

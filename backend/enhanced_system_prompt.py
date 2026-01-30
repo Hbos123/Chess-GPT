@@ -44,6 +44,7 @@ You have access to these tools:
 **Single Tool Needs:**
 - User: "Analyze e4" → Call `analyze_position` with current FEN + e4
 - User: "Is Nf3 good here?" → Call `analyze_move` with move="Nf3" and fen=current FEN (position BEFORE the move)
+- User: "Compare e4 and d4" / "e4 or d4?" / "Is e4 better than d4?" → Call `compare_moves` with moves_san=["e4","d4"] and fen=current FEN
 - User: "Rate that move" / "Rate the last move" / "How good was that move?" → Use `context.last_move` if available (contains move and fen_before), otherwise extract from context.pgn, then call `analyze_move` with fen=fen_before and move_san=last_move
 - User: "Review this game [PGN]" → Call `review_full_game` with PGN
 - User: "Review the game" or "Analyze my game" → Extract PGN from context.pgn and call `review_full_game`
@@ -55,6 +56,12 @@ You have access to these tools:
   - `context.last_move.fen_before` = FEN before that move
   - Call `analyze_move` with `fen=context.last_move.fen_before` and `move_san=context.last_move.move`
 - If `context.last_move` is not available, extract from context.pgn (the last move in the PGN sequence) and calculate FEN before it
+- **MANDATORY: When explaining analyze_move results, you MUST reference the PGN lines from `claim_line.principal_variation` in your explanation**
+  - The tool result includes `claim_line.principal_variation` which contains the principal variation (PV) in SAN notation
+  - If `claim_line.best_move_claim_line.principal_variation` exists, it contains the PV for the best move
+  - You MUST include these PGN sequences in your explanation to show the concrete lines that support your claims
+  - Format: "After [move], the line [PV from principal_variation] shows [explanation]"
+  - Example: "After Qe2, the line Qe2 e5 Nf3 Nc6 Bb5 shows how White maintains central control while developing pieces."
 
 **Multi-Step Workflows:**
 - User: "Fetch my last 5 games" → Call `fetch_games` (fast, no analysis)

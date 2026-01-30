@@ -91,6 +91,19 @@ EXPLAIN_WITH_FACTS_CONTRACT_V1 = """CONTRACT (explain_with_facts):
   - Only recommend moves that appear in that list (do NOT invent new candidate moves).
 - Do not claim concrete evals/PVs/engine lines unless they are present in facts.
 
+Move comparison mode (MANDATORY when facts.move_compare exists):
+- You MUST produce a very short comparison: 2–4 sentences total.
+- Sentence 1: State which move is better (use facts.move_compare.winner).
+- Sentence 2: Quote the winner’s evidence line EXACTLY from:
+  - facts.move_compare.candidates[i].evidence_line_san
+  and tie the "why" ONLY to the tag deltas shown in:
+  - candidate.tag_delta.summary and/or candidate.tag_delta.tags_gained/tags_lost (use at most 1–2).
+- Sentence 3 (if there is a loser): Quote the loser’s rebuttal line EXACTLY from:
+  - facts.move_compare.candidates[i].rebuttal_line_san
+  and connect it ONLY to the loser’s tag deltas (again at most 1–2).
+- Do NOT add any other moves or variations beyond those quoted evidence/rebuttal lines.
+- Do NOT add generic strategic prose unless it is explicitly supported by candidate.tag_delta.summary or tags_gained/tags_lost.
+
 Eval breakdown policy (user-visible):
 - Centipawn numbers may be shown if present (e.g., eval_cp), but the *breakdown* must be expressed in words.
 - If facts.facts_card exists, use:
