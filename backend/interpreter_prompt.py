@@ -150,6 +150,23 @@ When handling game-related queries, choose the appropriate tool:
 3. User asks for comparison table → `fetch_games` or use existing data → `generate_table`
 4. User asks for trends/graphs → `generate_graph` with appropriate data_type
 
+## Position Tool Choice Chart (CURRENT BOARD)
+
+Use this priority order when the user is discussing the current position (FEN/board_state in context):
+
+1) **Multiple candidate moves mentioned at once (HIGH PRIORITY override)**:
+   - If the user mentions **2+ SAN moves concurrently** (e.g., "A or B", "A vs B", "compare A and B", "between A and B"),
+     you MUST use `compare_moves` ONCE with `moves_san=[A,B]`.
+   - Do NOT call `analyze_move` twice in this case.
+   - If the user mentions 3+ moves (A/B/C), ask one clarifying question to pick two, unless they asked for a quick answer
+     (then compare the first two moves mentioned).
+
+2) **Single move quality**:
+   - "Is Nf3 good?" / "Rate Qe2" / "What about Bc4?" → `analyze_move` with that move.
+
+3) **General position / best move / plans / threats**:
+   - "Analyze this position" / "What's best?" / "Who's better?" → `analyze_position`.
+
 ## Examples
 
 **User: "What's the best move here?"** (discuss_position - single investigation)
@@ -259,6 +276,9 @@ When handling game-related queries, choose the appropriate tool:
   "needs_game_fetch": false
 }
 ```
+
+IMPORTANT: When the user compares two moves in the current position, prefer a single `compare_moves` tool call
+over two separate `analyze_move` calls. The compare tool is faster and produces evidence-grounded output.
 
 **User: "Is Nf3 a good move?"** (discuss_position - single move investigation)
 ```json
@@ -1420,7 +1440,9 @@ Understand the USER'S INTENT, not just their words. "Is this piece doing anythin
 - "Analyze this position" → analyze_position
 - "Is Nf3 good here?" → analyze_move with move_san
 - "What's the best move?" → analyze_position
-- "Compare e4 and d4" → analyze_move for both, compare in system_prompt
+- "Compare e4 and d4" → compare_moves with moves_san=["e4","d4"]
+- "Qe2 or Qa4?" → compare_moves with moves_san=["Qe2","Qa4"]
+- "Is Qe2 better than Qa4?" → compare_moves with moves_san=["Qe2","Qa4"]
 
 **Profile/Review** (fetch user data):
 - "Why am I stuck at 1200?" + username → fetch_and_review_games
@@ -1460,7 +1482,7 @@ Understand the USER'S INTENT, not just their words. "Is this piece doing anythin
 - For "most active piece": "Identify the most active piece and explain in 1-2 sentences why. No advice."
 - For "any threats": "List any immediate threats. If none, say so briefly. No extra commentary."
 - For "is this move good": "Rate the move quality (excellent/good/inaccuracy/mistake/blunder). Give cp loss if relevant. Be direct."
-- For "compare moves": "Compare these two moves. State which is better and why. Be concise."
+- For "compare moves": "Compare these two moves. Use compare_moves tool once (do NOT call analyze_move twice). State which is better and why, citing the evidence/rebuttal lines. Be concise."
 
 ## Tools Available
 - analyze_position: Deep position analysis
