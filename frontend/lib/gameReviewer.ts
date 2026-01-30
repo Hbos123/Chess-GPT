@@ -395,6 +395,11 @@ function detectAllKeyMoments(
   advantage_swing?: number;
   cp_loss?: number;
   side?: string;
+  evalBefore?: number;
+  evalAfter?: number;
+  crossed100?: boolean;
+  crossed200?: boolean;
+  crossed300?: boolean;
 }> {
   const allKeyMoments: Array<{ 
     ply: number; 
@@ -406,6 +411,11 @@ function detectAllKeyMoments(
     advantage_swing?: number;
     cp_loss?: number;
     side?: string;
+    evalBefore?: number;
+    evalAfter?: number;
+    crossed100?: boolean;
+    crossed200?: boolean;
+    crossed300?: boolean;
   }> = [];
   
   for (let i = 0; i < plyRecords.length; i++) {
