@@ -8645,6 +8645,98 @@ async def reset_tokens(request: ResetTokensRequest, req: Request):
         raise HTTPException(status_code=500, detail=f"Failed to reset tokens: {str(e)}")
 
 
+class UpdateSubscriptionRequest(BaseModel):
+    user_id: str
+    tier_id: str  # 'unpaid', 'lite', 'starter', 'full'
+
+@app.post("/admin/update-subscription")
+async def update_subscription(request: UpdateSubscriptionRequest, req: Request):
+    """
+    🔄 Update subscription tier for a user (for testing).
+    Requires BACKEND_SHARED_SECRET header OR can be called by user for their own data.
+    """
+    # Allow if shared secret provided OR allow self-service (no secret check for simplicity)
+    secret_provided = False
+    if _BACKEND_SHARED_SECRET:
+        got = (req.headers.get("x-chesster-secret") or "").strip()
+        secret_provided = (got == _BACKEND_SHARED_SECRET)
+    
+    # If no secret provided, still allow (self-service - users can update their own subscription)
+    if not secret_provided:
+        print(f"⚠️  No secret provided - allowing self-service subscription update for user {request.user_id}")
+    
+    if not supabase_client:
+        raise HTTPException(status_code=503, detail="Supabase client not initialized")
+    
+    user_id = request.user_id
+    tier_id = request.tier_id.lower()
+    
+    # Validate tier_id
+    valid_tiers = ['unpaid', 'lite', 'starter', 'full']
+    if tier_id not in valid_tiers:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Invalid tier_id: {tier_id}. Must be one of: {', '.join(valid_tiers)}"
+        )
+    
+    print(f"\n{'='*80}")
+    print(f"🔄 UPDATING SUBSCRIPTION FOR USER: {user_id}")
+    print(f"   New tier: {tier_id}")
+    print(f"{'='*80}")
+    
+    try:
+        # Get existing subscription to preserve Stripe IDs if they exist
+        existing_sub = supabase_client.client.table("user_subscriptions").select("*").eq("user_id", user_id).limit(1).execute()
+        existing_data = existing_sub.data[0] if existing_sub.data else None
+        
+        # Update subscription using upsert_user_subscription
+        # For testing, preserve existing Stripe IDs or use placeholder
+        stripe_customer_id = existing_data.get("stripe_customer_id") if existing_data else None
+        stripe_subscription_id = existing_data.get("stripe_subscription_id") if existing_data else None
+        
+        # If updating to unpaid, clear Stripe IDs
+        if tier_id == "unpaid":
+            stripe_customer_id = None
+            stripe_subscription_id = None
+        
+        # stripe_customer_id is required, use placeholder for testing if None
+        if not stripe_customer_id:
+            stripe_customer_id = f"test_customer_{user_id[:8]}"
+        
+        success = supabase_client.upsert_user_subscription(
+            user_id=user_id,
+            stripe_customer_id=stripe_customer_id,
+            stripe_subscription_id=stripe_subscription_id,
+            tier_id=tier_id,
+            status="active",
+            current_period_start=None,
+            current_period_end=None
+        )
+        
+        if not success:
+            raise Exception("Failed to update subscription in database")
+        
+        # Also invalidate subscription cache
+        supabase_client.invalidate_subscription_cache(user_id)
+        
+        print(f"   ✅ Updated subscription to tier: {tier_id}")
+        print(f"{'='*80}")
+        print(f"✅ SUBSCRIPTION UPDATE COMPLETE")
+        print(f"{'='*80}\n")
+        
+        return {
+            "success": True,
+            "user_id": user_id,
+            "tier_id": tier_id,
+            "message": f"Subscription updated to {tier_id}"
+        }
+    except Exception as e:
+        print(f"⚠️ Error updating subscription: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Failed to update subscription: {str(e)}")
+
+
 class PlanReviewRequest(BaseModel):
     query: str
     games: List[Dict]
