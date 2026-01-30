@@ -118,6 +118,15 @@ export interface GameReview {
     labels?: string[];
     category?: string;
     note?: string;
+    primary_label?: string;
+    advantage_swing?: number;
+    cp_loss?: number;
+    side?: string;
+    evalBefore?: number;
+    evalAfter?: number;
+    crossed100?: boolean;
+    crossed200?: boolean;
+    crossed300?: boolean;
   }>;
   game_metadata?: {
     game_character?: string;
