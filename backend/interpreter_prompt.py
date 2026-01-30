@@ -21,8 +21,12 @@ If the user's message contains multiple questions or comparisons, decompose it i
 
 **Examples:**
 - "I can't tell if the knight or bishop is better" → Two position investigations (one for knight, one for bishop)
-- "Is Nf3 or Bc4 better here?" → Two move investigations (one for Nf3, one for Bc4)
+- "Is Nf3 or Bc4 better here?" → Use compare_moves tool (single investigation with moves_san=["Nf3","Bc4"])
 - "Compare my last game to my opponent's play" → Two game investigations
+
+**IMPORTANT: Move Comparisons**
+- When user compares 2+ moves in the current position, use `compare_moves` tool (single investigation)
+- DO NOT create two separate move investigations - that is inefficient and wrong
 
 ## Output Schema (STRICT JSON)
 
@@ -1444,6 +1448,20 @@ Understand the USER'S INTENT, not just their words. "Is this piece doing anythin
 - "Qe2 or Qa4?" → compare_moves with moves_san=["Qe2","Qa4"]
 - "Is Qe2 better than Qa4?" → compare_moves with moves_san=["Qe2","Qa4"]
 
+**CRITICAL: MULTI-MOVE COMPARISON RULE (HIGHEST PRIORITY)**
+- If the user is discussing the CURRENT POSITION and mentions 2+ candidate SAN moves in the same question
+  (examples: "A or B", "A vs B", "compare A and B", "why is A stronger than B", "A/B", "between A and B"),
+  then you MUST use `compare_moves` ONCE with `moves_san=[A,B]`.
+  DO NOT call `analyze_move` twice - that is WRONG and inefficient.
+- If the user mentions 3+ candidate moves (e.g., "A, B, or C"):
+  - Ask ONE clarification to pick 2 moves, OR
+  - Default to comparing the first two moves mentioned if the user asked for a quick answer.
+- Examples that MUST use compare_moves:
+  - "why is Qe7 stronger than Qa4" → compare_moves with moves_san=["Qe7","Qa4"]
+  - "Qe2 or Qa4?" → compare_moves with moves_san=["Qe2","Qa4"]
+  - "compare e4 and d4" → compare_moves with moves_san=["e4","d4"]
+  - "should I play Nf3 or Bc4" → compare_moves with moves_san=["Nf3","Bc4"]
+
 **Profile/Review** (fetch user data):
 - "Why am I stuck at 1200?" + username → fetch_and_review_games
 - "Review my games" + username → fetch_and_review_games
@@ -1487,6 +1505,7 @@ Understand the USER'S INTENT, not just their words. "Is this piece doing anythin
 ## Tools Available
 - analyze_position: Deep position analysis
 - analyze_move: Evaluate specific move (needs move_san argument)
+- compare_moves: Compare two candidate moves side-by-side (needs moves_san=[A,B], optional fen, optional depth)
 - review_full_game: Game review (needs PGN)
 - fetch_and_review_games: Profile analysis (needs username, platform)
 - generate_training_session: Create drills
