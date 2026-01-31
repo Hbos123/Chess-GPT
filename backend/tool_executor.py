@@ -815,6 +815,7 @@ class ToolExecutor:
         """Analyze a specific move"""
         move_san = args.get("move_san")
         depth = args.get("depth", 14)  # Fast for overview - deep analysis on-demand
+        pv_plies = int(args.get("pv_plies") or 8)  # internal/undocumented; safe default
         
         # If move_san is missing but we have context.last_move, use it
         if not move_san and context:
@@ -911,6 +912,166 @@ class ToolExecutor:
         except Exception as e:
             return {"error": f"Error calling analyze_move endpoint: {str(e)}"}
 
+        # --------------------------------------------------------------------
+        # NEW: Deterministic move_facts (analogous to compare_moves candidates)
+        # --------------------------------------------------------------------
+        move_facts = None
+        try:
+            # Only compute if engine_queue is available
+            if self.engine_queue is not None:
+                from material_calculator import calculate_material_balance
+                from fen_analyzer import analyze_fen
+
+                def _bucket(pos_for_mover: int, mat_for_mover: int) -> str:
+                    pos_up = pos_for_mover >= 0
+                    mat_up = mat_for_mover >= 0
+                    if pos_up and mat_up:
+                        return "position_up_material_up"
+                    if pos_up and not mat_up:
+                        return "position_up_material_down"
+                    if (not pos_up) and mat_up:
+                        return "position_down_material_up"
+                    return "position_down_material_down"
+
+                def _tag_names(tags: Any) -> list[str]:
+                    out: list[str] = []
+                    if not isinstance(tags, list):
+                        return out
+                    for t in tags:
+                        if isinstance(t, dict):
+                            name = t.get("tag_name") or t.get("tag") or t.get("name")
+                            if isinstance(name, str) and name.strip():
+                                out.append(name.strip())
+                        elif isinstance(t, str) and t.strip():
+                            out.append(t.strip())
+                    return out
+
+                def _select_significant(tags: list[str], limit: int) -> list[str]:
+                    # Deterministic: prefer non-geometry tags first
+                    geo_prefixes = ("tag.diagonal.", "tag.file.")
+                    non_geo = sorted([t for t in tags if isinstance(t, str) and t and not t.startswith(geo_prefixes)])
+                    geo = sorted([t for t in tags if isinstance(t, str) and t and t.startswith(geo_prefixes)])
+                    merged = non_geo + geo
+                    return merged[: max(0, int(limit))]
+
+                async def _eval_cp_white(f: str, d: int) -> int:
+                    b = chess.Board(f)
+                    info = await self.engine_queue.enqueue(  # type: ignore[union-attr]
+                        self.engine_queue.engine.analyse,
+                        b,
+                        chess.engine.Limit(depth=int(d)),
+                    )
+                    sc = info.get("score")
+                    if not sc:
+                        return 0
+                    try:
+                        if sc.is_mate():
+                            m = sc.pov(chess.WHITE).mate()
+                            return 10000 if (m or 0) > 0 else -10000
+                    except Exception:
+                        pass
+                    try:
+                        v = sc.pov(chess.WHITE).score(mate_score=10000)
+                        return int(v or 0)
+                    except Exception:
+                        return 0
+
+                b0 = chess.Board(fen)
+                mover_is_white = bool(b0.turn == chess.WHITE)
+
+                # Start eval/material/positional (White POV)
+                eval_start_cp_white = await _eval_cp_white(fen, int(depth))
+                material_start_cp = int(calculate_material_balance(b0))
+                positional_start_cp = int(eval_start_cp_white) - int(material_start_cp)
+
+                # Analyze PV after playing the move
+                b1 = b0.copy()
+                mv1 = b1.parse_san(move_san)
+                if mv1 in b1.legal_moves:
+                    b1.push(mv1)
+
+                    info_after = await self.engine_queue.enqueue(  # type: ignore[union-attr]
+                        self.engine_queue.engine.analyse,
+                        b1,
+                        chess.engine.Limit(depth=int(depth)),
+                    )
+                    pv_moves = info_after.get("pv") or []
+
+                    pv_san: list[str] = []
+                    pv_board = b1.copy()
+                    for m in pv_moves[: max(0, pv_plies)]:
+                        if pv_board.is_game_over():
+                            break
+                        try:
+                            pv_san.append(pv_board.san(m))
+                        except Exception:
+                            pv_san.append(m.uci())
+                        try:
+                            pv_board.push(m)
+                        except Exception:
+                            break
+
+                    pv_end_fen = pv_board.fen()
+
+                    # End eval/material/positional (White POV)
+                    eval_end_cp_white = await _eval_cp_white(pv_end_fen, max(10, min(int(depth), 16)))
+                    material_end_cp = int(calculate_material_balance(chess.Board(pv_end_fen)))
+                    positional_end_cp = int(eval_end_cp_white) - int(material_end_cp)
+
+                    eval_delta = int(eval_end_cp_white) - int(eval_start_cp_white)
+                    mat_delta = int(material_end_cp) - int(material_start_cp)
+                    pos_delta = int(positional_end_cp) - int(positional_start_cp)
+
+                    eval_for_mover = eval_delta if mover_is_white else -eval_delta
+                    mat_for_mover = mat_delta if mover_is_white else -mat_delta
+                    pos_for_mover = pos_delta if mover_is_white else -pos_delta
+                    bucket = _bucket(pos_for_mover, mat_for_mover)
+
+                    # Tags start vs PV end
+                    start_af = await analyze_fen(fen, self.engine_queue, depth=min(12, int(depth)))  # type: ignore[arg-type]
+                    end_af = await analyze_fen(pv_end_fen, self.engine_queue, depth=min(12, int(depth)))  # type: ignore[arg-type]
+                    start_set = set(_tag_names((start_af or {}).get("tags")))
+                    end_set = set(_tag_names((end_af or {}).get("tags")))
+                    gained_all = sorted(list(end_set - start_set))
+                    lost_all = sorted(list(start_set - end_set))
+                    gained_sig = _select_significant(gained_all, 4)
+                    lost_sig = _select_significant(lost_all, 2)
+
+                    move_facts = {
+                        "pv_san": pv_san,
+                        "pv_end_fen": pv_end_fen,
+                        "evidence_line_san": (move_san + (" " + " ".join(pv_san) if pv_san else "")).strip(),
+                        "rebuttal_line_san": (move_san + (" " + pv_san[0] if pv_san else "")).strip(),
+                        "eval_breakdown": {
+                            "start": {
+                                "eval_cp_white": int(eval_start_cp_white),
+                                "material_cp": int(material_start_cp),
+                                "positional_cp": int(positional_start_cp),
+                            },
+                            "end": {
+                                "eval_cp_white": int(eval_end_cp_white),
+                                "material_cp": int(material_end_cp),
+                                "positional_cp": int(positional_end_cp),
+                            },
+                            "delta": {
+                                "eval_cp_white": int(eval_delta),
+                                "material_cp": int(mat_delta),
+                                "positional_cp": int(pos_delta),
+                                "for_mover": {
+                                    "eval_cp": int(eval_for_mover),
+                                    "material_cp": int(mat_for_mover),
+                                    "positional_cp": int(pos_for_mover),
+                                },
+                            },
+                        },
+                        "bucket": bucket,
+                        "significant_tag_delta": {"gained": gained_sig, "lost": lost_sig},
+                        "tag_delta_all": {"gained": gained_all, "lost": lost_all},
+                    }
+        except Exception:
+            # Non-fatal; keep move_facts None.
+            move_facts = None
+
         # Normalize to the tool’s expected compact shape (keep keys stable for downstream formatters)
         pmr = (result or {}).get("playedMoveReport") or {}
         return {
@@ -924,6 +1085,7 @@ class ToolExecutor:
             "eval_after": int(pmr.get("eval_after_cp") or result.get("eval_after_cp") or 0),
             "alternatives": [],
             "endpoint_response": result,
+            "move_facts": move_facts,
         }
 
     async def _tree_search(self, args: Dict, context: Dict) -> Dict:
@@ -3928,6 +4090,8 @@ Write your response now based on the game data provided."""
                 },
                 "best_move": best_move if not is_best else None,
                 "claim_line": claim_line,  # Significant tag deltas with PV for citation
+                # NEW: Deterministic PV + eval/material/positional breakdown (analogous to compare_moves candidates)
+                "move_facts": result.get("move_facts"),
                 "opening": {
                     "name": opening_name,
                     "is_theory": is_theory
