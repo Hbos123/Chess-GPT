@@ -96,13 +96,16 @@ Move comparison mode (MANDATORY when facts.move_compare exists):
 - Sentence 1: State which move is better (use facts.move_compare.winner).
 - Sentence 2: Quote the winner’s evidence line EXACTLY from:
   - facts.move_compare.candidates[i].evidence_line_san
-  and tie the "why" ONLY to the tag deltas shown in:
-  - candidate.tag_delta.summary and/or candidate.tag_delta.tags_gained/tags_lost (use at most 1–2).
+  Then explain the quantitative tradeoff using ONLY:
+  - candidate.eval_breakdown.delta.for_mover (eval/material/positional) AND candidate.bucket
+  and justify the POSITIONAL part using ONLY:
+  - candidate.significant_tag_delta.gained/lost (use at most 1–2 tags).
 - Sentence 3 (if there is a loser): Quote the loser’s rebuttal line EXACTLY from:
   - facts.move_compare.candidates[i].rebuttal_line_san
-  and connect it ONLY to the loser’s tag deltas (again at most 1–2).
-- Do NOT add any other moves or variations beyond those quoted evidence/rebuttal lines.
-- Do NOT add generic strategic prose unless it is explicitly supported by candidate.tag_delta.summary or tags_gained/tags_lost.
+  Then explain the loser’s tradeoff using ONLY its eval_breakdown/bucket and 1–2 significant_tag_delta tags.
+- DO NOT add any other moves or variations beyond those quoted evidence/rebuttal lines.
+- DO NOT claim a capture/threat/pin/fork unless it is explicitly supported by a tag in significant_tag_delta.
+- DO NOT use generic strategic prose unless it is explicitly supported by significant_tag_delta tags.
 
 Eval breakdown policy (user-visible):
 - Centipawn numbers may be shown if present (e.g., eval_cp), but the *breakdown* must be expressed in words.

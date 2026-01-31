@@ -298,140 +298,350 @@ class ToolExecutor:
         """
         Compare exactly two SAN moves from the same starting position.
 
-        Strong structure output:
-        {
-          "success": true,
-          "fen": "...",
-          "depth": 10,
-          "moves_san": ["Qe2","Qa4"],
-          "winner": "Qe2",
-          "scored": [{"move":"Qe2","score":0,"by":"cp_loss",...}, ...],
-          "candidates": [
-             {"move":"Qe2","cp_loss":0,"tag_delta":{...},"evidence_line_san":"Qe2 ...","rebuttal_line_san":"Qe2 ..."},
-             {"move":"Qa4","cp_loss":80,"tag_delta":{...},"evidence_line_san":"Qa4 ...","rebuttal_line_san":"Qa4 ..."}
-          ]
-        }
+        This is intentionally deterministic and tool-friendly:
+        - Produces PV (SAN), PV end FEN, and eval decomposition (eval/material/positional) at start and PV end.
+        - Classifies each candidate into a material/positional bucket.
+        - Provides "significant" tag deltas (deterministic subset) so the LLM can justify positional claims ONLY via tags.
+        - Detects common FEN/turn mismatch: when a move becomes legal if the side-to-move is flipped.
         """
         import chess
-        from skills.compare import compare_moves as _compare_moves_fn
-        from judges.move_compare_judge import judge_compare_moves as _judge
+        import chess.engine
+        from material_calculator import calculate_material_balance
+        from fen_analyzer import analyze_fen
 
         fen = (args or {}).get("fen") or (context or {}).get("board_state") or (context or {}).get("fen")
         moves_san = (args or {}).get("moves_san")
-        depth = int((args or {}).get("depth") or 10)
+        depth = int((args or {}).get("depth") or 18)
+        pv_plies = int((args or {}).get("pv_plies") or 8)  # internal/undocumented; safe default
 
         if not fen or not isinstance(fen, str):
             return {"error": "compare_moves: missing fen (provide fen or ensure context.fen is available)."}
         if not isinstance(moves_san, list) or len(moves_san) != 2:
             return {"error": "compare_moves: moves_san must be an array of exactly two SAN moves."}
 
-        # Validate legality from the starting position up-front (fail fast, stable errors).
+        def _flip_turn_in_fen(f: str) -> str:
+            parts = str(f or "").split(" ")
+            if len(parts) < 2:
+                return f
+            parts[1] = "b" if parts[1] == "w" else "w"
+            return " ".join(parts)
+
+        def _normalize_san_for_match(s: str) -> str:
+            # Tolerate missing check/mate suffixes (+/#) and annotations (!/?)
+            if not s or not isinstance(s, str):
+                return ""
+            out = s.strip()
+            while out and out[-1] in ["+", "#", "!", "?", "‽"]:
+                out = out[:-1]
+            return out.strip()
+
+        def _parse_san_lenient(board: chess.Board, san: str) -> Optional[chess.Move]:
+            target = _normalize_san_for_match(san)
+            if not target:
+                return None
+            try:
+                return board.parse_san(san)
+            except Exception:
+                pass
+            try:
+                for mv in board.legal_moves:
+                    try:
+                        ms = board.san(mv)
+                    except Exception:
+                        continue
+                    if _normalize_san_for_match(ms) == target:
+                        return mv
+            except Exception:
+                pass
+            return None
+
+        async def _eval_cp_white(f: str, d: int) -> int:
+            b = chess.Board(f)
+            info = await self.engine_queue.enqueue(  # type: ignore[union-attr]
+                self.engine_queue.engine.analyse,
+                b,
+                chess.engine.Limit(depth=int(d)),
+            )
+            sc = info.get("score")
+            if not sc:
+                return 0
+            try:
+                if sc.is_mate():
+                    m = sc.pov(chess.WHITE).mate()
+                    return 10000 if (m or 0) > 0 else -10000
+            except Exception:
+                pass
+            try:
+                v = sc.pov(chess.WHITE).score(mate_score=10000)
+                return int(v or 0)
+            except Exception:
+                return 0
+
+        def _bucket(pos_for_mover: int, mat_for_mover: int) -> str:
+            pos_up = pos_for_mover >= 0
+            mat_up = mat_for_mover >= 0
+            if pos_up and mat_up:
+                return "position_up_material_up"
+            if pos_up and not mat_up:
+                return "position_up_material_down"
+            if (not pos_up) and mat_up:
+                return "position_down_material_up"
+            return "position_down_material_down"
+
+        def _tag_names(tags: Any) -> list[str]:
+            out: list[str] = []
+            if not isinstance(tags, list):
+                return out
+            for t in tags:
+                if isinstance(t, dict):
+                    name = t.get("tag_name") or t.get("tag") or t.get("name")
+                    if isinstance(name, str) and name.strip():
+                        out.append(name.strip())
+                elif isinstance(t, str) and t.strip():
+                    out.append(t.strip())
+            return out
+
+        def _select_significant(tags: list[str], limit: int) -> list[str]:
+            """
+            Deterministic 'significant' selection:
+            - Prefer non-geometry tags first (avoid diagonal/file clutter unless nothing else exists).
+            - Stable sort for determinism.
+            """
+            geo_prefixes = ("tag.diagonal.", "tag.file.")
+            non_geo = sorted([t for t in tags if isinstance(t, str) and t and not t.startswith(geo_prefixes)])
+            geo = sorted([t for t in tags if isinstance(t, str) and t and t.startswith(geo_prefixes)])
+            merged = non_geo + geo
+            return merged[: max(0, int(limit))]
+
+        # Validate FEN.
         try:
             board = chess.Board(fen)
         except Exception as e:
             return {"error": f"compare_moves: invalid FEN: {str(e)}"}
 
+        mover_is_white = bool(board.turn == chess.WHITE)
+
+        # Validate both moves and diagnose turn mismatch where possible.
         cleaned_moves: list[str] = []
         illegal_moves: list[dict] = []
-
         for ms in moves_san:
             mss = (ms or "").strip()
             if not mss:
                 continue
-            try:
-                mv = board.parse_san(mss)
-                if mv not in board.legal_moves:
-                    # Get some legal moves as suggestions
-                    legal_sample = [board.san(m) for m in list(board.legal_moves)[:5]]
-                    illegal_moves.append({
-                        "move": mss,
-                        "reason": "illegal",
-                        "legal_alternatives": legal_sample
-                    })
-                    continue
-            except Exception as e:
-                # Get some legal moves as suggestions
-                legal_sample = [board.san(m) for m in list(board.legal_moves)[:5]]
-                illegal_moves.append({
-                    "move": mss,
-                    "reason": f"parse_error: {str(e)[:80]}",
-                    "legal_alternatives": legal_sample
-                })
+            mv = _parse_san_lenient(board, mss)
+            if mv and mv in board.legal_moves:
+                cleaned_moves.append(mss)
                 continue
-            cleaned_moves.append(mss)
+
+            legal_sample = [board.san(m) for m in list(board.legal_moves)[:5]]
+            turn_mismatch = False
+            try:
+                board_flip = chess.Board(_flip_turn_in_fen(fen))
+                mv_flip = _parse_san_lenient(board_flip, mss)
+                if mv_flip and mv_flip in board_flip.legal_moves:
+                    turn_mismatch = True
+            except Exception:
+                pass
+            illegal_moves.append(
+                {
+                    "move": mss,
+                    "reason": "illegal_or_parse_error",
+                    "turn_mismatch": bool(turn_mismatch),
+                    "expected_side_to_move": ("black" if mover_is_white else "white") if turn_mismatch else None,
+                    "legal_alternatives": legal_sample,
+                }
+            )
 
         if illegal_moves:
-            # Build a helpful error message
             error_parts = [f"compare_moves: {len(illegal_moves)} illegal move(s):"]
             for im in illegal_moves:
                 error_parts.append(f"  - {im['move']}: {im['reason']}")
-                if im.get('legal_alternatives'):
+                if im.get("turn_mismatch"):
+                    error_parts.append(
+                        f"    Note: this move becomes legal if it is {im.get('expected_side_to_move')} to move (possible FEN/turn mismatch)."
+                    )
+                if im.get("legal_alternatives"):
                     error_parts.append(f"    Legal alternatives: {', '.join(im['legal_alternatives'][:3])}")
             return {"error": "\n".join(error_parts), "illegal_moves": illegal_moves}
 
         if len(cleaned_moves) != 2:
             return {"error": "compare_moves: need exactly two non-empty SAN moves."}
 
-        comp = await _compare_moves_fn(tool_executor=self, context=(context or {}), fen=fen, moves_san=cleaned_moves, depth=depth)
-        judged = _judge(comp)
+        # Start eval/material/positional decomposition (White POV).
+        eval_start_cp_white = await _eval_cp_white(fen, depth)
+        material_start_cp = int(calculate_material_balance(board))
+        positional_start_cp = int(eval_start_cp_white) - int(material_start_cp)
 
-        def _pv_from_endpoint(ep: Dict[str, Any]) -> list[str]:
-            try:
-                analysis = (ep or {}).get("analysis") or {}
-                af_played = analysis.get("af_played") or {}
-                cands = af_played.get("candidate_moves") or []
-                if not cands:
-                    return []
-                pv = cands[0].get("pv_san")
-                if isinstance(pv, list):
-                    return [x.strip() for x in pv if isinstance(x, str) and x.strip()][:6]
-                if isinstance(pv, str):
-                    return [x for x in pv.split() if x.strip()][:6]
-            except Exception:
-                pass
-            return []
+        # Best move + eval (White POV) used for cp_loss.
+        best_move_san = ""
+        best_eval_cp_white = eval_start_cp_white
+        try:
+            info_best = await self.engine_queue.enqueue(  # type: ignore[union-attr]
+                self.engine_queue.engine.analyse,
+                board,
+                chess.engine.Limit(depth=int(depth)),
+            )
+            pv_best = info_best.get("pv") or []
+            if pv_best:
+                try:
+                    best_move_san = board.san(pv_best[0])
+                except Exception:
+                    best_move_san = pv_best[0].uci()
+            sc = info_best.get("score")
+            if sc:
+                best_eval_cp_white = int(sc.pov(chess.WHITE).score(mate_score=10000) or 0)
+        except Exception:
+            pass
 
-        def _tag_delta_from_endpoint(ep: Dict[str, Any]) -> Dict[str, Any]:
-            d = (ep or {}).get("played_move_description") or {}
-            return {
-                "summary": (d.get("summary") or "").strip(),
-                "tags_gained": (d.get("tags_gained") or [])[:2],
-                "tags_lost": (d.get("tags_lost") or [])[:2],
-                "theme_changes": (d.get("theme_changes") or {}),
-            }
+        # Start tags once (for tag deltas).
+        start_af: Optional[Dict[str, Any]] = None
+        try:
+            start_af = await analyze_fen(fen, self.engine_queue, depth=min(12, depth))  # type: ignore[arg-type]
+        except Exception:
+            start_af = None
+        start_tag_names = _tag_names((start_af or {}).get("tags")) if isinstance(start_af, dict) else []
+        start_tag_set = set(start_tag_names)
 
         candidates: list[Dict[str, Any]] = []
-        for r in (comp.get("moves") or []):
-            if not isinstance(r, dict):
-                continue
-            mv = (r.get("move") or r.get("move_san") or r.get("moveSAN") or "").strip()
-            ep = r.get("endpoint_response") if isinstance(r.get("endpoint_response"), dict) else {}
-            pv = _pv_from_endpoint(ep)
-            evidence_line = (mv + (" " + " ".join(pv) if pv else "")).strip()
-            rebuttal_line = (mv + (" " + pv[0] if pv else "")).strip()
+        scored: list[Dict[str, Any]] = []
+
+        for mv_san in cleaned_moves:
+            # Analyze after playing mv_san; extract PV and PV end.
+            b_after = chess.Board(fen)
+            mv_obj = _parse_san_lenient(b_after, mv_san)
+            if not mv_obj or mv_obj not in b_after.legal_moves:
+                return {"error": f"compare_moves: internal error - move became illegal after validation: {mv_san}"}
+            b_after.push(mv_obj)
+
+            info_after = await self.engine_queue.enqueue(  # type: ignore[union-attr]
+                self.engine_queue.engine.analyse,
+                b_after,
+                chess.engine.Limit(depth=int(depth)),
+            )
+            sc_after = info_after.get("score")
+            eval_after_cp_white = int(sc_after.pov(chess.WHITE).score(mate_score=10000) or 0) if sc_after else 0
+
+            pv_moves = info_after.get("pv") or []
+            pv_san: list[str] = []
+            pv_board = b_after.copy()
+            for m in pv_moves[: max(0, int(pv_plies))]:
+                if pv_board.is_game_over():
+                    break
+                try:
+                    pv_san.append(pv_board.san(m))
+                except Exception:
+                    pv_san.append(m.uci())
+                try:
+                    pv_board.push(m)
+                except Exception:
+                    break
+            pv_end_fen = pv_board.fen()
+
+            # Evaluate PV end (White POV).
+            eval_end_cp_white = await _eval_cp_white(pv_end_fen, max(10, min(int(depth), 16)))
+
+            # Decompose start/end and deltas.
+            material_end_cp = int(calculate_material_balance(chess.Board(pv_end_fen)))
+            positional_end_cp = int(eval_end_cp_white) - int(material_end_cp)
+
+            eval_delta = int(eval_end_cp_white) - int(eval_start_cp_white)
+            mat_delta = int(material_end_cp) - int(material_start_cp)
+            pos_delta = int(positional_end_cp) - int(positional_start_cp)
+
+            eval_for_mover = eval_delta if mover_is_white else -eval_delta
+            mat_for_mover = mat_delta if mover_is_white else -mat_delta
+            pos_for_mover = pos_delta if mover_is_white else -pos_delta
+
+            bucket = _bucket(pos_for_mover, mat_for_mover)
+
+            # Tag deltas from start -> PV end.
+            end_af: Optional[Dict[str, Any]] = None
+            try:
+                end_af = await analyze_fen(pv_end_fen, self.engine_queue, depth=min(12, depth))  # type: ignore[arg-type]
+            except Exception:
+                end_af = None
+            end_tag_names = _tag_names((end_af or {}).get("tags")) if isinstance(end_af, dict) else []
+            end_tag_set = set(end_tag_names)
+
+            gained_all = sorted(list(end_tag_set - start_tag_set))
+            lost_all = sorted(list(start_tag_set - end_tag_set))
+            gained_sig = _select_significant(gained_all, limit=4)
+            lost_sig = _select_significant(lost_all, limit=2)
+
+            # cp_loss relative to best move (deterministic, White POV).
+            if mover_is_white:
+                cp_loss = max(0, int(best_eval_cp_white) - int(eval_after_cp_white))
+            else:
+                cp_loss = max(0, int(eval_after_cp_white) - int(best_eval_cp_white))
+
+            evidence_line = (mv_san + (" " + " ".join(pv_san) if pv_san else "")).strip()
+            rebuttal_line = (mv_san + (" " + pv_san[0] if pv_san else "")).strip()
 
             candidates.append(
                 {
-                    "move": mv,
-                    "cp_loss": r.get("cp_loss"),
-                    "quality": r.get("quality"),
-                    "eval_before": r.get("eval_before"),
-                    "eval_after": r.get("eval_after"),
-                    "tag_delta": _tag_delta_from_endpoint(ep),
+                    "move": mv_san,
+                    "cp_loss": int(cp_loss),
+                    "pv_san": pv_san,
+                    "pv_end_fen": pv_end_fen,
+                    "eval_breakdown": {
+                        "start": {
+                            "eval_cp_white": int(eval_start_cp_white),
+                            "material_cp": int(material_start_cp),
+                            "positional_cp": int(positional_start_cp),
+                        },
+                        "end": {
+                            "eval_cp_white": int(eval_end_cp_white),
+                            "material_cp": int(material_end_cp),
+                            "positional_cp": int(positional_end_cp),
+                        },
+                        "delta": {
+                            "eval_cp_white": int(eval_delta),
+                            "material_cp": int(mat_delta),
+                            "positional_cp": int(pos_delta),
+                            "for_mover": {
+                                "eval_cp": int(eval_for_mover),
+                                "material_cp": int(mat_for_mover),
+                                "positional_cp": int(pos_for_mover),
+                            },
+                        },
+                    },
+                    "bucket": bucket,
+                    "significant_tag_delta": {"gained": gained_sig, "lost": lost_sig},
+                    "tag_delta_all": {"gained": gained_all, "lost": lost_all},
                     "evidence_line_san": evidence_line,
                     "rebuttal_line_san": rebuttal_line,
                 }
             )
 
+            scored.append(
+                {
+                    "move": mv_san,
+                    "score": int(eval_for_mover),
+                    "by": "pv_end_eval_delta_for_mover",
+                    "bucket": bucket,
+                    "cp_loss": int(cp_loss),
+                }
+            )
+
+        # Winner selection: higher PV-end delta-for-mover wins; tie-breaker lower cp_loss.
+        def _winner_key(x: Dict[str, Any]) -> tuple:
+            return (int(x.get("score") or 0), -int(x.get("cp_loss") or 0))
+
+        scored_sorted = sorted(scored, key=_winner_key, reverse=True)
+        winner = scored_sorted[0]["move"] if scored_sorted else cleaned_moves[0]
+
         return {
             "success": True,
             "fen": fen,
-            "depth": depth,
+            "depth": int(depth),
+            "pv_plies": int(pv_plies),
             "moves_san": cleaned_moves,
-            "winner": judged.get("winner"),
-            "scored": judged.get("scored", []),
-            "candidates": candidates[:2],
-            "raw_compare": comp,
+            "side_to_move": "white" if mover_is_white else "black",
+            "best_move_san": best_move_san,
+            "best_eval_cp_white": int(best_eval_cp_white),
+            "winner": winner,
+            "scored": scored_sorted,
+            "candidates": candidates,
         }
     
     def _track_tool_call(self, user_id: Optional[str], ip_address: Optional[str], tool_name: str, success: bool):
