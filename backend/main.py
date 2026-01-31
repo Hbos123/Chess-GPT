@@ -10035,6 +10035,28 @@ async def save_game_review_endpoint(request: SaveGameReviewRequest):
         if not game_id:
             raise HTTPException(status_code=500, detail="Failed to save game review")
         
+        # Update detailed analytics cache after saving game (non-blocking, non-fatal)
+        async def update_detailed_analytics_cache():
+            try:
+                # Fetch 60 most recent games for detailed analytics
+                games = supabase_client.get_active_reviewed_games(request.user_id, limit=60, include_full_review=True)
+                if not games:
+                    return
+                
+                from profile_analytics.detailed_analytics import DetailedAnalyticsAggregator
+                aggregator = DetailedAnalyticsAggregator()
+                analytics_data = aggregator.aggregate(games)
+                
+                # Save to cache
+                supabase_client._save_detailed_analytics_cache(request.user_id, analytics_data, len(games))
+                print(f"   ✅ [SAVE_GAME_REVIEW] Updated detailed analytics cache for user {request.user_id}")
+            except Exception as e:
+                print(f"   ⚠️ [SAVE_GAME_REVIEW] Failed to update detailed analytics cache: {e}")
+                # Non-fatal - game is still saved
+        
+        # Update cache in background (don't block response)
+        asyncio.create_task(update_detailed_analytics_cache())
+        
         return {"success": True, "game_id": game_id}
     except Exception as e:
         print(f"❌ Error saving game review: {e}")
