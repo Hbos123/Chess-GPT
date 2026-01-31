@@ -3936,7 +3936,8 @@ Write your response now based on the game data provided."""
             }
             
             # Return as JSON - LLM will format based on system_prompt_additions
-            import json
+            # NOTE: do NOT import json inside this function; it makes `json` a local
+            # variable and can trigger UnboundLocalError on other branches.
             return json.dumps(formatted_data, indent=2)
         
         else:
