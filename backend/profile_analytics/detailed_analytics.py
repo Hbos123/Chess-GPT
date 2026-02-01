@@ -26,8 +26,30 @@ class DetailedAnalyticsAggregator:
         """
         if not games:
             return self._empty_analytics()
-        
+
+        # Meta diagnostics for partial data (mid-launch upgrades, compressed games, etc.)
+        games_total = len(games)
+        games_with_ply = 0
+        games_compact = 0
+        games_missing_review = 0
+        for g in games:
+            gr = g.get("game_review", {})
+            if not gr or not isinstance(gr, dict):
+                games_missing_review += 1
+                continue
+            ply = gr.get("ply_records", [])
+            if isinstance(ply, list) and len(ply) > 0:
+                games_with_ply += 1
+            if gr.get("_stored") == "compact":
+                games_compact += 1
+
         return {
+            "_meta": {
+                "games_total": games_total,
+                "games_with_ply_records": games_with_ply,
+                "games_missing_game_review": games_missing_review,
+                "games_storage_compact": games_compact,
+            },
             "phase_analytics": self._aggregate_phases(games),
             "opening_detailed": self._aggregate_openings(games),
             "piece_accuracy_detailed": self._aggregate_pieces(games),

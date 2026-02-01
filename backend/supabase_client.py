@@ -915,6 +915,64 @@ class SupabaseClient:
     def save_game_review(self, user_id: str, game_data: Dict) -> Optional[str]:
         """Save complete game review - direct insert instead of RPC for backend context"""
         try:
+            def _compact_game_review_for_analytics(full_review: Any) -> Dict[str, Any]:
+                """
+                Build a compact representation of game_review that is sufficient for
+                DetailedAnalyticsAggregator while keeping payload size low.
+                """
+                if not isinstance(full_review, dict):
+                    return {"_stored": "compact", "_reason": "non_dict_review"}
+
+                meta = full_review.get("metadata") if isinstance(full_review.get("metadata"), dict) else {}
+                stats = full_review.get("stats") if isinstance(full_review.get("stats"), dict) else {}
+
+                # Keep minimal metadata used by aggregators
+                out: Dict[str, Any] = {
+                    "_stored": "compact",
+                    "metadata": {
+                        "player_color": meta.get("player_color"),
+                        "result": meta.get("result"),
+                        "time_control": meta.get("time_control"),
+                    },
+                    "stats": {
+                        "overall_accuracy": stats.get("overall_accuracy"),
+                        "avg_cp_loss": stats.get("avg_cp_loss"),
+                    },
+                }
+
+                # Keep only minimal ply record fields used by DetailedAnalyticsAggregator:
+                # - side_moved, phase, san, accuracy_pct, category, time_spent_s, analyse.tags
+                ply_records = full_review.get("ply_records")
+                compact_ply: list[Dict[str, Any]] = []
+                if isinstance(ply_records, list):
+                    for r in ply_records:
+                        if not isinstance(r, dict):
+                            continue
+                        analyse = r.get("analyse") if isinstance(r.get("analyse"), dict) else {}
+                        tags_raw = analyse.get("tags", [])
+                        tags_out: list[str] = []
+                        if isinstance(tags_raw, list):
+                            for t in tags_raw:
+                                if isinstance(t, str) and t.strip():
+                                    tags_out.append(t.strip())
+                                elif isinstance(t, dict):
+                                    name = t.get("tag_name") or t.get("name") or t.get("tag")
+                                    if isinstance(name, str) and name.strip():
+                                        tags_out.append(name.strip())
+                        compact_ply.append(
+                            {
+                                "side_moved": r.get("side_moved"),
+                                "phase": r.get("phase"),
+                                "san": r.get("san"),
+                                "accuracy_pct": r.get("accuracy_pct", 0),
+                                "category": r.get("category"),
+                                "time_spent_s": r.get("time_spent_s"),
+                                "analyse": {"tags": tags_out},
+                            }
+                        )
+                out["ply_records"] = compact_ply
+                return out
+
             def _normalize_platform(p: Any) -> Optional[str]:
                 if p is None:
                     return None
@@ -968,16 +1026,15 @@ class SupabaseClient:
                 if approx_bytes <= 150_000:
                     insert_data["game_review"] = full_review
                 else:
-                    insert_data["game_review"] = {
-                        "_stored": False,
-                        "_reason": "payload_too_large",
-                        "_approx_bytes": approx_bytes,
-                    }
+                    # NEW: store a compact analytics-focused review instead of a stub.
+                    compact = _compact_game_review_for_analytics(full_review)
+                    compact["_approx_full_bytes"] = approx_bytes
+                    insert_data["game_review"] = compact
                     pgn = insert_data.get("pgn")
                     if isinstance(pgn, str) and len(pgn) > 200_000:
                         insert_data["pgn"] = pgn[:200_000] + "\n\n;[TRUNCATED]"
             except Exception:
-                insert_data["game_review"] = {"_stored": False, "_reason": "size_check_failed"}
+                insert_data["game_review"] = {"_stored": "compact", "_reason": "size_check_failed", "ply_records": []}
 
             
             # Debug: log platform value

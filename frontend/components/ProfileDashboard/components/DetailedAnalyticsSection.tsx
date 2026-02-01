@@ -55,8 +55,9 @@ export default function DetailedAnalyticsSection({
     <div className="tab-section">
       <h2>{title}</h2>
       {loadingDetailed ? (
-        <div style={{ padding: "20px", textAlign: "center", color: "#93c5fd" }}>
-          Loading detailed analytics...
+        <div className="dashboard-loading">
+          <div className="spinner"></div>
+          <p>Loading detailed analytics...</p>
         </div>
       ) : detailedAnalytics ? (
         <>
