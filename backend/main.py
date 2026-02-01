@@ -8707,6 +8707,15 @@ async def wipe_my_data(req: Request):
     except Exception as e:
         print(f"   ⚠️  Error invalidating cache: {e}")
     
+    # Clear detailed_analytics_cache
+    try:
+        cache_result = supabase_client.client.table("detailed_analytics_cache").select("id").eq("user_id", user_id).execute()
+        if cache_result.data:
+            supabase_client.client.table("detailed_analytics_cache").delete().eq("user_id", user_id).execute()
+            print(f"   ✅ Deleted detailed_analytics_cache")
+    except Exception as e:
+        print(f"   ⚠️  Error deleting detailed_analytics_cache: {e}")
+    
     print(f"\n{'='*80}")
     print(f"✅ USER DATA WIPE COMPLETE")
     print(f"{'='*80}\n")
@@ -8714,6 +8723,114 @@ async def wipe_my_data(req: Request):
     return {
         "success": True,
         "user_id": user_id,
+        "deleted": counts,
+        "message": "All user data wiped. Games will be re-analyzed on next fetch."
+    }
+
+
+@app.post("/admin/wipe-all-users-data")
+async def wipe_all_users_data(req: Request):
+    """
+    🗑️ ADMIN ENDPOINT: Wipe all data for ALL users (nuclear option).
+    
+    Deletes:
+    - All games
+    - All personal_stats
+    - All positions
+    - All habit_trends
+    - All detailed_analytics_cache
+    - All pattern_snapshots
+    
+    Requires BACKEND_SHARED_SECRET header.
+    """
+    if not supabase_client:
+        raise HTTPException(status_code=503, detail="Supabase client not initialized")
+    
+    # Require secret for this dangerous operation
+    if _BACKEND_SHARED_SECRET:
+        got = (req.headers.get("x-chesster-secret") or "").strip()
+        if got != _BACKEND_SHARED_SECRET:
+            raise HTTPException(status_code=403, detail="Secret required for wipe-all operation")
+    
+    print(f"\n{'='*80}")
+    print(f"🗑️  NUCLEAR WIPE: DELETING ALL USER DATA")
+    print(f"{'='*80}")
+    
+    counts = {
+        "games": 0,
+        "personal_stats": 0,
+        "positions": 0,
+        "habit_trends": 0,
+        "pattern_snapshots": 0,
+        "detailed_analytics_cache": 0
+    }
+    
+    # Clear all games
+    try:
+        games_result = supabase_client.client.table("games").select("id").execute()
+        if games_result.data:
+            counts["games"] = len(games_result.data)
+            supabase_client.client.table("games").delete().neq("id", "00000000-0000-0000-0000-000000000000").execute()
+            print(f"   ✅ Deleted {counts['games']} games")
+    except Exception as e:
+        print(f"   ⚠️  Error deleting games: {e}")
+    
+    # Clear all personal_stats
+    try:
+        stats_result = supabase_client.client.table("personal_stats").select("id").execute()
+        if stats_result.data:
+            counts["personal_stats"] = len(stats_result.data)
+            supabase_client.client.table("personal_stats").delete().neq("id", "00000000-0000-0000-0000-000000000000").execute()
+            print(f"   ✅ Deleted {counts['personal_stats']} personal_stats records")
+    except Exception as e:
+        print(f"   ⚠️  Error deleting personal_stats: {e}")
+    
+    # Clear all positions
+    try:
+        positions_result = supabase_client.client.table("positions").select("id").execute()
+        if positions_result.data:
+            counts["positions"] = len(positions_result.data)
+            supabase_client.client.table("positions").delete().neq("id", "00000000-0000-0000-0000-000000000000").execute()
+            print(f"   ✅ Deleted {counts['positions']} positions")
+    except Exception as e:
+        print(f"   ⚠️  Error deleting positions: {e}")
+    
+    # Clear all habit_trends
+    try:
+        trends_result = supabase_client.client.table("habit_trends").select("id").execute()
+        if trends_result.data:
+            counts["habit_trends"] = len(trends_result.data)
+            supabase_client.client.table("habit_trends").delete().neq("id", "00000000-0000-0000-0000-000000000000").execute()
+            print(f"   ✅ Deleted {counts['habit_trends']} habit_trends records")
+    except Exception as e:
+        print(f"   ⚠️  Error deleting habit_trends: {e}")
+    
+    # Clear all pattern snapshots
+    try:
+        snapshots_result = supabase_client.client.table("daily_pattern_snapshots").select("id").execute()
+        if snapshots_result.data:
+            counts["pattern_snapshots"] = len(snapshots_result.data)
+            supabase_client.client.table("daily_pattern_snapshots").delete().neq("id", "00000000-0000-0000-0000-000000000000").execute()
+            print(f"   ✅ Deleted {counts['pattern_snapshots']} pattern snapshots")
+    except Exception as e:
+        print(f"   ⚠️  Error deleting pattern snapshots: {e}")
+    
+    # Clear all detailed_analytics_cache
+    try:
+        cache_result = supabase_client.client.table("detailed_analytics_cache").select("id").execute()
+        if cache_result.data:
+            counts["detailed_analytics_cache"] = len(cache_result.data)
+            supabase_client.client.table("detailed_analytics_cache").delete().neq("id", "00000000-0000-0000-0000-000000000000").execute()
+            print(f"   ✅ Deleted {counts['detailed_analytics_cache']} detailed_analytics_cache records")
+    except Exception as e:
+        print(f"   ⚠️  Error deleting detailed_analytics_cache: {e}")
+    
+    print(f"\n{'='*80}")
+    print(f"✅ ALL USER DATA WIPE COMPLETE")
+    print(f"{'='*80}\n")
+    
+    return {
+        "success": True,
         "deleted": counts,
         "message": "All user data wiped. Games will be re-analyzed on next fetch."
     }
