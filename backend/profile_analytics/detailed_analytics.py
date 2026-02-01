@@ -31,12 +31,17 @@ class DetailedAnalyticsAggregator:
         games_total = len(games)
         games_with_ply = 0
         games_compact = 0
+        games_stub_old = 0  # Old format: {"_stored": False}
         games_missing_review = 0
         for g in games:
             gr = g.get("game_review", {})
             if not gr or not isinstance(gr, dict):
                 games_missing_review += 1
                 continue
+            # Detect old stub format (pre-compact-review fix)
+            if gr.get("_stored") is False or (isinstance(gr.get("_stored"), bool) and not gr.get("_stored")):
+                games_stub_old += 1
+                continue  # Skip old stubs - they have no ply_records
             ply = gr.get("ply_records", [])
             if isinstance(ply, list) and len(ply) > 0:
                 games_with_ply += 1
@@ -49,6 +54,7 @@ class DetailedAnalyticsAggregator:
                 "games_with_ply_records": games_with_ply,
                 "games_missing_game_review": games_missing_review,
                 "games_storage_compact": games_compact,
+                "games_stub_old_format": games_stub_old,  # Games with old {"_stored": False} stub
             },
             "phase_analytics": self._aggregate_phases(games),
             "opening_detailed": self._aggregate_openings(games),

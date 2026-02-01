@@ -61,6 +61,42 @@ export default function DetailedAnalyticsSection({
         </div>
       ) : detailedAnalytics ? (
         <>
+          {/* Show warning if most games are missing move data (old stub format) */}
+          {detailedAnalytics._meta && (
+            (() => {
+              const meta = detailedAnalytics._meta;
+              const total = meta.games_total || 0;
+              const withPly = meta.games_with_ply_records || 0;
+              const stubOld = meta.games_stub_old_format || 0;
+              const missing = meta.games_missing_game_review || 0;
+              const usableGames = withPly;
+              const unusableGames = stubOld + missing;
+              
+              // Show warning if less than 50% of games have usable data
+              if (total > 0 && usableGames < total * 0.5) {
+                return (
+                  <div style={{
+                    padding: "16px",
+                    marginBottom: "20px",
+                    background: "rgba(251, 191, 36, 0.1)",
+                    border: "1px solid rgba(251, 191, 36, 0.3)",
+                    borderRadius: "8px",
+                    color: "#fbbf24"
+                  }}>
+                    <div style={{ fontSize: "14px", fontWeight: 600, marginBottom: "4px" }}>
+                      ⚠️ Limited Analytics Data
+                    </div>
+                    <div style={{ fontSize: "12px", color: "#cbd5e1" }}>
+                      {usableGames} of {total} games have full move data. {unusableGames > 0 && `${unusableGames} games are missing move records (older format).`} 
+                      {" "}New games will include complete analytics.
+                    </div>
+                  </div>
+                );
+              }
+              return null;
+            })()
+          )}
+
           {detailedAnalytics.phase_analytics && (
             <PhasePerformanceCard phaseAnalytics={detailedAnalytics.phase_analytics} />
           )}

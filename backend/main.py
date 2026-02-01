@@ -8357,6 +8357,60 @@ async def check_all_accounts():
     return results
 
 
+@app.post("/admin/clear-detailed-analytics-cache")
+async def clear_detailed_analytics_cache(user_id: Optional[str] = None):
+    """
+    Admin endpoint to clear detailed analytics cache for all users or a specific user.
+    Useful when source data changes (e.g., after fixing stub reviews).
+    """
+    if not supabase_client:
+        raise HTTPException(status_code=503, detail="Supabase client not initialized")
+    
+    try:
+        def clear_single_user(uid: str) -> Dict[str, Any]:
+            """Clear detailed analytics cache for a single user."""
+            try:
+                supabase_client.client.table("detailed_analytics_cache")\
+                    .delete()\
+                    .eq("user_id", uid)\
+                    .execute()
+                return {"user_id": uid, "status": "cleared"}
+            except Exception as e:
+                return {"user_id": uid, "status": "error", "error": str(e)}
+        
+        if user_id:
+            result = await asyncio.to_thread(clear_single_user, user_id)
+            return {"results": [result], "total": 1}
+        else:
+            # Clear all users
+            def get_all_cached_users():
+                result = supabase_client.client.table("detailed_analytics_cache")\
+                    .select("user_id")\
+                    .execute()
+                return list(set([r.get("user_id") for r in (result.data or []) if r.get("user_id")]))
+            
+            user_ids = await asyncio.to_thread(get_all_cached_users)
+            print(f"🗑️ [CLEAR_CACHE] Found {len(user_ids)} users with cached analytics")
+            
+            results = []
+            for i, uid in enumerate(user_ids, 1):
+                print(f"[{i}/{len(user_ids)}] Clearing cache for user {uid[:8]}...")
+                result = await asyncio.to_thread(clear_single_user, uid)
+                results.append(result)
+            
+            return {
+                "results": results,
+                "total": len(user_ids),
+                "cleared": len([r for r in results if r["status"] == "cleared"])
+            }
+    
+    except Exception as e:
+        import traceback
+        error_trace = traceback.format_exc()
+        print(f"❌ [CLEAR_CACHE] Error: {e}\n{error_trace}")
+        raise HTTPException(status_code=500, detail=f"Clear cache failed: {str(e)}")
+
+
 @app.post("/admin/backfill-detailed-analytics")
 async def backfill_detailed_analytics(user_id: Optional[str] = None):
     """
