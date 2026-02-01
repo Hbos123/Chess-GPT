@@ -63,6 +63,7 @@ import { fetchAndReviewGamesFrontend } from "@/lib/gameReviewOrchestrator";
 import { wipeMyData } from "@/lib/wipeUserData";
 import { resetMyTokens } from "@/lib/resetTokens";
 import { updateMySubscription } from "@/lib/updateSubscription";
+import { resetDetailedAnalytics } from "@/lib/resetDetailedAnalytics";
 import "../../styles/chatUI.css";
 import "../styles.css";
 
@@ -234,7 +235,8 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
       (window as any).wipeMyData = wipeMyData;
       (window as any).resetMyTokens = resetMyTokens;
       (window as any).updateMySubscription = updateMySubscription;
-      console.log('💡 Console helpers loaded! Type: await wipeMyData(), await resetMyTokens(), or await updateMySubscription("lite")');
+      (window as any).resetDetailedAnalytics = resetDetailedAnalytics;
+      console.log('💡 Console helpers loaded! Type: await wipeMyData(), await resetMyTokens(), await updateMySubscription("lite"), or await resetDetailedAnalytics()');
     }
   }, []);
   
