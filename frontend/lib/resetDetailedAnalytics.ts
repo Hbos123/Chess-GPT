@@ -36,10 +36,10 @@ export async function resetDetailedAnalytics(userId?: string): Promise<void> {
     
     // Step 1: Clear the cache
     console.log('   Step 1: Clearing detailed analytics cache...');
-    const clearResponse = await fetch(`${backendBase}/admin/clear-detailed-analytics-cache`, {
+    const clearUrl = `${backendBase}/admin/clear-detailed-analytics-cache${userId ? `?user_id=${userId}` : ''}`;
+    const clearResponse = await fetch(clearUrl, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ user_id: userId })
+      headers: { 'Content-Type': 'application/json' }
     });
 
     if (!clearResponse.ok) {
