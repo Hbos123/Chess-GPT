@@ -233,6 +233,20 @@ class SupabaseClient:
                 "tier": {"id": "unpaid", "name": "Unpaid", "daily_messages": 2, "daily_tokens": 20000},
             }
 
+    def get_subscription_overview_cached_only(self, user_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Return subscription overview ONLY if it's already in the in-memory cache.
+        This is safe for hot endpoints that must not block on Supabase/network.
+        """
+        import time
+        cache_key = f"sub:{user_id}"
+        with self._cache_lock:
+            if cache_key in self._subscription_cache:
+                data, timestamp = self._subscription_cache[cache_key]
+                if time.time() - timestamp < self._subscription_cache_ttl:
+                    return data
+        return None
+
     def invalidate_subscription_cache(self, user_id: str):
         """Invalidate subscription cache for a user"""
         cache_key = f"sub:{user_id}"

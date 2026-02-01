@@ -20,8 +20,6 @@ export default function DetailedAnalyticsSection({
   const [detailedAnalytics, setDetailedAnalytics] = useState<any>(null); // Start with null instead of dummy data
   const [loadingDetailed, setLoadingDetailed] = useState(true); // Start with loading true
 
-  // TEMPORARY: Comment out fetch - UNCOMMENT AFTER FORMATTING IS DONE
-  /*
   useEffect(() => {
     if (!userId || !backendBase) return;
 
@@ -52,7 +50,6 @@ export default function DetailedAnalyticsSection({
 
     loadDetailedAnalytics();
   }, [userId, backendBase]);
-  */ // END TEMPORARY COMMENT
 
   return (
     <div className="tab-section">

@@ -7740,53 +7740,71 @@ async def profile_overview(user_id: str):
             status_code=503,
         )
 
-    # In-memory only (never touch Supabase here).
+    # In-memory only (never block on Supabase/network here).
     prefs = {}
     highlights = []
     games = []
     status = _default_profile_status()
     try:
         prefs = profile_indexer.load_preferences(user_id) or {}
-        # Fallback to Supabase-stored linked accounts if in-memory prefs are empty.
-        # This happens after restarts or if the in-memory cache is cold.
-        if (not prefs or not prefs.get("accounts")) and supabase_client:
-            try:
-                profile_row = supabase_client.get_or_create_profile(user_id)
-                if profile_row:
-                    linked = profile_row.get("linked_accounts") or []
-                    time_controls = profile_row.get("time_controls") or []
-                    if linked or time_controls:
-                        prefs = {"accounts": linked, "time_controls": time_controls}
-            except Exception:
-                pass
     except Exception:
         prefs = {}
-        if supabase_client:
+
+    # If prefs are missing, warm them in the background from Supabase and persist locally.
+    if (not prefs or not prefs.get("accounts")) and supabase_client:
+        async def _warm_prefs_from_supabase():
             try:
-                profile_row = supabase_client.get_or_create_profile(user_id)
+                def _fetch_profile_row():
+                    return supabase_client.get_or_create_profile(user_id)
+                profile_row = await asyncio.to_thread(_fetch_profile_row)
                 if profile_row:
                     linked = profile_row.get("linked_accounts") or []
                     time_controls = profile_row.get("time_controls") or []
                     if linked or time_controls:
-                        prefs = {"accounts": linked, "time_controls": time_controls}
+                        try:
+                            profile_indexer.save_preferences(user_id, {"accounts": linked, "time_controls": time_controls})
+                        except Exception:
+                            pass
             except Exception:
                 pass
+        try:
+            asyncio.create_task(_warm_prefs_from_supabase())
+        except Exception:
+            pass
     try:
         full_status = profile_indexer.get_status(user_id) or {}
         
         # Get active games count from game window manager
         active_games_count = 0
+        # Avoid blocking on DB here; warm in background if available.
         if supabase_client and game_window_manager:
+            async def _warm_active_games_count():
+                try:
+                    def _count():
+                        return game_window_manager.count_active_games(user_id)
+                    await asyncio.to_thread(_count)
+                except Exception:
+                    pass
             try:
-                active_games_count = game_window_manager.count_active_games(user_id)
+                asyncio.create_task(_warm_active_games_count())
             except Exception:
                 pass
         
         # Get subscription tier to determine target games
         tier_info = {}
         if supabase_client and user_id:
-            tier_info = supabase_client.get_subscription_overview(user_id, use_cache=True)
-            print(f"📊 [PROFILE_OVERVIEW] Tier info for user {user_id}: {tier_info}")
+            # Hot path: cached-only (no network). Warm cache in background if missing.
+            tier_info = supabase_client.get_subscription_overview_cached_only(user_id) or {}
+            if not tier_info:
+                async def _warm_subscription_cache():
+                    try:
+                        await asyncio.to_thread(supabase_client.get_subscription_overview, user_id, True)
+                    except Exception:
+                        pass
+                try:
+                    asyncio.create_task(_warm_subscription_cache())
+                except Exception:
+                    pass
         
         tier = tier_info.get("tier", {}) if tier_info else {}
         max_storage = tier.get("max_games_storage", 60)  # Default to 60 if no tier
@@ -8046,7 +8064,7 @@ async def get_detailed_analytics(user_id: str):
         def fetch_cache():
             try:
                 result = supabase_client.client.table("detailed_analytics_cache")\
-                    .select("*")\
+                    .select("analytics_data,games_count,computed_at")\
                     .eq("user_id", user_id)\
                     .maybe_single()\
                     .execute()
