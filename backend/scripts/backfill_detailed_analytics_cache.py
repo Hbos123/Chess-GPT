@@ -10,14 +10,24 @@ from pathlib import Path
 
 # Add parent directory to path
 backend_dir = Path(__file__).parent.parent
+project_root = backend_dir.parent
 sys.path.insert(0, str(backend_dir))
 
-# Try to load from .env if available
+# Try to load from .env if available (check multiple locations)
 try:
     from dotenv import load_dotenv
+    # Try backend/.env first
     env_file = backend_dir / ".env"
     if env_file.exists():
         load_dotenv(env_file)
+    else:
+        # Try project root .env
+        root_env = project_root / ".env"
+        if root_env.exists():
+            load_dotenv(root_env)
+        else:
+            # Try current directory
+            load_dotenv()
 except ImportError:
     pass
 

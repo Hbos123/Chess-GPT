@@ -8339,6 +8339,76 @@ async def check_all_accounts():
     return results
 
 
+@app.post("/admin/backfill-detailed-analytics")
+async def backfill_detailed_analytics(user_id: Optional[str] = None):
+    """
+    Admin endpoint to backfill detailed analytics cache for all users or a specific user.
+    This runs the same logic as the backfill script but via API.
+    """
+    if not supabase_client:
+        raise HTTPException(status_code=503, detail="Supabase client not initialized")
+    
+    try:
+        from profile_analytics.detailed_analytics import DetailedAnalyticsAggregator
+        
+        def backfill_single_user(uid: str) -> Dict[str, Any]:
+            """Backfill detailed analytics cache for a single user."""
+            try:
+                games = supabase_client.get_active_reviewed_games(uid, limit=60, include_full_review=True)
+                if not games:
+                    return {"user_id": uid, "status": "skipped", "reason": "no_games"}
+                
+                aggregator = DetailedAnalyticsAggregator()
+                analytics_data = aggregator.aggregate(games)
+                
+                if supabase_client._save_detailed_analytics_cache(uid, analytics_data, len(games)):
+                    return {"user_id": uid, "status": "success", "games_count": len(games)}
+                else:
+                    return {"user_id": uid, "status": "failed", "reason": "save_failed"}
+            except Exception as e:
+                return {"user_id": uid, "status": "error", "error": str(e)}
+        
+        if user_id:
+            # Backfill specific user
+            result = await asyncio.to_thread(backfill_single_user, user_id)
+            return {"results": [result], "total": 1, "success": 1 if result["status"] == "success" else 0}
+        else:
+            # Backfill all users
+            def get_all_users():
+                result = supabase_client.client.table("games")\
+                    .select("user_id")\
+                    .not_.is_("analyzed_at", "null")\
+                    .execute()
+                return list(set([g.get("user_id") for g in (result.data or []) if g.get("user_id")]))
+            
+            user_ids = await asyncio.to_thread(get_all_users)
+            print(f"📊 [BACKFILL] Found {len(user_ids)} users with analyzed games")
+            
+            # Process users in batches to avoid blocking
+            results = []
+            success_count = 0
+            
+            for i, uid in enumerate(user_ids, 1):
+                print(f"[{i}/{len(user_ids)}] Processing user {uid[:8]}...")
+                result = await asyncio.to_thread(backfill_single_user, uid)
+                results.append(result)
+                if result["status"] == "success":
+                    success_count += 1
+            
+            return {
+                "results": results,
+                "total": len(user_ids),
+                "success": success_count,
+                "failed": len(user_ids) - success_count
+            }
+    
+    except Exception as e:
+        import traceback
+        error_trace = traceback.format_exc()
+        print(f"❌ [BACKFILL] Error: {e}\n{error_trace}")
+        raise HTTPException(status_code=500, detail=f"Backfill failed: {str(e)}")
+
+
 class WipeUserDataRequest(BaseModel):
     user_id: str
 
