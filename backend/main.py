@@ -8578,10 +8578,14 @@ async def wipe_user_data(request: WipeUserDataRequest, req: Request):
     
     # Reset profile indexing state (in-memory)
     try:
-        if profile_indexer and hasattr(profile_indexer, '_status'):
-            if user_id in profile_indexer._status:
+        if profile_indexer:
+            if hasattr(profile_indexer, '_status') and user_id in profile_indexer._status:
                 del profile_indexer._status[user_id]
-                print(f"   ✅ Reset profile indexing state")
+            if hasattr(profile_indexer, '_deep_completed') and user_id in profile_indexer._deep_completed:
+                del profile_indexer._deep_completed[user_id]
+            if hasattr(profile_indexer, '_games') and user_id in profile_indexer._games:
+                del profile_indexer._games[user_id]
+            print(f"   ✅ Reset profile indexing state (status, deep_completed, games)")
     except Exception as e:
         print(f"   ⚠️  Error resetting profile state: {e}")
     
@@ -8692,10 +8696,14 @@ async def wipe_my_data(req: Request):
     
     # Reset profile indexing state (in-memory)
     try:
-        if profile_indexer and hasattr(profile_indexer, '_status'):
-            if user_id in profile_indexer._status:
+        if profile_indexer:
+            if hasattr(profile_indexer, '_status') and user_id in profile_indexer._status:
                 del profile_indexer._status[user_id]
-                print(f"   ✅ Reset profile indexing state")
+            if hasattr(profile_indexer, '_deep_completed') and user_id in profile_indexer._deep_completed:
+                del profile_indexer._deep_completed[user_id]
+            if hasattr(profile_indexer, '_games') and user_id in profile_indexer._games:
+                del profile_indexer._games[user_id]
+            print(f"   ✅ Reset profile indexing state (status, deep_completed, games)")
     except Exception as e:
         print(f"   ⚠️  Error resetting profile state: {e}")
     
