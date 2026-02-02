@@ -13,6 +13,23 @@ from datetime import datetime as dt
 
 class DetailedAnalyticsAggregator:
     """Aggregates detailed analytics from game reviews."""
+
+    def _player_color(self, game: Dict, game_review: Dict) -> str:
+        """
+        Resolve the player's color robustly across stored review formats.
+
+        - Backend review: game_review.metadata.player_color is usually present.
+        - Frontend review: player_color may be missing; fall back to games.user_color.
+        """
+        meta = game_review.get("metadata", {}) if isinstance(game_review, dict) else {}
+        pc = (meta.get("player_color") if isinstance(meta, dict) else None) or game.get("user_color") or "white"
+        return "black" if str(pc).lower().strip() == "black" else "white"
+
+    def _move_san(self, record: Dict) -> str:
+        """Resolve SAN robustly across stored ply_record formats (san vs move_san)."""
+        if not isinstance(record, dict):
+            return ""
+        return (record.get("san") or record.get("move_san") or "").strip()
     
     def aggregate(self, games: List[Dict]) -> Dict[str, Any]:
         """
@@ -26,7 +43,7 @@ class DetailedAnalyticsAggregator:
         """
         if not games:
             return self._empty_analytics()
-
+        
         # Meta diagnostics for partial data (mid-launch upgrades, compressed games, etc.)
         games_total = len(games)
         games_with_ply = 0
@@ -92,7 +109,7 @@ class DetailedAnalyticsAggregator:
                 continue
             
             ply_records = game_review.get("ply_records", [])
-            player_color = game_review.get("metadata", {}).get("player_color", "white")
+            player_color = self._player_color(game, game_review)
             result = game.get("result") or game_review.get("metadata", {}).get("result", "unknown")
             
             # Determine ending phase
@@ -186,7 +203,7 @@ class DetailedAnalyticsAggregator:
             # Fallback to calculating from ply_records
             if overall_accuracy is None:
                 ply_records = game_review.get("ply_records", [])
-                player_color = game_review.get("metadata", {}).get("player_color", "white")
+                player_color = self._player_color(game, game_review)
                 accuracies = [
                     r.get("accuracy_pct", 0) 
                     for r in ply_records 
@@ -235,7 +252,7 @@ class DetailedAnalyticsAggregator:
                 continue
             
             ply_records = game_review.get("ply_records", [])
-            player_color = game_review.get("metadata", {}).get("player_color", "white")
+            player_color = self._player_color(game, game_review)
             game_id = game.get("id", "")
             
             game_pieces = defaultdict(lambda: {"accuracies": [], "count": 0})
@@ -244,7 +261,9 @@ class DetailedAnalyticsAggregator:
                 if record.get("side_moved") != player_color:
                     continue
                 
-                san = record.get("san", "")
+                san = self._move_san(record)
+                if not san:
+                    continue
                 accuracy = record.get("accuracy_pct", 0)
                 piece_type = self._get_piece_type_from_san(san)
                 
@@ -492,6 +511,15 @@ class DetailedAnalyticsAggregator:
                     if tag_name:
                         tag_names.add(tag_name)
             return tag_names
+
+        # Resolve a stable player_color for summary/trend formatting.
+        # (Should be consistent per user, but frontend reviews can omit metadata.player_color.)
+        default_player_color = "white"
+        for g in games:
+            gr = g.get("game_review", {})
+            if isinstance(gr, dict):
+                default_player_color = self._player_color(g, gr)
+                break
         
         for game in games:
             game_review = game.get("game_review", {})
@@ -499,7 +527,7 @@ class DetailedAnalyticsAggregator:
                 continue
             
             ply_records = game_review.get("ply_records", [])
-            player_color = game_review.get("metadata", {}).get("player_color", "white")
+            player_color = self._player_color(game, game_review)
             
             # Track transitions between consecutive moves
             for i in range(1, len(ply_records)):
@@ -670,8 +698,8 @@ class DetailedAnalyticsAggregator:
             return result
         
         return {
-            "gained": format_tag_data(gained_tags, games, player_color, "gained"),
-            "lost": format_tag_data(lost_tags, games, player_color, "lost")
+            "gained": format_tag_data(gained_tags, games, default_player_color, "gained"),
+            "lost": format_tag_data(lost_tags, games, default_player_color, "lost")
         }
     
     def _aggregate_time_buckets(self, games: List[Dict]) -> Dict[str, Dict]:
@@ -703,7 +731,7 @@ class DetailedAnalyticsAggregator:
                 continue
             
             ply_records = game_review.get("ply_records", [])
-            player_color = game_review.get("metadata", {}).get("player_color", "white")
+            player_color = self._player_color(game, game_review)
             
             for record in ply_records:
                 if record.get("side_moved") != player_color:

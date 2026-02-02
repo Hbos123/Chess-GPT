@@ -926,11 +926,17 @@ class SupabaseClient:
                 meta = full_review.get("metadata") if isinstance(full_review.get("metadata"), dict) else {}
                 stats = full_review.get("stats") if isinstance(full_review.get("stats"), dict) else {}
 
-                # Keep minimal metadata used by aggregators
+                # Keep minimal metadata used by aggregators.
+                #
+                # IMPORTANT:
+                # - Backend-reviewed games store move SAN under ply_record["san"].
+                # - Frontend-reviewed games store move SAN under ply_record["move_san"].
+                # - Frontend reviewer does NOT reliably populate full_review.metadata.player_color.
+                #   We must therefore default player_color from the top-level game_data.user_color.
                 out: Dict[str, Any] = {
                     "_stored": "compact",
                     "metadata": {
-                        "player_color": meta.get("player_color"),
+                        "player_color": meta.get("player_color") or game_data.get("user_color") or "white",
                         "result": meta.get("result"),
                         "time_control": meta.get("time_control"),
                     },
@@ -961,9 +967,11 @@ class SupabaseClient:
                                         tags_out.append(name.strip())
                         compact_ply.append(
                             {
-                                "side_moved": r.get("side_moved"),
+                                "side_moved": r.get("side_moved")
+                                or ("white" if int(r.get("ply") or 0) % 2 == 1 else "black"),
                                 "phase": r.get("phase"),
-                                "san": r.get("san"),
+                                # Preserve SAN across both backend (san) and frontend (move_san) reviewer formats.
+                                "san": r.get("san") or r.get("move_san") or "",
                                 "accuracy_pct": r.get("accuracy_pct", 0),
                                 "category": r.get("category"),
                                 "time_spent_s": r.get("time_spent_s"),
