@@ -32,6 +32,21 @@ export default function DetailedAnalyticsSection({
         const response = await fetch(url, { cache: "no-store" });
         if (response.ok) {
           const data = await response.json();
+          try {
+            const DEBUG_TAG_TRANSITIONS =
+              typeof window !== "undefined" && (window.localStorage?.getItem("chessterDebugTags") === "1");
+            if (DEBUG_TAG_TRANSITIONS) {
+              const gained = data?.tag_transitions?.gained || {};
+              const lost = data?.tag_transitions?.lost || {};
+              const gainedKeys = Object.keys(gained);
+              const lostKeys = Object.keys(lost);
+              console.log(
+                `[DetailedAnalyticsSection] tag_transitions summary: gained=${gainedKeys.length}, lost=${lostKeys.length}, sampleGained=${gainedKeys.slice(0, 5).join(", ") || "—"}, sampleLost=${lostKeys.slice(0, 5).join(", ") || "—"}`,
+              );
+            }
+          } catch {
+            // ignore debug failures
+          }
           setDetailedAnalytics(data);
         } else {
           const errorText = await response.text();

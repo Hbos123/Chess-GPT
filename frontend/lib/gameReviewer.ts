@@ -207,6 +207,20 @@ export async function reviewGame(
   try {
     const backendBase = getBackendBase();
     if (backendBase && plyRecords.length > 0) {
+      const DEBUG_TAG_ENRICH =
+        typeof window !== "undefined" && (window.localStorage?.getItem("chessterDebugTags") === "1");
+
+      const debugTagSummary = (tags: any[]) => {
+        if (!Array.isArray(tags) || tags.length === 0) return [];
+        const out: string[] = [];
+        for (const t of tags.slice(0, 5)) {
+          if (typeof t === "string") out.push(t);
+          else if (t && typeof t === "object") out.push(String((t as any).tag_name || (t as any).name || (t as any).tag || ""));
+          else out.push(String(t));
+        }
+        return out.filter(Boolean);
+      };
+
       const fenSet = new Set<string>();
       for (const r of plyRecords) {
         if (r?.fen_before) fenSet.add(r.fen_before);
@@ -219,9 +233,18 @@ export async function reviewGame(
         // Chunk for safety
         const tagsByFen: Record<string, any[]> = {};
         const chunkSize = 200;
+        if (DEBUG_TAG_ENRICH) {
+          console.log(
+            `[TagEnrich] Starting backend tag enrichment: plies=${plyRecords.length}, uniqueFENs=${fens.length}, chunkSize=${chunkSize}, endpoint=${backendBase.replace(/\\/$/, "")}/profile/position_tags`,
+          );
+        }
         for (let i = 0; i < fens.length; i += chunkSize) {
           const chunk = fens.slice(i, i + chunkSize);
-          const resp = await fetch(`${backendBase.replace(/\/$/, "")}/profile/position_tags`, {
+          const url = `${backendBase.replace(/\/$/, "")}/profile/position_tags`;
+          if (DEBUG_TAG_ENRICH) {
+            console.log(`[TagEnrich] POST ${url} chunk ${(i / chunkSize) + 1}/${Math.ceil(fens.length / chunkSize)} size=${chunk.length}`);
+          }
+          const resp = await fetch(url, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ fens: chunk, include_extras: false }),
@@ -232,10 +255,34 @@ export async function reviewGame(
             for (const [k, v] of Object.entries(map)) {
               tagsByFen[k] = Array.isArray(v) ? (v as any[]) : [];
             }
+            if (DEBUG_TAG_ENRICH) {
+              let nonEmpty = 0;
+              let firstNonEmptyFen: string | null = null;
+              for (const fen of chunk) {
+                const arr = tagsByFen[fen] || [];
+                if (Array.isArray(arr) && arr.length > 0) {
+                  nonEmpty += 1;
+                  if (!firstNonEmptyFen) firstNonEmptyFen = fen;
+                }
+              }
+              const sampleTags = firstNonEmptyFen ? debugTagSummary(tagsByFen[firstNonEmptyFen] || []) : [];
+              console.log(
+                `[TagEnrich] OK chunk ${(i / chunkSize) + 1}: fens=${chunk.length}, nonEmpty=${nonEmpty}, sampleTags=${sampleTags.join(", ") || "—"}`,
+              );
+            }
+          } else {
+            const text = await resp.text().catch(() => "");
+            if (DEBUG_TAG_ENRICH) {
+              console.warn(`[TagEnrich] FAILED chunk ${(i / chunkSize) + 1}: status=${resp.status} body=${text?.slice(0, 500)}`);
+            }
           }
         }
 
         // Apply tags back onto ply records
+        let withBefore = 0;
+        let withAfter = 0;
+        let withEither = 0;
+        let withBest = 0;
         for (const r of plyRecords) {
           const beforeTags = tagsByFen[r.fen_before] || [];
           const afterTags = tagsByFen[r.fen_after] || [];
@@ -248,6 +295,16 @@ export async function reviewGame(
             ...(r.engine || {}),
             best_move_tags: bestTags,
           };
+
+          if (Array.isArray(beforeTags) && beforeTags.length > 0) withBefore += 1;
+          if (Array.isArray(afterTags) && afterTags.length > 0) withAfter += 1;
+          if ((Array.isArray(beforeTags) && beforeTags.length > 0) || (Array.isArray(afterTags) && afterTags.length > 0)) withEither += 1;
+          if (Array.isArray(bestTags) && bestTags.length > 0) withBest += 1;
+        }
+        if (DEBUG_TAG_ENRICH) {
+          console.log(
+            `[TagEnrich] Applied tags to plyRecords: withRawBefore=${withBefore}/${plyRecords.length}, withRawAfter=${withAfter}/${plyRecords.length}, withEither=${withEither}/${plyRecords.length}, withBestMoveTags=${withBest}/${plyRecords.length}`,
+          );
         }
       }
     }
