@@ -427,11 +427,6 @@ export default function TrainingTab({ userId, backendBase }: TrainingTabProps) {
     }
   };
 
-  // Stub function for now
-  const loadDrillSuggestions = async () => {
-    // TODO: Implement when ready
-  };
-
   const handleSessionComplete = (results: any) => {
     console.log("[TrainingTab] Session complete:", results);
     setActiveSession(null);
