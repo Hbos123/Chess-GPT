@@ -526,8 +526,20 @@ class DetailedAnalyticsAggregator:
                 if curr_record.get("side_moved") != player_color:
                     continue
                 
-                prev_tags = extract_tag_names(prev_record.get("analyse", {}).get("tags", []))
-                curr_tags = extract_tag_names(curr_record.get("analyse", {}).get("tags", []))
+                # Extract tags from all sources (frontend stores position tags in raw_before/raw_after)
+                prev_analyse_tags = prev_record.get("analyse", {}).get("tags", []) if isinstance(prev_record.get("analyse"), dict) else []
+                prev_raw_before_tags = prev_record.get("raw_before", {}).get("tags", []) if isinstance(prev_record.get("raw_before"), dict) else []
+                prev_raw_after_tags = prev_record.get("raw_after", {}).get("tags", []) if isinstance(prev_record.get("raw_after"), dict) else []
+                prev_tags = extract_tag_names(
+                    list(prev_analyse_tags) + list(prev_raw_before_tags) + list(prev_raw_after_tags)
+                )
+                
+                curr_analyse_tags = curr_record.get("analyse", {}).get("tags", []) if isinstance(curr_record.get("analyse"), dict) else []
+                curr_raw_before_tags = curr_record.get("raw_before", {}).get("tags", []) if isinstance(curr_record.get("raw_before"), dict) else []
+                curr_raw_after_tags = curr_record.get("raw_after", {}).get("tags", []) if isinstance(curr_record.get("raw_after"), dict) else []
+                curr_tags = extract_tag_names(
+                    list(curr_analyse_tags) + list(curr_raw_before_tags) + list(curr_raw_after_tags)
+                )
                 
                 gained = curr_tags - prev_tags
                 lost = prev_tags - curr_tags
@@ -626,8 +638,20 @@ class DetailedAnalyticsAggregator:
                 if curr_record.get("side_moved") != player_color:
                     continue
                 
-                prev_tags = extract_tag_names(prev_record.get("analyse", {}).get("tags", []))
-                curr_tags = extract_tag_names(curr_record.get("analyse", {}).get("tags", []))
+                # Extract tags from all sources (frontend stores position tags in raw_before/raw_after)
+                prev_analyse_tags = prev_record.get("analyse", {}).get("tags", []) if isinstance(prev_record.get("analyse"), dict) else []
+                prev_raw_before_tags = prev_record.get("raw_before", {}).get("tags", []) if isinstance(prev_record.get("raw_before"), dict) else []
+                prev_raw_after_tags = prev_record.get("raw_after", {}).get("tags", []) if isinstance(prev_record.get("raw_after"), dict) else []
+                prev_tags = extract_tag_names(
+                    list(prev_analyse_tags) + list(prev_raw_before_tags) + list(prev_raw_after_tags)
+                )
+                
+                curr_analyse_tags = curr_record.get("analyse", {}).get("tags", []) if isinstance(curr_record.get("analyse"), dict) else []
+                curr_raw_before_tags = curr_record.get("raw_before", {}).get("tags", []) if isinstance(curr_record.get("raw_before"), dict) else []
+                curr_raw_after_tags = curr_record.get("raw_after", {}).get("tags", []) if isinstance(curr_record.get("raw_after"), dict) else []
+                curr_tags = extract_tag_names(
+                    list(curr_analyse_tags) + list(curr_raw_before_tags) + list(curr_raw_after_tags)
+                )
                 
                 gained = curr_tags - prev_tags
                 lost = prev_tags - curr_tags
@@ -711,8 +735,20 @@ class DetailedAnalyticsAggregator:
                     if curr_record.get("side_moved") != player_color_str:
                         continue
                     
-                    prev_tags = extract_tag_names(prev_record.get("analyse", {}).get("tags", []))
-                    curr_tags = extract_tag_names(curr_record.get("analyse", {}).get("tags", []))
+                    # Extract tags from all sources (frontend stores position tags in raw_before/raw_after)
+                    prev_analyse_tags = prev_record.get("analyse", {}).get("tags", []) if isinstance(prev_record.get("analyse"), dict) else []
+                    prev_raw_before_tags = prev_record.get("raw_before", {}).get("tags", []) if isinstance(prev_record.get("raw_before"), dict) else []
+                    prev_raw_after_tags = prev_record.get("raw_after", {}).get("tags", []) if isinstance(prev_record.get("raw_after"), dict) else []
+                    prev_tags = extract_tag_names(
+                        list(prev_analyse_tags) + list(prev_raw_before_tags) + list(prev_raw_after_tags)
+                    )
+                    
+                    curr_analyse_tags = curr_record.get("analyse", {}).get("tags", []) if isinstance(curr_record.get("analyse"), dict) else []
+                    curr_raw_before_tags = curr_record.get("raw_before", {}).get("tags", []) if isinstance(curr_record.get("raw_before"), dict) else []
+                    curr_raw_after_tags = curr_record.get("raw_after", {}).get("tags", []) if isinstance(curr_record.get("raw_after"), dict) else []
+                    curr_tags = extract_tag_names(
+                        list(curr_analyse_tags) + list(curr_raw_before_tags) + list(curr_raw_after_tags)
+                    )
                     
                     gained = curr_tags - prev_tags
                     lost = prev_tags - curr_tags
