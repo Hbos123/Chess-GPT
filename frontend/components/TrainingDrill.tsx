@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, useMemo } from "react";
+import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { Chess } from "chess.js";
 import Board from "./Board";
 
@@ -34,6 +34,37 @@ export default function TrainingDrill({
   
   const prevDrillIdRef = useRef<string | undefined>(undefined);
   const prevFenRef = useRef<string | undefined>(undefined);
+
+  const bestMoveUciNorm = useMemo(() => {
+    const raw = drill?.best_move_uci;
+    if (!raw || typeof raw !== "string") return "";
+    return raw.trim().toLowerCase();
+  }, [drill?.best_move_uci]);
+
+  const bestMoveSanNorm = useMemo(() => {
+    const raw = drill?.best_move_san;
+    if (!raw || typeof raw !== "string") return "";
+    return raw.trim().toLowerCase();
+  }, [drill?.best_move_san]);
+
+  const isCorrectMove = useCallback(
+    (moveObj: any) => {
+      // Prefer UCI equality to avoid SAN formatting mismatches (+/#/disambiguation)
+      try {
+        const from = String(moveObj?.from || "").toLowerCase();
+        const to = String(moveObj?.to || "").toLowerCase();
+        const promo = String(moveObj?.promotion || "").toLowerCase();
+        const uci = `${from}${to}${promo}`.trim();
+        if (bestMoveUciNorm && uci) return uci === bestMoveUciNorm;
+      } catch {
+        // fall back to SAN
+      }
+      const san = String(moveObj?.san || "").trim().toLowerCase();
+      if (bestMoveSanNorm && san) return san === bestMoveSanNorm;
+      return false;
+    },
+    [bestMoveUciNorm, bestMoveSanNorm]
+  );
   
   // Memoize the initial FEN to prevent recreation on every render
   const initialFen = useMemo(() => {
@@ -97,23 +128,22 @@ export default function TrainingDrill({
         return;
       }
       
-      const moveSan = move.san;
       const timeSpent = (Date.now() - startTime) / 1000;
-      const isCorrect = moveSan.toLowerCase() === drill.best_move_san.toLowerCase();
+      const isCorrect = isCorrectMove(move);
       
-      setUserMove(moveSan);
+      setUserMove(move.san);
       setDrillGame(tempGame);
       
       if (isCorrect) {
         setFeedback({
           type: "correct",
-          message: `✅ Correct! ${drill.best_move_san} is the best move.`
+          message: `✅ Correct!`,
         });
         setTimeout(() => onComplete(true, timeSpent, hintsUsed), 1500);
       } else {
         setFeedback({
           type: "incorrect",
-          message: `❌ Not quite. The best move is ${drill.best_move_san}. Try again or show solution.`
+          message: `❌ Not quite. Try again, or give up to reveal the solution.`,
         });
         // Reset board AND clear feedback after showing incorrect feedback (so retry actually works)
         setTimeout(() => {
@@ -154,7 +184,7 @@ export default function TrainingDrill({
         }
         
         const timeSpent = (Date.now() - startTime) / 1000;
-        const isCorrect = moveObj.san.toLowerCase() === drill.best_move_san.toLowerCase();
+        const isCorrect = isCorrectMove(moveObj);
         
         setUserMove(move);
         setDrillGame(tempGame);
@@ -162,13 +192,13 @@ export default function TrainingDrill({
         if (isCorrect) {
           setFeedback({
             type: "correct",
-            message: `✅ Correct! ${drill.best_move_san} is the best move.`
+            message: `✅ Correct!`,
           });
           setTimeout(() => onComplete(true, timeSpent, hintsUsed), 1500);
         } else {
           setFeedback({
             type: "incorrect",
-            message: `❌ Not quite. The best move is ${drill.best_move_san}. Try again or show solution.`
+            message: `❌ Not quite. Try again, or give up to reveal the solution.`,
           });
           setTimeout(() => {
             setDrillGame(new Chess(drill.fen));
@@ -299,7 +329,7 @@ export default function TrainingDrill({
               {showHint ? `💡 ${drill.hint || "No hint available"}` : "Show Hint"}
             </button>
             <button onClick={handleShowSolution} className="solution-btn">
-              Show Solution
+              Give up (show solution)
             </button>
             <button onClick={onSkip} className="skip-btn">
               Skip

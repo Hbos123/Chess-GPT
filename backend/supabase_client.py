@@ -1966,7 +1966,11 @@ class SupabaseClient:
                 query = query.eq("mover_name", mover_name)
 
             if error_side_filter:
-                query = query.eq("error_side", error_side_filter)
+                # Special sentinel to support legacy rows where error_side is NULL
+                if error_side_filter == "__null__":
+                    query = query.is_("error_side", "null")
+                else:
+                    query = query.eq("error_side", error_side_filter)
             
             # Tag transition filters using array contains
             if tags_gained_filter:
@@ -2039,7 +2043,11 @@ class SupabaseClient:
                 query = query.in_("error_category", error_categories)
 
             if error_side_filter:
-                query = query.eq("error_side", error_side_filter)
+                # Special sentinel to support legacy rows where error_side is NULL
+                if error_side_filter == "__null__":
+                    query = query.is_("error_side", "null")
+                else:
+                    query = query.eq("error_side", error_side_filter)
             
             if tags_gained_filter:
                 query = query.contains("tags_gained", [tags_gained_filter])
