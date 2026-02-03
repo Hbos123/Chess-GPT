@@ -193,11 +193,9 @@ class DetailedAnalyticsAggregator:
                 continue
             
             ply_records = game_review.get("ply_records", [])
-            infer_mode = self._should_infer_accuracy_for_game(ply_records, player_color)
             player_color = self._player_color(game, game_review)
             infer_mode = self._should_infer_accuracy_for_game(ply_records, player_color)
             result = game.get("result") or game_review.get("metadata", {}).get("result", "unknown")
-            infer_mode = self._should_infer_accuracy_for_game(ply_records, player_color)
             
             # Determine ending phase
             ending_phase = self._determine_ending_phase(ply_records, player_color)
