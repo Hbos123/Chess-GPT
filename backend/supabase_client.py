@@ -1007,17 +1007,45 @@ class SupabaseClient:
                     for r in ply_records:
                         if not isinstance(r, dict):
                             continue
+                        
+                        # Extract tags from all sources (frontend stores position tags in raw_before/raw_after)
                         analyse = r.get("analyse") if isinstance(r.get("analyse"), dict) else {}
+                        raw_before = r.get("raw_before") if isinstance(r.get("raw_before"), dict) else {}
+                        raw_after = r.get("raw_after") if isinstance(r.get("raw_after"), dict) else {}
+                        
                         tags_raw = analyse.get("tags", [])
-                        tags_out: list[str] = []
-                        if isinstance(tags_raw, list):
-                            for t in tags_raw:
-                                if isinstance(t, str) and t.strip():
-                                    tags_out.append(t.strip())
-                                elif isinstance(t, dict):
-                                    name = t.get("tag_name") or t.get("name") or t.get("tag")
-                                    if isinstance(name, str) and name.strip():
-                                        tags_out.append(name.strip())
+                        raw_before_tags_raw = raw_before.get("tags", []) if raw_before else []
+                        raw_after_tags_raw = raw_after.get("tags", []) if raw_after else []
+                        
+                        # Helper function to extract tag names from a list
+                        def extract_tag_names_from_list(tag_list):
+                            result = []
+                            if isinstance(tag_list, list):
+                                for t in tag_list:
+                                    if isinstance(t, str) and t.strip():
+                                        result.append(t.strip())
+                                    elif isinstance(t, dict):
+                                        name = t.get("tag_name") or t.get("name") or t.get("tag")
+                                        if isinstance(name, str) and name.strip():
+                                            result.append(name.strip())
+                            return result
+                        
+                        # Combine all tags into analyse.tags for backward compatibility
+                        tags_out = extract_tag_names_from_list(tags_raw)
+                        tags_out.extend(extract_tag_names_from_list(raw_before_tags_raw))
+                        tags_out.extend(extract_tag_names_from_list(raw_after_tags_raw))
+                        # Remove duplicates while preserving order
+                        seen = set()
+                        tags_out_unique = []
+                        for tag in tags_out:
+                            if tag not in seen:
+                                seen.add(tag)
+                                tags_out_unique.append(tag)
+                        
+                        # Preserve raw_before and raw_after tags separately for tag transitions
+                        raw_before_tags_out = extract_tag_names_from_list(raw_before_tags_raw)
+                        raw_after_tags_out = extract_tag_names_from_list(raw_after_tags_raw)
+                        
                         compact_ply.append(
                             {
                                 "side_moved": r.get("side_moved")
@@ -1035,7 +1063,10 @@ class SupabaseClient:
                                 # Keep cp_loss if present (helps future analytics/backfills).
                                 "cp_loss": r.get("cp_loss"),
                                 "time_spent_s": r.get("time_spent_s"),
-                                "analyse": {"tags": tags_out},
+                                "analyse": {"tags": tags_out_unique},
+                                # Preserve raw_before and raw_after tags for tag transitions
+                                "raw_before": {"tags": raw_before_tags_out} if raw_before_tags_out else {},
+                                "raw_after": {"tags": raw_after_tags_out} if raw_after_tags_out else {},
                             }
                         )
                 out["ply_records"] = compact_ply

@@ -656,6 +656,13 @@ class DetailedAnalyticsAggregator:
                 gained = curr_tags - prev_tags
                 lost = prev_tags - curr_tags
                 
+                # Diagnostics: log tag extraction (only for first few transitions to avoid spam)
+                if (gained or lost) and len(gained_tags) + len(lost_tags) < 5:
+                    print(f"🔍 [TAG_TRANSITIONS] Game {game.get('id', 'unknown')[:8]}, ply {i}:")
+                    print(f"   prev_tags: {prev_tags}")
+                    print(f"   curr_tags: {curr_tags}")
+                    print(f"   gained: {gained}, lost: {lost}")
+                
                 accuracy = self._record_accuracy_pct(curr_record, infer_mode)
                 category = curr_record.get("category", "").lower() if curr_record.get("category") else ""
                 
@@ -688,6 +695,17 @@ class DetailedAnalyticsAggregator:
         for tag_data in lost_tags.values():
             all_tag_accuracies.extend(tag_data["accuracies"])
         baseline_accuracy = statistics.mean(all_tag_accuracies) if all_tag_accuracies else 75.0
+        
+        # Diagnostics
+        total_transitions = sum(d["count"] for d in gained_tags.values()) + sum(d["count"] for d in lost_tags.values())
+        print(f"📊 [TAG_TRANSITIONS] Summary for {len(games)} games:")
+        print(f"   Gained tags found: {len(gained_tags)}")
+        print(f"   Lost tags found: {len(lost_tags)}")
+        print(f"   Total transitions: {total_transitions}")
+        if gained_tags:
+            print(f"   Sample gained tags: {list(gained_tags.keys())[:5]}")
+        if lost_tags:
+            print(f"   Sample lost tags: {list(lost_tags.keys())[:5]}")
         
         # Format results with trend calculation and significance scoring
         def format_tag_data(tag_dict, games_list, player_color_str, transition_type_str):
