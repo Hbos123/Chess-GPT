@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import TrainingSession from "@/components/TrainingSession";
 import { getBackendBase } from "@/lib/backendBase";
 
@@ -53,12 +53,7 @@ export default function TrainingTab({ userId, backendBase }: TrainingTabProps) {
   const [isTagExpanded, setIsTagExpanded] = useState(true);
   const [isTimeExpanded, setIsTimeExpanded] = useState(true);
 
-  useEffect(() => {
-    if (!userId) return;
-    loadDrillSuggestions();
-  }, [userId, BACKEND_BASE]);
-
-  const loadDrillSuggestions = async () => {
+  const loadDrillSuggestions = useCallback(async () => {
     setLoading(true);
     setError(null);
     
@@ -275,44 +270,48 @@ export default function TrainingTab({ userId, backendBase }: TrainingTabProps) {
 
       setSuggestions(allSuggestions);
 
-      // Pre-fetch position counts for all suggestions (non-blocking)
-      allSuggestions.forEach(async (suggestion) => {
-        try {
-          const params = new URLSearchParams({
-            user_id: userId,
-            filter_type: suggestion.filter_type,
-            filter_value: suggestion.filter_value,
-            limit: "1",
-            min_cp_loss: "100",
-          });
-          
-          if (suggestion.transition_type) {
-            params.append("transition_type", suggestion.transition_type);
-          }
+      // Pre-fetch position counts for all suggestions (non-blocking, parallel)
+      Promise.all(
+        allSuggestions.map(async (suggestion) => {
+          try {
+            const params = new URLSearchParams({
+              user_id: userId,
+              filter_type: suggestion.filter_type,
+              filter_value: suggestion.filter_value,
+              limit: "1",
+              min_cp_loss: "100",
+            });
+            
+            if (suggestion.transition_type) {
+              params.append("transition_type", suggestion.transition_type);
+            }
 
-          const countResponse = await fetch(
-            `${baseUrl}/profile/positions/by-filter?${params.toString()}`,
-            { cache: "no-store" }
-          );
-          
-          if (countResponse.ok) {
-            const countData = await countResponse.json();
-            setSuggestions((prev) =>
-              prev.map((s) =>
-                s.id === suggestion.id
-                  ? {
-                      ...s,
-                      position_count: countData.total_available || 0,
-                      position_avg_accuracy: countData.average_accuracy,
-                    }
-                  : s
-              )
+            const countResponse = await fetch(
+              `${baseUrl}/profile/positions/by-filter?${params.toString()}`,
+              { cache: "no-store" }
             );
+            
+            if (countResponse.ok) {
+              const countData = await countResponse.json();
+              setSuggestions((prev) =>
+                prev.map((s) =>
+                  s.id === suggestion.id
+                    ? {
+                        ...s,
+                        position_count: countData.total_available || 0,
+                        position_avg_accuracy: countData.average_accuracy,
+                      }
+                    : s
+                )
+              );
+            }
+          } catch (err) {
+            // Silently fail - position count is nice to have but not critical
+            console.debug(`[TrainingTab] Failed to fetch position count for ${suggestion.id}:`, err);
           }
-        } catch (err) {
-          // Silently fail - position count is nice to have but not critical
-          console.debug(`[TrainingTab] Failed to fetch position count for ${suggestion.id}:`, err);
-        }
+        })
+      ).catch((err) => {
+        console.debug("[TrainingTab] Error fetching position counts:", err);
       });
     } catch (err: any) {
       console.error("[TrainingTab] Failed to load drill suggestions:", err);
@@ -320,7 +319,12 @@ export default function TrainingTab({ userId, backendBase }: TrainingTabProps) {
     } finally {
       setLoading(false);
     }
-  };
+  }, [userId, BACKEND_BASE]);
+
+  useEffect(() => {
+    if (!userId) return;
+    loadDrillSuggestions();
+  }, [userId, loadDrillSuggestions]);
 
   const handleStartDrill = async (suggestion: DrillSuggestion) => {
     try {
@@ -398,9 +402,31 @@ export default function TrainingTab({ userId, backendBase }: TrainingTabProps) {
         return;
       }
 
-      // Create training session
+      // Create training session with required properties for TrainingSession component
+      const getSessionMode = () => {
+        if (suggestion.category === "phase") {
+          return `${suggestion.filter_value.charAt(0).toUpperCase() + suggestion.filter_value.slice(1)} Training`;
+        } else if (suggestion.category === "opening") {
+          return `${suggestion.filter_value} Opening Drill`;
+        } else if (suggestion.category === "piece") {
+          return `${suggestion.filter_value} Piece Accuracy`;
+        } else if (suggestion.category === "tag_transition") {
+          return `${suggestion.filter_value.replace(/_/g, " ")} Tag Transition`;
+        } else if (suggestion.category === "time_bucket") {
+          return `${suggestion.filter_value} Time Management`;
+        }
+        return "Personalized Drill";
+      };
+
       const session = {
         session_id: `drill-${suggestion.id}-${Date.now()}`,
+        mode: getSessionMode(),
+        intro: `Practice ${suggestion.description.toLowerCase()}`,
+        composition: {
+          new: drills.length,
+          learning: 0,
+          review: 0
+        },
         total_cards: drills.length,
         cards: drills.map((drill: any, idx: number) => ({
           card_id: drill.card_id || `drill-${idx}`,

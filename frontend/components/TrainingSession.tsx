@@ -25,8 +25,28 @@ export default function TrainingSession({
   const [isComplete, setIsComplete] = useState(false);
   const [activeTab, setActiveTab] = useState<'training' | 'chat'>('training');
 
+  // Guard: Check if session has valid cards
+  if (!session?.cards || session.cards.length === 0) {
+    return (
+      <div className="training-session-container">
+        <div style={{ padding: "40px", textAlign: "center", color: "#9ca3af" }}>
+          <h3>No drills available</h3>
+          <p>This session has no drill cards. Please try starting a new drill.</p>
+          <button onClick={onClose} className="exit-session-btn" style={{ marginTop: "20px" }}>
+            Close
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   const handleDrillComplete = async (correct: boolean, timeS: number, hintsUsed: number) => {
     const drill = session.cards[currentDrillIndex];
+    
+    if (!drill) {
+      console.error("[TrainingSession] Drill not found at index", currentDrillIndex);
+      return;
+    }
     
     // Record result
     const result = {
