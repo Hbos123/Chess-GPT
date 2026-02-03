@@ -103,14 +103,25 @@ class DetailedAnalyticsAggregator:
         Return a quality category for error-rate calculations: blunder/mistake/inaccuracy.
 
         Frontend reviews often store these as analyse.tags (tag_name) and may omit record["category"].
+        Also checks is_blunder/is_mistake/is_inaccuracy boolean fields.
         """
         if not isinstance(record, dict):
             return ""
 
+        # Check boolean fields first (frontend format)
+        if record.get("is_blunder"):
+            return "blunder"
+        if record.get("is_mistake"):
+            return "mistake"
+        if record.get("is_inaccuracy"):
+            return "inaccuracy"
+
+        # Check category field (backend format)
         cat = str(record.get("category") or "").strip().lower()
         if cat in ("blunder", "mistake", "inaccuracy"):
             return cat
 
+        # Check analyse.tags for quality tags
         analyse = record.get("analyse") if isinstance(record.get("analyse"), dict) else {}
         tags = analyse.get("tags", []) if isinstance(analyse.get("tags"), list) else []
         tags_norm = set()
@@ -689,7 +700,7 @@ class DetailedAnalyticsAggregator:
                 lost = prev_tags - curr_tags
                 
                 # Diagnostics: log tag extraction (only for first few transitions to avoid spam)
-                if (gained or lost) and len(gained_tags) + len(lost_tags) < 5:
+                if (gained or lost) and len(gained_tags) + len(lost_tags) < 10:
                     print(f"🔍 [TAG_TRANSITIONS] Game {game.get('id', 'unknown')[:8]}, ply {i}:")
                     print(f"   prev_tags: {prev_tags}")
                     print(f"   curr_tags: {curr_tags}")
@@ -697,6 +708,12 @@ class DetailedAnalyticsAggregator:
                 
                 accuracy = self._record_accuracy_pct(curr_record, infer_mode)
                 category = self._quality_category(curr_record)
+                
+                # Diagnostics for category detection (first few transitions)
+                if (gained or lost) and len(gained_tags) + len(lost_tags) < 10:
+                    print(f"   category detected: '{category}' (is_blunder={curr_record.get('is_blunder')}, is_mistake={curr_record.get('is_mistake')}, is_inaccuracy={curr_record.get('is_inaccuracy')})")
+                    analyse_tags = curr_record.get("analyse", {}).get("tags", []) if isinstance(curr_record.get("analyse"), dict) else []
+                    print(f"   analyse.tags: {analyse_tags}")
                 
                 # Track gained tags
                 for tag_name in gained:
@@ -734,10 +751,19 @@ class DetailedAnalyticsAggregator:
         print(f"   Gained tags found: {len(gained_tags)}")
         print(f"   Lost tags found: {len(lost_tags)}")
         print(f"   Total transitions: {total_transitions}")
+        print(f"   Note: Transitions only count when tags are gained/lost between moves, not when they persist.")
         if gained_tags:
             print(f"   Sample gained tags: {list(gained_tags.keys())[:5]}")
+            # Show error counts for first tag
+            first_tag = list(gained_tags.keys())[0]
+            tag_data = gained_tags[first_tag]
+            print(f"   Sample tag '{first_tag}': count={tag_data['count']}, blunders={tag_data['blunders']}, mistakes={tag_data['mistakes']}, inaccuracies={tag_data['inaccuracies']}")
         if lost_tags:
             print(f"   Sample lost tags: {list(lost_tags.keys())[:5]}")
+            # Show error counts for first tag
+            first_tag = list(lost_tags.keys())[0]
+            tag_data = lost_tags[first_tag]
+            print(f"   Sample tag '{first_tag}': count={tag_data['count']}, blunders={tag_data['blunders']}, mistakes={tag_data['mistakes']}, inaccuracies={tag_data['inaccuracies']}")
         
         # Format results with trend calculation and significance scoring
         def format_tag_data(tag_dict, games_list, player_color_str, transition_type_str):
