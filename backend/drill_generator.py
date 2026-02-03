@@ -177,6 +177,11 @@ class DrillGenerator:
         piece_blundered = position.get("piece_blundered")
         piece_best_move = position.get("piece_best_move")
         move_san = position.get("move_san") or position.get("player_move_san")
+
+        # Determine who made the mistake (if available)
+        error_side = position.get("error_side")
+        actor = "You" if error_side != "opponent" else "Your opponent"
+        poss = "your" if actor == "You" else "their"
         
         # Generate contextual question and hint based on tag transitions
         question, hint = self._generate_contextual_prompt(
@@ -188,7 +193,9 @@ class DrillGenerator:
             tags_after_played,
             move_san,
             piece_blundered,
-            piece_best_move
+            piece_best_move,
+            actor,
+            poss
         )
         
         # Fallback to default if no contextual prompt generated
@@ -198,6 +205,24 @@ class DrillGenerator:
             hint = self._generate_hint(tag_names, drill_type)
         
         # Build drill card
+        opening_name = position.get("opening") or position.get("opening_name")
+        phase = position.get("phase")
+        game_id = position.get("source_game_id") or position.get("from_game_id")
+        ply = position.get("ply") or position.get("source_ply")
+        created_at = position.get("created_at")
+        origin_parts = []
+        if opening_name:
+            origin_parts.append(str(opening_name))
+        if phase:
+            origin_parts.append(str(phase))
+        if game_id:
+            origin_parts.append(f"game {str(game_id)[:8]}")
+        if ply is not None:
+            origin_parts.append(f"ply {ply}")
+        if position.get("error_note"):
+            origin_parts.append(str(position.get("error_note")))
+        origin = " • ".join(origin_parts) if origin_parts else None
+
         drill = {
             "card_id": card_id,
             "type": drill_type,
@@ -209,8 +234,8 @@ class DrillGenerator:
             "alternatives": position.get("alternatives", []),
             "eval_cp": position.get("verified_eval_cp", position.get("eval_before_cp", 0)),
             "tags": tag_names,
-            "phase": position.get("phase"),
-            "opening": position.get("opening"),
+            "phase": phase,
+            "opening": opening_name,
             "hint": hint,
             "difficulty": {
                 "rating_est": self._estimate_difficulty(position),
@@ -218,9 +243,12 @@ class DrillGenerator:
             },
             "source": {
                 "type": "own_game",
-                "game_id": position.get("source_game_id") or position.get("from_game_id"),
-                "ply": position.get("ply") or position.get("source_ply")
+                "game_id": game_id,
+                "ply": ply,
+                "error_side": error_side
             },
+            "origin": origin,
+            "game_date": position.get("game_date") or created_at,
             "explanation": "",  # Filled after user attempts
             # Tag transition metadata
             "tag_transitions": {
@@ -246,7 +274,9 @@ class DrillGenerator:
         tags_after_played: List[str],
         move_san: Optional[str],
         piece_blundered: Optional[str],
-        piece_best_move: Optional[str]
+        piece_best_move: Optional[str],
+        actor: str = "You",
+        poss: str = "your"
     ) -> Tuple[str, str]:
         """
         Generate contextual question and hint based on tag transitions.
@@ -267,24 +297,24 @@ class DrillGenerator:
             tag_display = primary_tag.replace("_", " ").title()
             
             if move_san:
-                question = f"{color} to move — You mistakenly played {move_san}, losing {tag_display}. Find the better move that maintains this advantage."
+                question = f"{color} to move — {actor} mistakenly played {move_san}, losing {tag_display}. Find the better move that maintains this advantage."
             else:
-                question = f"{color} to move — Find the move that maintains {tag_display} (your move lost this advantage)."
+                question = f"{color} to move — Find the move that maintains {tag_display} (the move lost this advantage)."
             
             if piece_blundered and piece_best_move and piece_blundered != piece_best_move:
-                hint = f"💡 Consider moving your {piece_best_move} instead of your {piece_blundered}. The best move maintains {tag_display}."
+                hint = f"💡 Consider moving {poss} {piece_best_move} instead of {poss} {piece_blundered}. The best move maintains {tag_display}."
             else:
-                hint = f"💡 The best move maintains {tag_display} that your move lost."
+                hint = f"💡 The best move maintains {tag_display} that the move lost."
         
         # Priority 2: Missed opportunities
         elif missed_tags:
             primary_tag = missed_tags[0]
             tag_display = primary_tag.replace("_", " ").title()
             
-            question = f"{color} to move — The best move would gain {tag_display}, but your move missed this opportunity. Find the move that secures this advantage."
+            question = f"{color} to move — The best move would gain {tag_display}, but {actor.lower()} missed this opportunity. Find the move that secures this advantage."
             
             if piece_best_move:
-                hint = f"💡 Consider moving your {piece_best_move} to gain {tag_display}."
+                hint = f"💡 Consider moving {poss} {piece_best_move} to gain {tag_display}."
             else:
                 hint = f"💡 The best move gains {tag_display}."
         
@@ -293,7 +323,7 @@ class DrillGenerator:
             primary_tag = tags_gained[0]
             tag_display = primary_tag.replace("_", " ").title()
             
-            question = f"{color} to move — Find the best move (your move gained {tag_display}, but there may be a better option)."
+            question = f"{color} to move — Find the best move ({actor} gained {tag_display}, but there may be a better option)."
             hint = f"💡 Consider if there's a better way to gain {tag_display}."
         
         return (question, hint)

@@ -90,6 +90,10 @@ export default function TrainingDrill({
           type: "incorrect",
           message: "❌ Invalid move. Try again."
         });
+        // Clear feedback so the user can keep trying
+        setTimeout(() => {
+          setFeedback({ type: "", message: "" });
+        }, 1500);
         return;
       }
       
@@ -111,9 +115,11 @@ export default function TrainingDrill({
           type: "incorrect",
           message: `❌ Not quite. The best move is ${drill.best_move_san}. Try again or show solution.`
         });
-        // Reset board after showing incorrect feedback
+        // Reset board AND clear feedback after showing incorrect feedback (so retry actually works)
         setTimeout(() => {
           setDrillGame(new Chess(drill.fen));
+          setFeedback({ type: "", message: "" });
+          setUserMove("");
         }, 2000);
       }
     } catch (e) {
@@ -121,6 +127,9 @@ export default function TrainingDrill({
         type: "incorrect",
         message: "❌ Invalid move. Try again."
       });
+      setTimeout(() => {
+        setFeedback({ type: "", message: "" });
+      }, 1500);
     }
   };
 
@@ -138,6 +147,9 @@ export default function TrainingDrill({
             type: "incorrect",
             message: "❌ Invalid move notation. Try again."
           });
+          setTimeout(() => {
+            setFeedback({ type: "", message: "" });
+          }, 1500);
           return;
         }
         
@@ -160,6 +172,8 @@ export default function TrainingDrill({
           });
           setTimeout(() => {
             setDrillGame(new Chess(drill.fen));
+            setFeedback({ type: "", message: "" });
+            setUserMove("");
           }, 2000);
         }
       } catch (e) {
@@ -167,6 +181,9 @@ export default function TrainingDrill({
           type: "incorrect",
           message: "❌ Invalid move notation. Try again."
         });
+        setTimeout(() => {
+          setFeedback({ type: "", message: "" });
+        }, 1500);
       }
     }
   };
@@ -192,6 +209,21 @@ export default function TrainingDrill({
 
   const boardOrientation = drill.side_to_move === "white" ? "white" : "black";
 
+  const originText = useMemo(() => {
+    if (drill.origin) return String(drill.origin);
+    const opening = drill.opening ? String(drill.opening) : "";
+    const phase = drill.phase ? String(drill.phase) : "";
+    const src = drill.source || {};
+    const gameId = src.game_id ? String(src.game_id).slice(0, 8) : "";
+    const ply = src.ply != null ? String(src.ply) : "";
+    const parts = [];
+    if (opening) parts.push(opening);
+    if (phase) parts.push(phase);
+    if (gameId) parts.push(`game ${gameId}`);
+    if (ply) parts.push(`ply ${ply}`);
+    return parts.length > 0 ? parts.join(" • ") : "";
+  }, [drill.origin, drill.opening, drill.phase, drill.source]);
+
   return (
     <div className="training-drill-container">
       <div className="drill-header">
@@ -208,9 +240,9 @@ export default function TrainingDrill({
             Phase: {drill.phase} {drill.opening && `• Opening: ${drill.opening}`}
           </div>
         )}
-        {drill.origin && (
+        {(drill.origin || originText) && (
           <div className="drill-origin">
-            📍 {drill.origin}
+            📍 {drill.origin || originText}
             {drill.game_date && (
               <span className="drill-date">
                 ({new Date(drill.game_date).toLocaleDateString()})

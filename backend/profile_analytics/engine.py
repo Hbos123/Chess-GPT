@@ -363,6 +363,9 @@ class ProfileAnalyticsEngine:
             review = g.get("game_review") or {}
             if not isinstance(review, dict):
                 continue
+            meta = review.get("metadata", {}) if isinstance(review.get("metadata"), dict) else {}
+            player_color = (meta.get("player_color") or g.get("user_color") or "white")
+            player_color = "black" if str(player_color).lower().strip() == "black" else "white"
             plys = review.get("ply_records", [])
             if not isinstance(plys, list):
                 continue
@@ -377,6 +380,8 @@ class ProfileAnalyticsEngine:
                 if not fen or not san:
                     continue
                 cp_loss = float(ply.get("cp_loss", 0) or 0)
+                side_moved = ply.get("side_moved")
+                error_side = "player" if side_moved == player_color else "opponent"
                 
                 position_data = {
                     "fen_before": fen,
@@ -445,7 +450,9 @@ class ProfileAnalyticsEngine:
                         "phase": ply.get("phase"),
                         "opening_name": g.get("opening_name") or ply.get("opening_name") or None,
                         "is_critical": cp_loss >= 200,
+                        "is_error": True,
                         "error_category": error_category,
+                        "error_side": error_side,
                         "error_note": f"{category.capitalize()}: {san} (cp_loss: {round(cp_loss, 1)})",
                         # Tag transition metadata
                         "tags_start": tags_start,

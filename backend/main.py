@@ -9377,6 +9377,7 @@ async def get_positions_by_tag_transition(
         total_count_result = await asyncio.to_thread(
             supabase_client.count_user_positions,
             user_id=user_id,
+            error_side_filter="player",
             tags_gained_filter=tags_gained_filter,
             tags_lost_filter=tags_lost_filter,
             tags_missed_filter=tags_missed_filter,
@@ -9389,6 +9390,7 @@ async def get_positions_by_tag_transition(
         positions = await asyncio.to_thread(
             supabase_client.search_user_positions,
             user_id=user_id,
+            error_side_filter="player",
             tags_gained_filter=tags_gained_filter,
             tags_lost_filter=tags_lost_filter,
             tags_missed_filter=tags_missed_filter,
@@ -9503,6 +9505,7 @@ async def get_positions_by_filter(
         total_count_result = await asyncio.to_thread(
             supabase_client.count_user_positions,
             user_id=user_id,
+            error_side_filter="player",
             tags_gained_filter=tags_gained_filter,
             tags_lost_filter=tags_lost_filter,
             tags_missed_filter=tags_missed_filter,
@@ -9519,6 +9522,7 @@ async def get_positions_by_filter(
         positions = await asyncio.to_thread(
             supabase_client.search_user_positions,
             user_id=user_id,
+            error_side_filter="player",
             tags_gained_filter=tags_gained_filter,
             tags_lost_filter=tags_lost_filter,
             tags_missed_filter=tags_missed_filter,

@@ -1921,6 +1921,7 @@ class SupabaseClient:
         phases: Optional[List[str]] = None,
         themes: Optional[List[str]] = None,
         mover_name: Optional[str] = None,
+        error_side_filter: Optional[str] = None,
         tags_gained_filter: Optional[str] = None,
         tags_lost_filter: Optional[str] = None,
         tags_missed_filter: Optional[str] = None,
@@ -1963,6 +1964,9 @@ class SupabaseClient:
                 
             if mover_name:
                 query = query.eq("mover_name", mover_name)
+
+            if error_side_filter:
+                query = query.eq("error_side", error_side_filter)
             
             # Tag transition filters using array contains
             if tags_gained_filter:
@@ -2016,6 +2020,7 @@ class SupabaseClient:
     def count_user_positions(
         self,
         user_id: str,
+        error_side_filter: Optional[str] = None,
         tags_gained_filter: Optional[str] = None,
         tags_lost_filter: Optional[str] = None,
         tags_missed_filter: Optional[str] = None,
@@ -2032,6 +2037,9 @@ class SupabaseClient:
             
             if error_categories:
                 query = query.in_("error_category", error_categories)
+
+            if error_side_filter:
+                query = query.eq("error_side", error_side_filter)
             
             if tags_gained_filter:
                 query = query.contains("tags_gained", [tags_gained_filter])
