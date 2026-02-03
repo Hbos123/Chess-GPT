@@ -30,6 +30,90 @@ class DetailedAnalyticsAggregator:
         if not isinstance(record, dict):
             return ""
         return (record.get("san") or record.get("move_san") or "").strip()
+
+    def _infer_accuracy_pct(self, record: Dict) -> float:
+        """
+        Infer per-move accuracy when `accuracy_pct` is missing/zero in stored compact reviews.
+
+        Priority:
+        - cp_loss (if present)
+        - category
+        - analyse.tags (blunder/mistake/inaccuracy/missed_win)
+        - default baseline
+        """
+        if not isinstance(record, dict):
+            return 75.0
+
+        cp_loss = record.get("cp_loss")
+        if isinstance(cp_loss, (int, float)):
+            v = float(cp_loss)
+            if v < 15:
+                return 98.0
+            if v < 50:
+                return 90.0
+            if v < 100:
+                return 72.0
+            if v < 200:
+                return 45.0
+            return 15.0
+
+        cat = str(record.get("category") or "").strip().lower()
+        if cat in ("critical_best", "best", "excellent", "good", "brilliant"):
+            return 92.0
+        if cat == "inaccuracy":
+            return 62.0
+        if cat == "mistake":
+            return 38.0
+        if cat == "blunder":
+            return 12.0
+
+        analyse = record.get("analyse") if isinstance(record.get("analyse"), dict) else {}
+        tags = analyse.get("tags", []) if isinstance(analyse.get("tags"), list) else []
+        tags_norm = set()
+        for t in tags:
+            if isinstance(t, str):
+                tags_norm.add(t.strip().lower())
+            elif isinstance(t, dict):
+                name = t.get("tag_name") or t.get("name") or t.get("tag")
+                if isinstance(name, str):
+                    tags_norm.add(name.strip().lower())
+
+        if "blunder" in tags_norm:
+            return 12.0
+        if "mistake" in tags_norm:
+            return 38.0
+        if "inaccuracy" in tags_norm:
+            return 62.0
+        if "missed_win" in tags_norm:
+            return 55.0
+
+        return 75.0
+
+    def _record_accuracy_pct(self, record: Dict, infer_mode: bool) -> float:
+        """Return accuracy_pct, using inference when needed."""
+        if not isinstance(record, dict):
+            return 0.0
+        a = record.get("accuracy_pct")
+        if isinstance(a, (int, float)) and float(a) > 0:
+            return float(a)
+        return float(self._infer_accuracy_pct(record)) if infer_mode else 0.0
+
+    def _should_infer_accuracy_for_game(self, ply_records: List[Dict], player_color: str) -> bool:
+        """
+        Decide whether to infer accuracies for a game.
+        We infer if almost all player moves have missing/zero accuracy_pct.
+        """
+        if not isinstance(ply_records, list) or not ply_records:
+            return False
+        player_moves = [r for r in ply_records if isinstance(r, dict) and r.get("side_moved") == player_color]
+        if len(player_moves) < 3:
+            return False
+        nonzero = 0
+        for r in player_moves:
+            a = r.get("accuracy_pct")
+            if isinstance(a, (int, float)) and float(a) > 0:
+                nonzero += 1
+        return nonzero < max(2, int(len(player_moves) * 0.2))
     
     def aggregate(self, games: List[Dict]) -> Dict[str, Any]:
         """
@@ -109,8 +193,11 @@ class DetailedAnalyticsAggregator:
                 continue
             
             ply_records = game_review.get("ply_records", [])
+            infer_mode = self._should_infer_accuracy_for_game(ply_records, player_color)
             player_color = self._player_color(game, game_review)
+            infer_mode = self._should_infer_accuracy_for_game(ply_records, player_color)
             result = game.get("result") or game_review.get("metadata", {}).get("result", "unknown")
+            infer_mode = self._should_infer_accuracy_for_game(ply_records, player_color)
             
             # Determine ending phase
             ending_phase = self._determine_ending_phase(ply_records, player_color)
@@ -121,7 +208,7 @@ class DetailedAnalyticsAggregator:
                 if record.get("side_moved") != player_color:
                     continue
                 phase = record.get("phase", "middlegame")
-                accuracy = record.get("accuracy_pct", 0)
+                accuracy = self._record_accuracy_pct(record, infer_mode)
                 phase_accuracies[phase].append(accuracy)
             
             # Update phase data
@@ -204,10 +291,11 @@ class DetailedAnalyticsAggregator:
             if overall_accuracy is None:
                 ply_records = game_review.get("ply_records", [])
                 player_color = self._player_color(game, game_review)
+                infer_mode = self._should_infer_accuracy_for_game(ply_records, player_color)
                 accuracies = [
-                    r.get("accuracy_pct", 0) 
-                    for r in ply_records 
-                    if r.get("side_moved") == player_color
+                    self._record_accuracy_pct(r, infer_mode)
+                    for r in ply_records
+                    if isinstance(r, dict) and r.get("side_moved") == player_color
                 ]
                 if accuracies:
                     overall_accuracy = statistics.mean(accuracies)
@@ -253,7 +341,9 @@ class DetailedAnalyticsAggregator:
             
             ply_records = game_review.get("ply_records", [])
             player_color = self._player_color(game, game_review)
+            infer_mode = self._should_infer_accuracy_for_game(ply_records, player_color)
             game_id = game.get("id", "")
+            infer_mode = self._should_infer_accuracy_for_game(ply_records, player_color)
             
             game_pieces = defaultdict(lambda: {"accuracies": [], "count": 0})
             
@@ -264,7 +354,7 @@ class DetailedAnalyticsAggregator:
                 san = self._move_san(record)
                 if not san:
                     continue
-                accuracy = record.get("accuracy_pct", 0)
+                accuracy = self._record_accuracy_pct(record, infer_mode)
                 piece_type = self._get_piece_type_from_san(san)
                 
                 if piece_type:
@@ -446,14 +536,14 @@ class DetailedAnalyticsAggregator:
                 
                 # Check if this tag transition matches
                 if transition_type == "gained" and tag_name in gained:
-                    accuracy = curr_record.get("accuracy_pct", 0)
+                    accuracy = self._record_accuracy_pct(curr_record, infer_mode)
                     category = curr_record.get("category", "").lower() if curr_record.get("category") else ""
                     daily_data[game_date]["accuracies"].append(accuracy)
                     daily_data[game_date]["count"] += 1
                     if category in ["blunder", "mistake", "inaccuracy"]:
                         daily_data[game_date]["errors"] += 1
                 elif transition_type == "lost" and tag_name in lost:
-                    accuracy = curr_record.get("accuracy_pct", 0)
+                    accuracy = self._record_accuracy_pct(curr_record, infer_mode)
                     category = curr_record.get("category", "").lower() if curr_record.get("category") else ""
                     daily_data[game_date]["accuracies"].append(accuracy)
                     daily_data[game_date]["count"] += 1
@@ -543,7 +633,7 @@ class DetailedAnalyticsAggregator:
                 gained = curr_tags - prev_tags
                 lost = prev_tags - curr_tags
                 
-                accuracy = curr_record.get("accuracy_pct", 0)
+                accuracy = self._record_accuracy_pct(curr_record, infer_mode)
                 category = curr_record.get("category", "").lower() if curr_record.get("category") else ""
                 
                 # Track gained tags
@@ -613,6 +703,7 @@ class DetailedAnalyticsAggregator:
                 
                 ply_records = game_review.get("ply_records", [])
                 is_recent = game_idx in recent_indices
+                infer_mode = self._should_infer_accuracy_for_game(ply_records, player_color_str)
                 
                 for i in range(1, len(ply_records)):
                     prev_record = ply_records[i - 1]
@@ -627,7 +718,7 @@ class DetailedAnalyticsAggregator:
                     gained = curr_tags - prev_tags
                     lost = prev_tags - curr_tags
                     
-                    accuracy = curr_record.get("accuracy_pct", 0)
+                    accuracy = self._record_accuracy_pct(curr_record, infer_mode)
                     
                     # Track for trend calculation
                     for tag_name in gained | lost:
@@ -738,7 +829,7 @@ class DetailedAnalyticsAggregator:
                     continue
                 
                 time_spent = record.get("time_spent_s", 0)
-                accuracy = record.get("accuracy_pct", 0)
+                accuracy = self._record_accuracy_pct(record, infer_mode)
                 category = record.get("category", "").lower() if record.get("category") else ""
                 
                 if time_spent is None or time_spent <= 0:
