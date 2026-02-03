@@ -187,9 +187,7 @@ export default function DetailedAnalyticsSection({
             <TagTransitionsCard tagTransitions={detailedAnalytics.tag_transitions} />
           )}
 
-          {detailedAnalytics.static_tags && (
-            <StaticTagsCard staticTags={detailedAnalytics.static_tags} />
-          )}
+          <StaticTagsCard staticTags={detailedAnalytics.static_tags || {}} />
 
           {detailedAnalytics.time_buckets && Object.keys(detailedAnalytics.time_buckets).length > 0 && (
             <TimeManagementCard timeBuckets={detailedAnalytics.time_buckets} />

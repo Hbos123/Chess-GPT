@@ -12,6 +12,7 @@ type DetailedAnalytics = {
     gained?: Record<string, { significance_score?: number }>;
     lost?: Record<string, { significance_score?: number }>;
   };
+  static_tags?: Record<string, { significance_score?: number }>;
 };
 
 const COLOR_POOL = ["#60a5fa", "#34d399", "#fbbf24", "#f87171", "#a78bfa", "#22d3ee", "#fb7185", "#4ade80"];

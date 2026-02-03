@@ -8177,6 +8177,7 @@ async def get_graph_data(
                     "piece_accuracy": point.get("piece_accuracy") or {},
                     "time_bucket_accuracy": point.get("time_bucket_accuracy") or {},
                     "tag_transitions": point.get("tag_transitions") or {"gained": {}, "lost": {}},
+                    "static_tags": point.get("static_tags") or {},
                 })
             
             print(f"✅ [GRAPH_DATA_ENDPOINT] Returning {len(formatted)} pre-computed graph points for user_id: {user_id}")

@@ -15,6 +15,7 @@ export type GraphGamePoint = {
     gained: Record<string, { count: number; avg_accuracy: number | null }>;
     lost: Record<string, { count: number; avg_accuracy: number | null }>;
   };
+  static_tags?: Record<string, { count: number; avg_accuracy: number | null }>;
 };
 
 export type TimePoint = {
@@ -31,7 +32,9 @@ export type SeriesKind =
   | "piece_accuracy"
   | "time_bucket_accuracy"
   | "tag_transition_count"
-  | "tag_transition_accuracy";
+  | "tag_transition_accuracy"
+  | "static_tag_count"
+  | "static_tag_accuracy";
 
 export type GraphSeriesEntry = {
   id: string;
@@ -190,6 +193,26 @@ export function buildSeries(entry: GraphSeriesEntry, points: TimePoint[]): Built
       const dir = params.dir || "gained";
       const items = games.map((g) => {
         const it = g.tag_transitions?.[dir]?.[tag];
+        return { value: it?.avg_accuracy ?? null, weight: it?.count ?? 0 };
+      });
+      rawValues.push(weightedMean(items));
+      const inst = items.reduce((s, it) => s + (it.weight || 0), 0);
+      instancesByPoint.push(inst);
+      continue;
+    }
+
+    if (kind === "static_tag_count") {
+      const tag = params.tag || "";
+      const counts = games.map((g) => g.static_tags?.[tag]?.count ?? 0);
+      rawValues.push(counts.reduce((a, b) => a + b, 0));
+      instancesByPoint.push(counts.reduce((a, b) => a + b, 0));
+      continue;
+    }
+
+    if (kind === "static_tag_accuracy") {
+      const tag = params.tag || "";
+      const items = games.map((g) => {
+        const it = g.static_tags?.[tag];
         return { value: it?.avg_accuracy ?? null, weight: it?.count ?? 0 };
       });
       rawValues.push(weightedMean(items));

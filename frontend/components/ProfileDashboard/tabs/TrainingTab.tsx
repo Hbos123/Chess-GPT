@@ -53,12 +53,10 @@ export default function TrainingTab({ userId, backendBase }: TrainingTabProps) {
   const [isTagExpanded, setIsTagExpanded] = useState(true);
   const [isTimeExpanded, setIsTimeExpanded] = useState(true);
 
-  // TEMPORARY: Comment out fetch - UNCOMMENT AFTER FORMATTING IS DONE
-  /*
   useEffect(() => {
     if (!userId) return;
     loadDrillSuggestions();
-  }, [userId]);
+  }, [userId, BACKEND_BASE]);
 
   const loadDrillSuggestions = async () => {
     setLoading(true);
@@ -323,7 +321,6 @@ export default function TrainingTab({ userId, backendBase }: TrainingTabProps) {
       setLoading(false);
     }
   };
-  */ // END TEMPORARY COMMENT - UNCOMMENT ABOVE AFTER FORMATTING IS DONE
 
   const handleStartDrill = async (suggestion: DrillSuggestion) => {
     try {

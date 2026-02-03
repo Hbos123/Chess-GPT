@@ -8,6 +8,7 @@ type DetailedAnalytics = {
     gained?: Record<string, { significance_score?: number }>;
     lost?: Record<string, { significance_score?: number }>;
   };
+  static_tags?: Record<string, { significance_score?: number }>;
 };
 
 const PIECES = ["Pawn", "Knight", "Bishop", "Rook", "Queen", "King"] as const;
@@ -62,6 +63,7 @@ export default function AddGraphEntryModal({
   const suggested = useMemo(() => {
     const gained = detailed?.tag_transitions?.gained || {};
     const lost = detailed?.tag_transitions?.lost || {};
+    const statics = detailed?.static_tags || {};
     const items: Array<{ dir: "gained" | "lost"; tag: string; score: number }> = [];
     for (const [tag, data] of Object.entries(gained)) {
       const s = typeof data?.significance_score === "number" ? data.significance_score : 0;
@@ -72,6 +74,15 @@ export default function AddGraphEntryModal({
       if (s > 0) items.push({ dir: "lost", tag, score: s });
     }
     return items.sort((a, b) => b.score - a.score).slice(0, 5);
+  }, [detailed]);
+
+  const suggestedStatic = useMemo(() => {
+    const statics = detailed?.static_tags || {};
+    return Object.entries(statics)
+      .map(([tag, data]) => ({ tag, score: typeof data?.significance_score === "number" ? data.significance_score : 0 }))
+      .filter((x) => x.score > 0)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 5);
   }, [detailed]);
 
   const gainedTags = useMemo(() => {
@@ -85,6 +96,14 @@ export default function AddGraphEntryModal({
   const lostTags = useMemo(() => {
     const lost = detailed?.tag_transitions?.lost || {};
     return Object.entries(lost)
+      .map(([tag, data]) => ({ tag, score: typeof data?.significance_score === "number" ? data.significance_score : 0 }))
+      .sort((a, b) => b.score - a.score)
+      .map((x) => x.tag);
+  }, [detailed]);
+
+  const staticTags = useMemo(() => {
+    const statics = detailed?.static_tags || {};
+    return Object.entries(statics)
       .map(([tag, data]) => ({ tag, score: typeof data?.significance_score === "number" ? data.significance_score : 0 }))
       .sort((a, b) => b.score - a.score)
       .map((x) => x.tag);
@@ -203,6 +222,57 @@ export default function AddGraphEntryModal({
                     return (
                       <button
                         key={`${sugg.dir}:${sugg.tag}`}
+                        disabled={disabled}
+                        onClick={() => handleAdd(entry)}
+                        style={{
+                          display: "flex",
+                          justifyContent: "space-between",
+                          gap: 12,
+                          alignItems: "center",
+                          padding: "10px 12px",
+                          borderRadius: 12,
+                          border: "1px solid rgba(148, 163, 184, 0.18)",
+                          background: disabled ? "rgba(148, 163, 184, 0.06)" : "rgba(30, 58, 95, 0.25)",
+                          cursor: disabled ? "not-allowed" : "pointer",
+                          color: "#e2e8f0",
+                          textAlign: "left",
+                        }}
+                      >
+                        <div style={{ display: "flex", gap: 10, alignItems: "center", minWidth: 0 }}>
+                          <span style={{ width: 10, height: 10, borderRadius: 999, background: entry.color, flex: "0 0 auto" }} />
+                          <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{label}</span>
+                        </div>
+                        <div style={{ color: "#93c5fd", fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>{sugg.score.toFixed(0)}</div>
+                      </button>
+                    );
+                  })
+              )}
+            </div>
+          </div>
+
+          <div style={{ display: "grid", gap: 10, marginTop: 6 }}>
+            <div style={{ color: "#e0e7ff", fontWeight: 800, fontSize: 12, letterSpacing: 0.4, textTransform: "uppercase" }}>
+              Suggested static tags
+            </div>
+            <div style={{ display: "grid", gap: 8 }}>
+              {suggestedStatic.length === 0 ? (
+                <div style={{ color: "#94a3b8", fontSize: 13 }}>No suggestions yet (need detailed analytics static tags).</div>
+              ) : (
+                suggestedStatic
+                  .filter((x) => filter(formatTagName(x.tag)))
+                  .map((sugg, i) => {
+                    const label = `Static tag: ${formatTagName(sugg.tag)}`;
+                    const entry: GraphSeriesEntry = {
+                      id: entryId("static_tag_count", { tag: sugg.tag }),
+                      kind: "static_tag_count",
+                      label,
+                      color: pickColor(i),
+                      params: { tag: sugg.tag },
+                    };
+                    const disabled = existingIds.has(entry.id);
+                    return (
+                      <button
+                        key={`static:${sugg.tag}`}
                         disabled={disabled}
                         onClick={() => handleAdd(entry)}
                         style={{
@@ -361,6 +431,44 @@ export default function AddGraphEntryModal({
                     return (
                       <button
                         key={`lost:${x.t}`}
+                        disabled={disabled}
+                        onClick={() => handleAdd(entry)}
+                        style={{
+                          padding: "8px 10px",
+                          borderRadius: 10,
+                          border: "1px solid rgba(148, 163, 184, 0.18)",
+                          background: disabled ? "rgba(148, 163, 184, 0.06)" : "rgba(30, 58, 95, 0.18)",
+                          color: "#e2e8f0",
+                          cursor: disabled ? "not-allowed" : "pointer",
+                          textAlign: "left",
+                        }}
+                      >
+                        {x.label}
+                      </button>
+                    );
+                  })}
+              </div>
+            </details>
+
+            <details style={{ border: "1px solid rgba(148, 163, 184, 0.15)", borderRadius: 12, padding: 10 }}>
+              <summary style={{ cursor: "pointer", color: "#e2e8f0", fontWeight: 700 }}>Static tags</summary>
+              <div style={{ display: "grid", gap: 8, marginTop: 10 }}>
+                {staticTags
+                  .map((t) => ({ t, label: formatTagName(t) }))
+                  .filter((x) => filter(x.label))
+                  .slice(0, 120)
+                  .map((x, i) => {
+                    const entry: GraphSeriesEntry = {
+                      id: entryId("static_tag_count", { tag: x.t }),
+                      kind: "static_tag_count",
+                      label: `Static tag: ${x.label}`,
+                      color: pickColor(i),
+                      params: { tag: x.t },
+                    };
+                    const disabled = existingIds.has(entry.id);
+                    return (
+                      <button
+                        key={`static:${x.t}`}
                         disabled={disabled}
                         onClick={() => handleAdd(entry)}
                         style={{

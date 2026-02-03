@@ -186,6 +186,36 @@ def build_graph_game_point(game: Dict[str, Any], index: int) -> Dict[str, Any]:
 
     tag_transitions = {"gained": _format_transitions(gained_count, gained), "lost": _format_transitions(lost_count, lost)}
 
+    # Static tags per game (persisting before->after the player's move)
+    static_accs = defaultdict(list)  # tag -> accuracies
+    static_count = defaultdict(int)
+
+    for r in ply_records:
+        if r.get("side_moved") != player_color:
+            continue
+        acc = r.get("accuracy_pct")
+        if not isinstance(acc, (int, float)):
+            acc = None
+
+        analyse_tags = (r.get("analyse") or {}).get("tags") if isinstance(r.get("analyse") or {}, dict) else None
+        rb = (r.get("raw_before") or {}) if isinstance(r.get("raw_before") or {}, dict) else {}
+        ra = (r.get("raw_after") or {}) if isinstance(r.get("raw_after") or {}, dict) else {}
+        before_tags_raw = rb.get("tags")
+        after_tags_raw = ra.get("tags")
+
+        before_tags = _extract_tag_names(before_tags_raw) if before_tags_raw else _extract_tag_names(analyse_tags)
+        after_tags = _extract_tag_names(after_tags_raw) if after_tags_raw else _extract_tag_names(analyse_tags)
+        static_tags = before_tags & after_tags
+        if not static_tags:
+            continue
+
+        for t in static_tags:
+            static_count[t] += 1
+            if acc is not None:
+                static_accs[t].append(float(acc))
+
+    static_tags = _format_transitions(static_count, static_accs)
+
     opening_name = game.get("opening_name") or metadata.get("opening_name") or "Unknown"
     opening_eco = game.get("opening_eco") or metadata.get("opening_eco") or "Unknown"
 
@@ -201,6 +231,7 @@ def build_graph_game_point(game: Dict[str, Any], index: int) -> Dict[str, Any]:
         "piece_accuracy": piece_accuracy,
         "time_bucket_accuracy": time_bucket_accuracy,
         "tag_transitions": tag_transitions,
+        "static_tags": static_tags,
     }
 
 
