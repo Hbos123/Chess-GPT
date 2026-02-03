@@ -13,7 +13,7 @@ from datetime import datetime as dt
 
 class DetailedAnalyticsAggregator:
     """Aggregates detailed analytics from game reviews."""
-
+    
     def _player_color(self, game: Dict, game_review: Dict) -> str:
         """
         Resolve the player's color robustly across stored review formats.
@@ -148,7 +148,7 @@ class DetailedAnalyticsAggregator:
                 games_with_ply += 1
             if gr.get("_stored") == "compact":
                 games_compact += 1
-
+        
         return {
             "_meta": {
                 "games_total": games_total,
@@ -294,7 +294,7 @@ class DetailedAnalyticsAggregator:
                 infer_mode = self._should_infer_accuracy_for_game(ply_records, player_color)
                 accuracies = [
                     self._record_accuracy_pct(r, infer_mode)
-                    for r in ply_records
+                    for r in ply_records 
                     if isinstance(r, dict) and r.get("side_moved") == player_color
                 ]
                 if accuracies:

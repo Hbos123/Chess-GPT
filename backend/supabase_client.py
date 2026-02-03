@@ -920,58 +920,58 @@ class SupabaseClient:
                 Build a compact representation of game_review that is sufficient for
                 DetailedAnalyticsAggregator while keeping payload size low.
                 """
-                        def _infer_accuracy_pct(r: Dict[str, Any]) -> float:
-                            """
-                            Infer a per-move accuracy percentage when the client didn't provide one.
-                            This is primarily for frontend-reviewed games which often omit accuracy_pct.
-                            """
-                            try:
-                                # Prefer cp_loss if present (most informative).
-                                cp_loss = r.get("cp_loss")
-                                if isinstance(cp_loss, (int, float)):
-                                    v = float(cp_loss)
-                                    if v < 15:
-                                        return 98.0
-                                    if v < 50:
-                                        return 90.0
-                                    if v < 100:
-                                        return 72.0
-                                    if v < 200:
-                                        return 45.0
-                                    return 15.0
-                            except Exception:
-                                pass
+                def _infer_accuracy_pct(r: Dict[str, Any]) -> float:
+                    """
+                    Infer a per-move accuracy percentage when the client didn't provide one.
+                    This is primarily for frontend-reviewed games which often omit accuracy_pct.
+                    """
+                    try:
+                        # Prefer cp_loss if present (most informative).
+                        cp_loss = r.get("cp_loss")
+                        if isinstance(cp_loss, (int, float)):
+                            v = float(cp_loss)
+                            if v < 15:
+                                return 98.0
+                            if v < 50:
+                                return 90.0
+                            if v < 100:
+                                return 72.0
+                            if v < 200:
+                                return 45.0
+                            return 15.0
+                    except Exception:
+                        pass
 
-                            # Fall back to category / tags heuristics.
-                            cat = str(r.get("category") or "").strip().lower()
-                            if cat in ("critical_best", "best", "excellent", "good", "brilliant"):
-                                return 92.0
-                            if cat in ("inaccuracy",):
-                                return 62.0
-                            if cat in ("mistake",):
-                                return 38.0
-                            if cat in ("blunder",):
-                                return 12.0
+                    # Fall back to category / tags heuristics.
+                    cat = str(r.get("category") or "").strip().lower()
+                    if cat in ("critical_best", "best", "excellent", "good", "brilliant"):
+                        return 92.0
+                    if cat in ("inaccuracy",):
+                        return 62.0
+                    if cat in ("mistake",):
+                        return 38.0
+                    if cat in ("blunder",):
+                        return 12.0
 
-                            analyse = r.get("analyse") if isinstance(r.get("analyse"), dict) else {}
-                            tags = analyse.get("tags", []) if isinstance(analyse.get("tags", []), list) else []
-                            tags_norm = set()
-                            for t in tags:
-                                if isinstance(t, str):
-                                    tags_norm.add(t.strip().lower())
-                                elif isinstance(t, dict):
-                                    name = t.get("tag_name") or t.get("name") or t.get("tag")
-                                    if isinstance(name, str):
-                                        tags_norm.add(name.strip().lower())
-                            if "blunder" in tags_norm:
-                                return 12.0
-                            if "mistake" in tags_norm:
-                                return 38.0
-                            if "inaccuracy" in tags_norm:
-                                return 62.0
-                            if "missed_win" in tags_norm:
-                                return 55.0
-                            return 75.0
+                    analyse = r.get("analyse") if isinstance(r.get("analyse"), dict) else {}
+                    tags = analyse.get("tags", []) if isinstance(analyse.get("tags", []), list) else []
+                    tags_norm = set()
+                    for t in tags:
+                        if isinstance(t, str):
+                            tags_norm.add(t.strip().lower())
+                        elif isinstance(t, dict):
+                            name = t.get("tag_name") or t.get("name") or t.get("tag")
+                            if isinstance(name, str):
+                                tags_norm.add(name.strip().lower())
+                    if "blunder" in tags_norm:
+                        return 12.0
+                    if "mistake" in tags_norm:
+                        return 38.0
+                    if "inaccuracy" in tags_norm:
+                        return 62.0
+                    if "missed_win" in tags_norm:
+                        return 55.0
+                    return 75.0
 
                 if not isinstance(full_review, dict):
                     return {"_stored": "compact", "_reason": "non_dict_review"}
