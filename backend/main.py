@@ -7751,7 +7751,7 @@ async def profile_overview(user_id: str):
         prefs = {}
 
     # If prefs are missing, warm them in the background from Supabase and persist locally.
-        if (not prefs or not prefs.get("accounts")) and supabase_client:
+    if (not prefs or not prefs.get("accounts")) and supabase_client:
         async def _warm_prefs_from_supabase():
             try:
                 def _fetch_profile_row():
@@ -7763,14 +7763,14 @@ async def profile_overview(user_id: str):
                     if linked or time_controls:
                         try:
                             profile_indexer.save_preferences(user_id, {"accounts": linked, "time_controls": time_controls})
+                        except Exception:
+                            pass
             except Exception:
                 pass
-    except Exception:
-                pass
-            try:
+        try:
             asyncio.create_task(_warm_prefs_from_supabase())
-            except Exception:
-                pass
+        except Exception:
+            pass
     try:
         full_status = profile_indexer.get_status(user_id) or {}
         
