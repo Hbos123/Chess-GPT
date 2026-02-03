@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import PhasePerformanceCard from "./PhasePerformanceCard";
 import PieceAccuracyCard from "./PieceAccuracyCard";
 import TagTransitionsCard from "./TagTransitionsCard";
+import StaticTagsCard from "./StaticTagsCard";
 import TimeManagementCard from "./TimeManagementCard";
 
 interface DetailedAnalyticsSectionProps {
@@ -184,6 +185,10 @@ export default function DetailedAnalyticsSection({
 
           {detailedAnalytics.tag_transitions && (
             <TagTransitionsCard tagTransitions={detailedAnalytics.tag_transitions} />
+          )}
+
+          {detailedAnalytics.static_tags && (
+            <StaticTagsCard staticTags={detailedAnalytics.static_tags} />
           )}
 
           {detailedAnalytics.time_buckets && Object.keys(detailedAnalytics.time_buckets).length > 0 && (

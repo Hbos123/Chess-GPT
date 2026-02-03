@@ -204,6 +204,7 @@ class DetailedAnalyticsAggregator:
             "opening_detailed": self._aggregate_openings(games),
             "piece_accuracy_detailed": self._aggregate_pieces(games),
             "tag_transitions": self._aggregate_tag_transitions(games),
+            "static_tags": self._aggregate_static_tags(games),
             "time_buckets": self._aggregate_time_buckets(games)
         }
     
@@ -218,8 +219,263 @@ class DetailedAnalyticsAggregator:
             "opening_detailed": {},
             "piece_accuracy_detailed": {"per_game": [], "aggregate": {}},
             "tag_transitions": {"gained": {}, "lost": {}},
+            "static_tags": {},
             "time_buckets": {}
         }
+
+    def _aggregate_static_by_day_intervals(
+        self,
+        games: List[Dict],
+        tag_name: str,
+        player_color: str,
+    ) -> Dict[str, Any]:
+        """
+        Aggregate static (persisting) tag data by day intervals for trend visualization.
+
+        A tag is considered "static" for a player move when it appears in both:
+        - raw_before.tags (preferred) or analyse.tags (fallback)
+        - raw_after.tags (preferred) or analyse.tags (fallback)
+        """
+        def extract_tag_names(tags):
+            tag_names = set()
+            for tag in (tags or []):
+                if isinstance(tag, str):
+                    t = tag.strip()
+                    if t:
+                        tag_names.add(t)
+                elif isinstance(tag, dict):
+                    t = tag.get("tag_name") or tag.get("name") or tag.get("tag", "")
+                    if isinstance(t, str) and t.strip():
+                        tag_names.add(t.strip())
+            return tag_names
+
+        daily_data = defaultdict(lambda: {"accuracies": [], "count": 0, "errors": 0})
+
+        for game in games:
+            game_review = game.get("game_review", {})
+            if not game_review:
+                continue
+
+            game_date = game.get("game_date")
+            if not game_date:
+                continue
+
+            if isinstance(game_date, dt):
+                game_date = game_date.strftime("%Y-%m-%d")
+            elif isinstance(game_date, str):
+                if "T" in game_date:
+                    game_date = game_date.split("T")[0]
+                elif " " in game_date:
+                    game_date = game_date.split(" ")[0]
+            else:
+                continue
+
+            ply_records = game_review.get("ply_records", [])
+            infer_mode = self._should_infer_accuracy_for_game(ply_records, player_color)
+
+            for record in ply_records:
+                if not isinstance(record, dict):
+                    continue
+                if record.get("side_moved") != player_color:
+                    continue
+
+                analyse_tags = record.get("analyse", {}).get("tags", []) if isinstance(record.get("analyse"), dict) else []
+                raw_before_tags = record.get("raw_before", {}).get("tags", []) if isinstance(record.get("raw_before"), dict) else []
+                raw_after_tags = record.get("raw_after", {}).get("tags", []) if isinstance(record.get("raw_after"), dict) else []
+
+                before = extract_tag_names(raw_before_tags) if raw_before_tags else extract_tag_names(analyse_tags)
+                after = extract_tag_names(raw_after_tags) if raw_after_tags else extract_tag_names(analyse_tags)
+                static = before & after
+                if tag_name not in static:
+                    continue
+
+                accuracy = self._record_accuracy_pct(record, infer_mode)
+                category = self._quality_category(record)
+                daily_data[game_date]["accuracies"].append(accuracy)
+                daily_data[game_date]["count"] += 1
+                if category in ["blunder", "mistake", "inaccuracy"]:
+                    daily_data[game_date]["errors"] += 1
+
+        sorted_dates = sorted(daily_data.keys())
+        dates: list[str] = []
+        accuracies: list[float] = []
+        counts: list[int] = []
+        errors: list[int] = []
+
+        for date in sorted_dates:
+            data = daily_data[date]
+            if data["count"] > 0:
+                dates.append(date)
+                accuracies.append(round(statistics.mean(data["accuracies"]), 1))
+                counts.append(data["count"])
+                errors.append(data["errors"])
+
+        return {"dates": dates, "accuracies": accuracies, "counts": counts, "errors": errors}
+
+    def _aggregate_static_tags(self, games: List[Dict]) -> Dict[str, Dict]:
+        """
+        Aggregate "static" tags: tags that persist before and after a player's move.
+
+        Mirrors the structure of tag_transitions entries so the frontend can display
+        highest/lowest accuracy, error rate, trend and sparklines in the same way.
+        """
+        static_tags = defaultdict(lambda: {
+            "accuracies": [],
+            "blunders": 0,
+            "mistakes": 0,
+            "inaccuracies": 0,
+            "count": 0,
+        })
+
+        def extract_tag_names(tags):
+            tag_names = set()
+            for tag in (tags or []):
+                if isinstance(tag, str):
+                    t = tag.strip()
+                    if t:
+                        tag_names.add(t)
+                elif isinstance(tag, dict):
+                    t = tag.get("tag_name") or tag.get("name") or tag.get("tag", "")
+                    if isinstance(t, str) and t.strip():
+                        tag_names.add(t.strip())
+            return tag_names
+
+        # Resolve a stable player_color for trend formatting.
+        default_player_color = "white"
+        for g in games:
+            gr = g.get("game_review", {})
+            if isinstance(gr, dict):
+                default_player_color = self._player_color(g, gr)
+                break
+
+        for game in games:
+            game_review = game.get("game_review", {})
+            if not game_review:
+                continue
+
+            ply_records = game_review.get("ply_records", [])
+            player_color = self._player_color(game, game_review)
+            infer_mode = self._should_infer_accuracy_for_game(ply_records, player_color)
+
+            for record in ply_records:
+                if not isinstance(record, dict):
+                    continue
+                if record.get("side_moved") != player_color:
+                    continue
+
+                analyse_tags = record.get("analyse", {}).get("tags", []) if isinstance(record.get("analyse"), dict) else []
+                raw_before_tags = record.get("raw_before", {}).get("tags", []) if isinstance(record.get("raw_before"), dict) else []
+                raw_after_tags = record.get("raw_after", {}).get("tags", []) if isinstance(record.get("raw_after"), dict) else []
+
+                before = extract_tag_names(raw_before_tags) if raw_before_tags else extract_tag_names(analyse_tags)
+                after = extract_tag_names(raw_after_tags) if raw_after_tags else extract_tag_names(analyse_tags)
+                static = before & after
+                if not static:
+                    continue
+
+                accuracy = self._record_accuracy_pct(record, infer_mode)
+                category = self._quality_category(record)
+
+                for t in static:
+                    static_tags[t]["accuracies"].append(accuracy)
+                    static_tags[t]["count"] += 1
+                    if category == "blunder":
+                        static_tags[t]["blunders"] += 1
+                    elif category == "mistake":
+                        static_tags[t]["mistakes"] += 1
+                    elif category == "inaccuracy":
+                        static_tags[t]["inaccuracies"] += 1
+
+        # Baseline from all static-tag accuracies.
+        all_accs: list[float] = []
+        for td in static_tags.values():
+            all_accs.extend(td["accuracies"])
+        baseline_accuracy = statistics.mean(all_accs) if all_accs else 75.0
+
+        # Trend calculation uses per-game buckets like transitions.
+        tag_game_accuracies = defaultdict(lambda: {"recent": [], "older": []})
+        recent_indices = (
+            set(range(max(0, len(games) - 10), len(games)))
+            if len(games) > 10
+            else set(range(len(games) // 2, len(games)))
+        )
+
+        for game_idx, game in enumerate(games):
+            game_review = game.get("game_review", {})
+            if not game_review:
+                continue
+            ply_records = game_review.get("ply_records", [])
+            is_recent = game_idx in recent_indices
+            infer_mode = self._should_infer_accuracy_for_game(ply_records, default_player_color)
+
+            for record in ply_records:
+                if not isinstance(record, dict):
+                    continue
+                if record.get("side_moved") != default_player_color:
+                    continue
+
+                analyse_tags = record.get("analyse", {}).get("tags", []) if isinstance(record.get("analyse"), dict) else []
+                raw_before_tags = record.get("raw_before", {}).get("tags", []) if isinstance(record.get("raw_before"), dict) else []
+                raw_after_tags = record.get("raw_after", {}).get("tags", []) if isinstance(record.get("raw_after"), dict) else []
+
+                before = extract_tag_names(raw_before_tags) if raw_before_tags else extract_tag_names(analyse_tags)
+                after = extract_tag_names(raw_after_tags) if raw_after_tags else extract_tag_names(analyse_tags)
+                static = before & after
+                if not static:
+                    continue
+
+                accuracy = self._record_accuracy_pct(record, infer_mode)
+                for t in static:
+                    if is_recent:
+                        tag_game_accuracies[t]["recent"].append(accuracy)
+                    else:
+                        tag_game_accuracies[t]["older"].append(accuracy)
+
+        result: Dict[str, Dict[str, Any]] = {}
+        for tag_name, data in static_tags.items():
+            if data["count"] <= 0:
+                continue
+            avg_accuracy = statistics.mean(data["accuracies"]) if data["accuracies"] else 0
+            significance_score = self._calculate_tag_significance(
+                avg_accuracy,
+                data["count"],
+                baseline_accuracy,
+                data["accuracies"],
+            )
+
+            # Keep consistent with tag transitions (minimum 20).
+            if significance_score < 20:
+                continue
+
+            recent_accs = tag_game_accuracies[tag_name]["recent"]
+            older_accs = tag_game_accuracies[tag_name]["older"]
+            trend_value = 0.0
+            trend_direction = "stable"
+            if len(recent_accs) > 0 and len(older_accs) > 0:
+                trend_value = statistics.mean(recent_accs) - statistics.mean(older_accs)
+            elif len(recent_accs) > 0:
+                trend_value = statistics.mean(recent_accs) - avg_accuracy
+
+            if trend_value > 2:
+                trend_direction = "improving"
+            elif trend_value < -2:
+                trend_direction = "declining"
+
+            day_intervals = self._aggregate_static_by_day_intervals(games, tag_name, default_player_color)
+
+            result[tag_name] = {
+                "accuracy": round(avg_accuracy, 1),
+                "count": data["count"],
+                "blunders": data["blunders"],
+                "mistakes": data["mistakes"],
+                "inaccuracies": data["inaccuracies"],
+                "trend": trend_direction,
+                "trend_value": round(trend_value, 1),
+                "significance_score": significance_score,
+                "day_intervals": day_intervals,
+            }
+
+        return result
     
     def _aggregate_phases(self, games: List[Dict]) -> Dict[str, Dict]:
         """Aggregate phase analytics with win/loss tracking."""
