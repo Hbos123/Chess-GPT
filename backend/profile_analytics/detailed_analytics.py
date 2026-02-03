@@ -341,7 +341,6 @@ class DetailedAnalyticsAggregator:
             player_color = self._player_color(game, game_review)
             infer_mode = self._should_infer_accuracy_for_game(ply_records, player_color)
             game_id = game.get("id", "")
-            infer_mode = self._should_infer_accuracy_for_game(ply_records, player_color)
             
             game_pieces = defaultdict(lambda: {"accuracies": [], "count": 0})
             
@@ -517,6 +516,7 @@ class DetailedAnalyticsAggregator:
                 continue
             
             ply_records = game_review.get("ply_records", [])
+            infer_mode = self._should_infer_accuracy_for_game(ply_records, player_color)
             
             # Track transitions for this tag on this day
             for i in range(1, len(ply_records)):
@@ -616,6 +616,7 @@ class DetailedAnalyticsAggregator:
             
             ply_records = game_review.get("ply_records", [])
             player_color = self._player_color(game, game_review)
+            infer_mode = self._should_infer_accuracy_for_game(ply_records, player_color)
             
             # Track transitions between consecutive moves
             for i in range(1, len(ply_records)):
@@ -821,6 +822,7 @@ class DetailedAnalyticsAggregator:
             
             ply_records = game_review.get("ply_records", [])
             player_color = self._player_color(game, game_review)
+            infer_mode = self._should_infer_accuracy_for_game(ply_records, player_color)
             
             for record in ply_records:
                 if record.get("side_moved") != player_color:
