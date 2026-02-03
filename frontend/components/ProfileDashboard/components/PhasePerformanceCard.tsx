@@ -79,26 +79,24 @@ export default function PhasePerformanceCard({ phaseAnalytics }: PhasePerformanc
               <div style={{ fontSize: '12px', color: '#cbd5e1', marginBottom: '12px' }}>
                 Accuracy
               </div>
-              {totalGames > 0 && (
-                <div style={{ fontSize: '12px', color: '#cbd5e1' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
-                    <span>Wins:</span>
-                    <span style={{ color: '#10b981' }}>{data.games_won}</span>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
-                    <span>Losses:</span>
-                    <span style={{ color: '#ef4444' }}>{data.games_lost}</span>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
-                    <span>Draws:</span>
-                    <span style={{ color: '#fbbf24' }}>{data.games_drawn}</span>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '8px', paddingTop: '8px', borderTop: '1px solid rgba(147, 197, 253, 0.1)' }}>
-                    <span>Win Rate:</span>
-                    <span style={{ fontWeight: 600 }}>{winRate.toFixed(1)}%</span>
-                  </div>
+              <div style={{ fontSize: '12px', color: '#cbd5e1' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                  <span>Wins:</span>
+                  <span style={{ color: '#10b981' }}>{data.games_won}</span>
                 </div>
-              )}
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                  <span>Losses:</span>
+                  <span style={{ color: '#ef4444' }}>{data.games_lost}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                  <span>Draws:</span>
+                  <span style={{ color: '#fbbf24' }}>{data.games_drawn}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '8px', paddingTop: '8px', borderTop: '1px solid rgba(147, 197, 253, 0.1)' }}>
+                  <span>Win Rate:</span>
+                  <span style={{ fontWeight: 600 }}>{winRate.toFixed(1)}%</span>
+                </div>
+              </div>
             </div>
           );
         })}

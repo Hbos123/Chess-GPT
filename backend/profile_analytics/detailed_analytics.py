@@ -98,6 +98,38 @@ class DetailedAnalyticsAggregator:
             return float(a)
         return float(self._infer_accuracy_pct(record)) if infer_mode else 0.0
 
+    def _quality_category(self, record: Dict[str, Any]) -> str:
+        """
+        Return a quality category for error-rate calculations: blunder/mistake/inaccuracy.
+
+        Frontend reviews often store these as analyse.tags (tag_name) and may omit record["category"].
+        """
+        if not isinstance(record, dict):
+            return ""
+
+        cat = str(record.get("category") or "").strip().lower()
+        if cat in ("blunder", "mistake", "inaccuracy"):
+            return cat
+
+        analyse = record.get("analyse") if isinstance(record.get("analyse"), dict) else {}
+        tags = analyse.get("tags", []) if isinstance(analyse.get("tags"), list) else []
+        tags_norm = set()
+        for t in tags:
+            if isinstance(t, str):
+                tags_norm.add(t.strip().lower())
+            elif isinstance(t, dict):
+                name = t.get("tag_name") or t.get("name") or t.get("tag")
+                if isinstance(name, str):
+                    tags_norm.add(name.strip().lower())
+
+        if "blunder" in tags_norm:
+            return "blunder"
+        if "mistake" in tags_norm:
+            return "mistake"
+        if "inaccuracy" in tags_norm:
+            return "inaccuracy"
+        return ""
+
     def _should_infer_accuracy_for_game(self, ply_records: List[Dict], player_color: str) -> bool:
         """
         Decide whether to infer accuracies for a game.
@@ -547,14 +579,14 @@ class DetailedAnalyticsAggregator:
                 # Check if this tag transition matches
                 if transition_type == "gained" and tag_name in gained:
                     accuracy = self._record_accuracy_pct(curr_record, infer_mode)
-                    category = curr_record.get("category", "").lower() if curr_record.get("category") else ""
+                    category = self._quality_category(curr_record)
                     daily_data[game_date]["accuracies"].append(accuracy)
                     daily_data[game_date]["count"] += 1
                     if category in ["blunder", "mistake", "inaccuracy"]:
                         daily_data[game_date]["errors"] += 1
                 elif transition_type == "lost" and tag_name in lost:
                     accuracy = self._record_accuracy_pct(curr_record, infer_mode)
-                    category = curr_record.get("category", "").lower() if curr_record.get("category") else ""
+                    category = self._quality_category(curr_record)
                     daily_data[game_date]["accuracies"].append(accuracy)
                     daily_data[game_date]["count"] += 1
                     if category in ["blunder", "mistake", "inaccuracy"]:
@@ -664,7 +696,7 @@ class DetailedAnalyticsAggregator:
                     print(f"   gained: {gained}, lost: {lost}")
                 
                 accuracy = self._record_accuracy_pct(curr_record, infer_mode)
-                category = curr_record.get("category", "").lower() if curr_record.get("category") else ""
+                category = self._quality_category(curr_record)
                 
                 # Track gained tags
                 for tag_name in gained:
@@ -884,7 +916,7 @@ class DetailedAnalyticsAggregator:
                 
                 time_spent = record.get("time_spent_s", 0)
                 accuracy = self._record_accuracy_pct(record, infer_mode)
-                category = record.get("category", "").lower() if record.get("category") else ""
+                category = self._quality_category(record)
                 
                 if time_spent is None or time_spent <= 0:
                     continue

@@ -236,7 +236,7 @@ export default function TagTransitionsCard({ tagTransitions }: TagTransitionsCar
           
           {/* Tags Gained - Lowest Accuracy */}
           <div>
-            <h4 style={{ margin: '0 0 12px 0', fontSize: '14px', fontWeight: 600, color: '#10b981' }}>
+            <h4 style={{ margin: '0 0 12px 0', fontSize: '14px', fontWeight: 600, color: '#ef4444' }}>
               Tags Gained - Lowest Accuracy
             </h4>
             {lowestGained.length > 0 ? (
@@ -249,12 +249,12 @@ export default function TagTransitionsCard({ tagTransitions }: TagTransitionsCar
                   return (
                     <div key={tag} style={{
                       padding: '12px',
-                      background: 'rgba(16, 185, 129, 0.1)',
+                      background: 'rgba(239, 68, 68, 0.1)',
                       borderRadius: '6px',
-                      border: '1px solid rgba(16, 185, 129, 0.3)'
+                      border: '1px solid rgba(239, 68, 68, 0.3)'
                     }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-                        <div style={{ fontSize: '13px', fontWeight: 600, color: '#6ee7b7' }}>
+                        <div style={{ fontSize: '13px', fontWeight: 600, color: '#fca5a5' }}>
                           {formatTagName(tag)}
                         </div>
                       {data.significance_score !== undefined && (
@@ -316,7 +316,7 @@ export default function TagTransitionsCard({ tagTransitions }: TagTransitionsCar
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
           {/* Tags Lost - Highest Accuracy */}
           <div>
-            <h4 style={{ margin: '0 0 12px 0', fontSize: '14px', fontWeight: 600, color: '#ef4444' }}>
+            <h4 style={{ margin: '0 0 12px 0', fontSize: '14px', fontWeight: 600, color: '#10b981' }}>
               Tags Lost - Highest Accuracy
           </h4>
           {highestLost.length > 0 ? (
@@ -329,12 +329,12 @@ export default function TagTransitionsCard({ tagTransitions }: TagTransitionsCar
                 return (
                   <div key={tag} style={{
                     padding: '12px',
-                    background: 'rgba(239, 68, 68, 0.1)',
+                    background: 'rgba(16, 185, 129, 0.1)',
                     borderRadius: '6px',
-                    border: '1px solid rgba(239, 68, 68, 0.2)'
+                    border: '1px solid rgba(16, 185, 129, 0.2)'
                   }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-                      <div style={{ fontSize: '13px', fontWeight: 600, color: '#fca5a5' }}>
+                      <div style={{ fontSize: '13px', fontWeight: 600, color: '#6ee7b7' }}>
                         {formatTagName(tag)}
                       </div>
                       {data.significance_score !== undefined && (
