@@ -235,7 +235,7 @@ export async function reviewGame(
         const chunkSize = 200;
         if (DEBUG_TAG_ENRICH) {
           console.log(
-            `[TagEnrich] Starting backend tag enrichment: plies=${plyRecords.length}, uniqueFENs=${fens.length}, chunkSize=${chunkSize}, endpoint=${backendBase.replace(/\\/$/, "")}/profile/position_tags`,
+            `[TagEnrich] Starting backend tag enrichment: plies=${plyRecords.length}, uniqueFENs=${fens.length}, chunkSize=${chunkSize}, endpoint=${backendBase.replace(/\/$/, "")}/profile/position_tags`,
           );
         }
         for (let i = 0; i < fens.length; i += chunkSize) {
