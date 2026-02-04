@@ -209,6 +209,14 @@ async def backfill_user_positions_from_pgn(
             
             positions_to_save = []
             
+            total_plys = len(ply_records)
+            plys_with_category = 0
+            plys_with_cp_loss = 0
+            plys_meeting_criteria = 0
+            
+            if idx == 1:
+                print(f"   🔍 Debug: Game {game_id} has {total_plys} ply_records, {len(fen_befores)} moves in PGN")
+            
             for rec_idx, rec in enumerate(ply_records):
                 if not isinstance(rec, dict):
                     continue
@@ -223,6 +231,9 @@ async def backfill_user_positions_from_pgn(
                     continue
                 
                 category = infer_category(rec)
+                if category:
+                    plys_with_category += 1
+                
                 if category not in ("blunder", "mistake"):
                     continue
                 
@@ -232,8 +243,13 @@ async def backfill_user_positions_from_pgn(
                 except Exception:
                     cp_loss_f = 0.0
                 
+                if cp_loss_f > 0:
+                    plys_with_cp_loss += 1
+                
                 if cp_loss_f < min_cp_loss:
                     continue
+                
+                plys_meeting_criteria += 1
                 
                 side_moved = rec.get("side_moved") or side_moveds[ply_i - 1]
                 error_side = "player" if side_moved == player_color else "opponent"
@@ -292,6 +308,8 @@ async def backfill_user_positions_from_pgn(
                     break
             
             if not positions_to_save:
+                if idx <= 3:
+                    print(f"   ⚠️ Game {game_id}: {total_plys} plys, {plys_with_category} with category, {plys_with_cp_loss} with cp_loss>0, {plys_meeting_criteria} meeting criteria (blunder/mistake + cp_loss>={min_cp_loss})")
                 continue
             
             games_with_positions += 1
