@@ -7,6 +7,7 @@ import { getBackendBase } from "@/lib/backendBase";
 interface TrainingTabProps {
   userId: string;
   backendBase?: string;
+  onCreateNewTab?: (params: any) => void;
 }
 
 interface TagTransition {
@@ -38,7 +39,7 @@ interface DrillSuggestion {
   difficulty: string;
 }
 
-export default function TrainingTab({ userId, backendBase }: TrainingTabProps) {
+export default function TrainingTab({ userId, backendBase, onCreateNewTab }: TrainingTabProps) {
   const BACKEND_BASE = backendBase || getBackendBase();
   
   const [loading, setLoading] = useState(true); // Start with loading true
@@ -443,6 +444,23 @@ export default function TrainingTab({ userId, backendBase }: TrainingTabProps) {
           piece_context: drill.piece_context,
         })),
       };
+
+      // Prefer launching drills in the main app's board tabs (so training runs in the main chat UI).
+      if (onCreateNewTab) {
+        const firstFen =
+          session.cards?.[0]?.fen ||
+          "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+        onCreateNewTab({
+          action: "new_tab",
+          title: `Training: ${session.mode}`,
+          type: "training",
+          fen: firstFen,
+          pgn: "",
+          trainingSession: session,
+          initialMessage: session.intro || `Training session ready: ${session.mode}`,
+        });
+        return;
+      }
 
       setActiveSession(session);
     } catch (err: any) {

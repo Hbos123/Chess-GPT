@@ -539,7 +539,9 @@ export default function ProfileDashboard({ onClose, initialTab = 'overview', onC
               {!isUnpaid && activeTab === 'recent' && <RecentGamesTab userId={user?.id || ''} onCreateNewTab={onCreateNewTab} />}
               {!isUnpaid && activeTab === 'graphs' && <GraphsTab userId={user?.id || ''} backendBase={backendBase} />}
               {!isUnpaid && activeTab === 'habits' && <HabitsPatternsTab userId={user?.id || ''} backendBase={backendBase} />}
-              {!isUnpaid && activeTab === 'training' && <TrainingTab userId={user?.id || ''} backendBase={backendBase} />}
+              {!isUnpaid && activeTab === 'training' && (
+                <TrainingTab userId={user?.id || ''} backendBase={backendBase} onCreateNewTab={onCreateNewTab} />
+              )}
             </div>
           )}
           {error && <div className="dashboard-error-banner">{error}</div>}
