@@ -177,7 +177,7 @@ class DrillGenerator:
         piece_blundered = position.get("piece_blundered")
         piece_best_move = position.get("piece_best_move")
         move_san = position.get("move_san") or position.get("player_move_san")
-
+        
         # Determine who made the mistake (if available)
         error_side = position.get("error_side")
         actor = "You" if error_side != "opponent" else "Your opponent"

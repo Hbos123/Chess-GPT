@@ -204,6 +204,28 @@ async def backfill_user_positions_from_pgn(
             
             positions_to_save = []
 
+            def piece_name_from_uci(fen: str, uci: str) -> str | None:
+                """Canonical lowercase piece name moved in a UCI move."""
+                if not fen or not uci or len(uci) < 4:
+                    return None
+                try:
+                    board_local = chess.Board(fen)
+                    mv_local = chess.Move.from_uci(uci)
+                    pc = board_local.piece_at(mv_local.from_square)
+                    if not pc:
+                        return None
+                    labels = {
+                        chess.PAWN: "pawn",
+                        chess.KNIGHT: "knight",
+                        chess.BISHOP: "bishop",
+                        chess.ROOK: "rook",
+                        chess.QUEEN: "queen",
+                        chess.KING: "king",
+                    }
+                    return labels.get(pc.piece_type)
+                except Exception:
+                    return None
+
             # Recompute cp_loss from PGN + engine so backfill works even when stored reviews are "thin".
             board = game_obj.board()
             total_plys = sum(1 for _ in game_obj.mainline_moves())
@@ -271,6 +293,9 @@ async def backfill_user_positions_from_pgn(
                 except Exception:
                     best_san, best_uci, eval_cp = "", "", float(eval_before)
 
+                piece_blundered = piece_name_from_uci(fen_before, move_uci)
+                piece_best_move = piece_name_from_uci(fen_before, best_uci) if best_uci else None
+
                 positions_to_save.append(
                     {
                         "fen": fen_before,
@@ -296,8 +321,8 @@ async def backfill_user_positions_from_pgn(
                         "tags_gained": tags_gained,
                         "tags_lost": tags_lost,
                         "time_spent_s": time_spent_s,
-                        "piece_blundered": rec.get("piece_blundered"),
-                        "piece_best_move": rec.get("piece_best_move"),
+                        "piece_blundered": piece_blundered,
+                        "piece_best_move": piece_best_move,
                     }
                 )
 

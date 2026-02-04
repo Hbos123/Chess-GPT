@@ -7,7 +7,6 @@ import { getBackendBase } from "@/lib/backendBase";
 interface TrainingTabProps {
   userId: string;
   backendBase?: string;
-  onCreateNewTab?: (params: any) => void;
 }
 
 interface TagTransition {
@@ -39,7 +38,7 @@ interface DrillSuggestion {
   difficulty: string;
 }
 
-export default function TrainingTab({ userId, backendBase, onCreateNewTab }: TrainingTabProps) {
+export default function TrainingTab({ userId, backendBase }: TrainingTabProps) {
   const BACKEND_BASE = backendBase || getBackendBase();
   
   const [loading, setLoading] = useState(true); // Start with loading true
@@ -153,7 +152,8 @@ export default function TrainingTab({ userId, backendBase, onCreateNewTab }: Tra
             id: `piece-${pieceName}`,
             category: "piece",
             filter_type: "piece",
-            filter_value: pieceName,
+            // Backend stores canonical piece names in lowercase (pawn/knight/...)
+            filter_value: pieceName.toLowerCase(),
             accuracy: pieceData.accuracy || 0,
             metadata: {
               piece: {
@@ -191,6 +191,14 @@ export default function TrainingTab({ userId, backendBase, onCreateNewTab }: Tra
         })
       );
 
+      // Only propose tag transitions that can realistically map to stored drill positions.
+      // Positions table is mined from blunders/mistakes, so exclude transitions with no errors and non-positional tags.
+      const isDrillableTag = (t: TagTransition) => {
+        const name = String(t.tag_name || "");
+        const hasErrors = (t.blunders || 0) + (t.mistakes || 0) > 0;
+        return hasErrors && (name.startsWith("tag.") || name.startsWith("Tag.") || name.startsWith("TAG."));
+      };
+
       const sortBySignificance = (a: TagTransition, b: TagTransition) => {
         const scoreA = a.significance_score || a.count;
         const scoreB = b.significance_score || b.count;
@@ -200,7 +208,7 @@ export default function TrainingTab({ userId, backendBase, onCreateNewTab }: Tra
       gainedTags.sort(sortBySignificance);
       lostTags.sort(sortBySignificance);
 
-      lostTags.slice(0, 5).forEach((tag) => {
+      lostTags.filter(isDrillableTag).slice(0, 5).forEach((tag) => {
         allSuggestions.push({
           id: `tag-lost-${tag.tag_name}`,
           category: "tag_transition",
@@ -221,7 +229,7 @@ export default function TrainingTab({ userId, backendBase, onCreateNewTab }: Tra
         });
       });
 
-      gainedTags.slice(0, 3).forEach((tag) => {
+      gainedTags.filter(isDrillableTag).slice(0, 3).forEach((tag) => {
         allSuggestions.push({
           id: `tag-gained-${tag.tag_name}`,
           category: "tag_transition",
@@ -274,42 +282,42 @@ export default function TrainingTab({ userId, backendBase, onCreateNewTab }: Tra
       // Pre-fetch position counts for all suggestions (non-blocking, parallel)
       Promise.all(
         allSuggestions.map(async (suggestion) => {
-          try {
-            const params = new URLSearchParams({
-              user_id: userId,
-              filter_type: suggestion.filter_type,
-              filter_value: suggestion.filter_value,
-              limit: "1",
-              min_cp_loss: "100",
-            });
-            
-            if (suggestion.transition_type) {
-              params.append("transition_type", suggestion.transition_type);
-            }
-
-            const countResponse = await fetch(
-              `${baseUrl}/profile/positions/by-filter?${params.toString()}`,
-              { cache: "no-store" }
-            );
-            
-            if (countResponse.ok) {
-              const countData = await countResponse.json();
-              setSuggestions((prev) =>
-                prev.map((s) =>
-                  s.id === suggestion.id
-                    ? {
-                        ...s,
-                        position_count: countData.total_available || 0,
-                        position_avg_accuracy: countData.average_accuracy,
-                      }
-                    : s
-                )
-              );
-            }
-          } catch (err) {
-            // Silently fail - position count is nice to have but not critical
-            console.debug(`[TrainingTab] Failed to fetch position count for ${suggestion.id}:`, err);
+        try {
+          const params = new URLSearchParams({
+            user_id: userId,
+            filter_type: suggestion.filter_type,
+            filter_value: suggestion.filter_value,
+            limit: "1",
+            min_cp_loss: "50",
+          });
+          
+          if (suggestion.transition_type) {
+            params.append("transition_type", suggestion.transition_type);
           }
+
+          const countResponse = await fetch(
+            `${baseUrl}/profile/positions/by-filter?${params.toString()}`,
+            { cache: "no-store" }
+          );
+          
+          if (countResponse.ok) {
+            const countData = await countResponse.json();
+            setSuggestions((prev) =>
+              prev.map((s) =>
+                s.id === suggestion.id
+                  ? {
+                      ...s,
+                      position_count: countData.total_available || 0,
+                      position_avg_accuracy: countData.average_accuracy,
+                    }
+                  : s
+              )
+            );
+          }
+        } catch (err) {
+          // Silently fail - position count is nice to have but not critical
+          console.debug(`[TrainingTab] Failed to fetch position count for ${suggestion.id}:`, err);
+        }
         })
       ).catch((err) => {
         console.debug("[TrainingTab] Error fetching position counts:", err);
@@ -339,7 +347,7 @@ export default function TrainingTab({ userId, backendBase, onCreateNewTab }: Tra
         filter_type: suggestion.filter_type,
         filter_value: suggestion.filter_value,
         limit: "20",
-        min_cp_loss: "100",
+        min_cp_loss: "50",
       });
       
       if (suggestion.transition_type) {
@@ -444,23 +452,6 @@ export default function TrainingTab({ userId, backendBase, onCreateNewTab }: Tra
           piece_context: drill.piece_context,
         })),
       };
-
-      // Prefer launching drills in the main app's board tabs (so training runs in the main chat UI).
-      if (onCreateNewTab) {
-        const firstFen =
-          session.cards?.[0]?.fen ||
-          "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
-        onCreateNewTab({
-          action: "new_tab",
-          title: `Training: ${session.mode}`,
-          type: "training",
-          fen: firstFen,
-          pgn: "",
-          trainingSession: session,
-          initialMessage: session.intro || `Training session ready: ${session.mode}`,
-        });
-        return;
-      }
 
       setActiveSession(session);
     } catch (err: any) {
@@ -698,7 +689,7 @@ function DrillCard({ suggestion, onStart, loading }: { suggestion: DrillSuggesti
     } else if (suggestion.category === "opening") {
       return suggestion.filter_value;
     } else if (suggestion.category === "piece") {
-      return suggestion.filter_value;
+      return suggestion.filter_value.charAt(0).toUpperCase() + suggestion.filter_value.slice(1);
     } else if (suggestion.category === "tag_transition") {
       return suggestion.filter_value.replace(/_/g, " ").replace(/\b\w/g, (l) => l.toUpperCase());
     } else if (suggestion.category === "time_bucket") {
@@ -731,9 +722,9 @@ function DrillCard({ suggestion, onStart, loading }: { suggestion: DrillSuggesti
       <button
         className="start-training-btn"
         onClick={() => onStart(suggestion)}
-        disabled={loading}
+        disabled={loading || suggestion.position_count === 0}
       >
-        {loading ? "Loading..." : "Start Drill"}
+        {loading ? "Loading..." : (suggestion.position_count === 0 ? "No positions yet" : "Start Drill")}
       </button>
     </div>
   );

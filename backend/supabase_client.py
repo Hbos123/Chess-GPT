@@ -921,57 +921,57 @@ class SupabaseClient:
                 DetailedAnalyticsAggregator while keeping payload size low.
                 """
                 def _infer_accuracy_pct(r: Dict[str, Any]) -> float:
-                    """
-                    Infer a per-move accuracy percentage when the client didn't provide one.
-                    This is primarily for frontend-reviewed games which often omit accuracy_pct.
-                    """
-                    try:
-                        # Prefer cp_loss if present (most informative).
-                        cp_loss = r.get("cp_loss")
-                        if isinstance(cp_loss, (int, float)):
-                            v = float(cp_loss)
-                            if v < 15:
-                                return 98.0
-                            if v < 50:
-                                return 90.0
-                            if v < 100:
-                                return 72.0
-                            if v < 200:
-                                return 45.0
-                            return 15.0
-                    except Exception:
-                        pass
+                            """
+                            Infer a per-move accuracy percentage when the client didn't provide one.
+                            This is primarily for frontend-reviewed games which often omit accuracy_pct.
+                            """
+                            try:
+                                # Prefer cp_loss if present (most informative).
+                                cp_loss = r.get("cp_loss")
+                                if isinstance(cp_loss, (int, float)):
+                                    v = float(cp_loss)
+                                    if v < 15:
+                                        return 98.0
+                                    if v < 50:
+                                        return 90.0
+                                    if v < 100:
+                                        return 72.0
+                                    if v < 200:
+                                        return 45.0
+                                    return 15.0
+                            except Exception:
+                                pass
 
-                    # Fall back to category / tags heuristics.
-                    cat = str(r.get("category") or "").strip().lower()
-                    if cat in ("critical_best", "best", "excellent", "good", "brilliant"):
-                        return 92.0
-                    if cat in ("inaccuracy",):
-                        return 62.0
-                    if cat in ("mistake",):
-                        return 38.0
-                    if cat in ("blunder",):
-                        return 12.0
+                            # Fall back to category / tags heuristics.
+                            cat = str(r.get("category") or "").strip().lower()
+                            if cat in ("critical_best", "best", "excellent", "good", "brilliant"):
+                                return 92.0
+                            if cat in ("inaccuracy",):
+                                return 62.0
+                            if cat in ("mistake",):
+                                return 38.0
+                            if cat in ("blunder",):
+                                return 12.0
 
-                    analyse = r.get("analyse") if isinstance(r.get("analyse"), dict) else {}
-                    tags = analyse.get("tags", []) if isinstance(analyse.get("tags", []), list) else []
-                    tags_norm = set()
-                    for t in tags:
-                        if isinstance(t, str):
-                            tags_norm.add(t.strip().lower())
-                        elif isinstance(t, dict):
-                            name = t.get("tag_name") or t.get("name") or t.get("tag")
-                            if isinstance(name, str):
-                                tags_norm.add(name.strip().lower())
-                    if "blunder" in tags_norm:
-                        return 12.0
-                    if "mistake" in tags_norm:
-                        return 38.0
-                    if "inaccuracy" in tags_norm:
-                        return 62.0
-                    if "missed_win" in tags_norm:
-                        return 55.0
-                    return 75.0
+                            analyse = r.get("analyse") if isinstance(r.get("analyse"), dict) else {}
+                            tags = analyse.get("tags", []) if isinstance(analyse.get("tags", []), list) else []
+                            tags_norm = set()
+                            for t in tags:
+                                if isinstance(t, str):
+                                    tags_norm.add(t.strip().lower())
+                                elif isinstance(t, dict):
+                                    name = t.get("tag_name") or t.get("name") or t.get("tag")
+                                    if isinstance(name, str):
+                                        tags_norm.add(name.strip().lower())
+                            if "blunder" in tags_norm:
+                                return 12.0
+                            if "mistake" in tags_norm:
+                                return 38.0
+                            if "inaccuracy" in tags_norm:
+                                return 62.0
+                            if "missed_win" in tags_norm:
+                                return 55.0
+                            return 75.0
 
                 if not isinstance(full_review, dict):
                     return {"_stored": "compact", "_reason": "non_dict_review"}
@@ -2005,6 +2005,37 @@ class SupabaseClient:
             
             if min_cp_loss is not None:
                 query = query.gte("cp_loss", min_cp_loss)
+
+            # Phase filter (single value)
+            if phase_filter:
+                query = query.eq("phase", phase_filter)
+
+            # Opening name filter (case-insensitive)
+            if opening_name_filter:
+                query = query.ilike("opening_name", f"%{opening_name_filter}%")
+
+            # Piece type filter (canonical lowercase name)
+            piece_norm = None
+            if piece_type_filter:
+                piece_norm = str(piece_type_filter).strip().lower()
+                query = query.eq("piece_blundered", piece_norm)
+
+            # Time bucket filter
+            if time_bucket_filter:
+                TIME_BUCKET_RANGES = {
+                    "<5s": (0, 5),
+                    "5-15s": (5, 15),
+                    "15-30s": (15, 30),
+                    "30s-1min": (30, 60),
+                    "1min-2min30": (60, 150),
+                    "2min30-5min": (150, 300),
+                    "5min+": (300, float('inf'))
+                }
+                if time_bucket_filter in TIME_BUCKET_RANGES:
+                    min_time, max_time = TIME_BUCKET_RANGES[time_bucket_filter]
+                    query = query.gte("time_spent_s", min_time)
+                    if max_time != float('inf'):
+                        query = query.lt("time_spent_s", max_time)
             
             # Order by freshness if requested (unseen/oldest first), otherwise by CP loss
             if prioritize_fresh:
@@ -2021,6 +2052,63 @@ class SupabaseClient:
             else:
                 result = query.order("cp_loss", desc=True).limit(limit).execute()
                 positions = result.data if result.data else []
+
+            # Fallback for legacy piece_blundered encoding (piece symbols) if we got no results.
+            if piece_norm and not positions:
+                legacy_map = {
+                    "pawn": ["P", "p"],
+                    "knight": ["N", "n"],
+                    "bishop": ["B", "b"],
+                    "rook": ["R", "r"],
+                    "queen": ["Q", "q"],
+                    "king": ["K", "k"],
+                }
+                legacy_vals = legacy_map.get(piece_norm)
+                if legacy_vals:
+                    query2 = self.client.table("positions").select("*").eq("user_id", user_id)
+                    if tags:
+                        query2 = query2.overlaps("tags_start", tags)
+                    if error_categories:
+                        query2 = query2.in_("error_category", error_categories)
+                    if phases:
+                        query2 = query2.in_("phase", phases)
+                    if mover_name:
+                        query2 = query2.eq("mover_name", mover_name)
+                    if error_side_filter:
+                        if error_side_filter == "__null__":
+                            query2 = query2.is_("error_side", "null")
+                        else:
+                            query2 = query2.eq("error_side", error_side_filter)
+                    if tags_gained_filter:
+                        query2 = query2.contains("tags_gained", [tags_gained_filter])
+                    if tags_lost_filter:
+                        query2 = query2.contains("tags_lost", [tags_lost_filter])
+                    if tags_missed_filter:
+                        query2 = query2.contains("tags_after_best", [tags_missed_filter])
+                    if min_cp_loss is not None:
+                        query2 = query2.gte("cp_loss", min_cp_loss)
+                    if phase_filter:
+                        query2 = query2.eq("phase", phase_filter)
+                    if opening_name_filter:
+                        query2 = query2.ilike("opening_name", f"%{opening_name_filter}%")
+                    if time_bucket_filter:
+                        TIME_BUCKET_RANGES = {
+                            "<5s": (0, 5),
+                            "5-15s": (5, 15),
+                            "15-30s": (15, 30),
+                            "30s-1min": (30, 60),
+                            "1min-2min30": (60, 150),
+                            "2min30-5min": (150, 300),
+                            "5min+": (300, float('inf'))
+                        }
+                        if time_bucket_filter in TIME_BUCKET_RANGES:
+                            min_time, max_time = TIME_BUCKET_RANGES[time_bucket_filter]
+                            query2 = query2.gte("time_spent_s", min_time)
+                            if max_time != float('inf'):
+                                query2 = query2.lt("time_spent_s", max_time)
+                    query2 = query2.in_("piece_blundered", legacy_vals)
+                    result2 = query2.order("cp_loss", desc=True).limit(limit).execute()
+                    positions = result2.data if result2.data else []
             
             # Post-process for tags_missed_filter (check that tag is NOT in tags_after_played)
             if tags_missed_filter and positions:
@@ -2085,9 +2173,11 @@ class SupabaseClient:
             if opening_name_filter:
                 query = query.ilike("opening_name", f"%{opening_name_filter}%")
             
-            # Piece type filter (filter by piece_blundered)
+            # Piece type filter (filter by piece_blundered) - canonical lowercase name
+            piece_norm = None
             if piece_type_filter:
-                query = query.eq("piece_blundered", piece_type_filter)
+                piece_norm = str(piece_type_filter).strip().lower()
+                query = query.eq("piece_blundered", piece_norm)
             
             # Time bucket filter
             if time_bucket_filter:
@@ -2108,6 +2198,57 @@ class SupabaseClient:
             
             result = query.execute()
             count = result.count if hasattr(result, 'count') else len(result.data) if result.data else 0
+
+            # Fallback for legacy piece_blundered encoding (piece symbols) if we got no matches.
+            if piece_norm and count == 0:
+                legacy_map = {
+                    "pawn": ["P", "p"],
+                    "knight": ["N", "n"],
+                    "bishop": ["B", "b"],
+                    "rook": ["R", "r"],
+                    "queen": ["Q", "q"],
+                    "king": ["K", "k"],
+                }
+                legacy_vals = legacy_map.get(piece_norm)
+                if legacy_vals:
+                    query2 = self.client.table("positions").select("id", count="exact").eq("user_id", user_id)
+                    if error_categories:
+                        query2 = query2.in_("error_category", error_categories)
+                    if error_side_filter:
+                        if error_side_filter == "__null__":
+                            query2 = query2.is_("error_side", "null")
+                        else:
+                            query2 = query2.eq("error_side", error_side_filter)
+                    if tags_gained_filter:
+                        query2 = query2.contains("tags_gained", [tags_gained_filter])
+                    if tags_lost_filter:
+                        query2 = query2.contains("tags_lost", [tags_lost_filter])
+                    if tags_missed_filter:
+                        query2 = query2.contains("tags_after_best", [tags_missed_filter])
+                    if min_cp_loss is not None:
+                        query2 = query2.gte("cp_loss", min_cp_loss)
+                    if phase_filter:
+                        query2 = query2.eq("phase", phase_filter)
+                    if opening_name_filter:
+                        query2 = query2.ilike("opening_name", f"%{opening_name_filter}%")
+                    if time_bucket_filter:
+                        TIME_BUCKET_RANGES = {
+                            "<5s": (0, 5),
+                            "5-15s": (5, 15),
+                            "15-30s": (15, 30),
+                            "30s-1min": (30, 60),
+                            "1min-2min30": (60, 150),
+                            "2min30-5min": (150, 300),
+                            "5min+": (300, float('inf'))
+                        }
+                        if time_bucket_filter in TIME_BUCKET_RANGES:
+                            min_time, max_time = TIME_BUCKET_RANGES[time_bucket_filter]
+                            query2 = query2.gte("time_spent_s", min_time)
+                            if max_time != float('inf'):
+                                query2 = query2.lt("time_spent_s", max_time)
+                    query2 = query2.in_("piece_blundered", legacy_vals)
+                    result2 = query2.execute()
+                    count = result2.count if hasattr(result2, "count") else len(result2.data) if result2.data else 0
             
             # For tags_missed_filter, we need to filter out positions where tag is in tags_after_played
             if tags_missed_filter and result.data:

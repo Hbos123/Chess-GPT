@@ -3025,34 +3025,50 @@ async def _save_error_positions(
         move_uci = record.get("uci")
         best_move_san = record.get("engine", {}).get("best_move_san")
         
-        # Helper to extract piece name from move
-        def piece_name_from_move(fen: str, uci: str) -> str:
+        # Helper to extract piece type moved (canonical lowercase name: pawn/knight/bishop/rook/queen/king)
+        def piece_name_from_move(fen: str, uci: str) -> Optional[str]:
             if not fen or not uci or len(uci) < 4:
                 return None
             try:
-                from chess import Board
-                board = Board(fen)
-                from_square = uci[:2]
-                piece = board.piece_at(getattr(__import__('chess'), from_square.upper()))
-                if piece:
-                    return piece.symbol().upper() if piece.color else piece.symbol().lower()
-            except:
-                pass
-            return None
+                import chess
+                board = chess.Board(fen)
+                mv = chess.Move.from_uci(uci)
+                piece = board.piece_at(mv.from_square)
+                if not piece:
+                    return None
+                labels = {
+                    chess.PAWN: "pawn",
+                    chess.KNIGHT: "knight",
+                    chess.BISHOP: "bishop",
+                    chess.ROOK: "rook",
+                    chess.QUEEN: "queen",
+                    chess.KING: "king",
+                }
+                return labels.get(piece.piece_type)
+            except Exception:
+                return None
         
-        def piece_name_from_san(fen: str, san: str) -> str:
+        def piece_name_from_san(fen: str, san: str) -> Optional[str]:
             if not fen or not san:
                 return None
             try:
-                from chess import Board
-                board = Board(fen)
-                move = board.parse_san(san)
-                piece = board.piece_at(move.from_square)
-                if piece:
-                    return piece.symbol().upper() if piece.color else piece.symbol().lower()
-            except:
-                pass
-            return None
+                import chess
+                board = chess.Board(fen)
+                mv = board.parse_san(san)
+                piece = board.piece_at(mv.from_square)
+                if not piece:
+                    return None
+                labels = {
+                    chess.PAWN: "pawn",
+                    chess.KNIGHT: "knight",
+                    chess.BISHOP: "bishop",
+                    chess.ROOK: "rook",
+                    chess.QUEEN: "queen",
+                    chess.KING: "king",
+                }
+                return labels.get(piece.piece_type)
+            except Exception:
+                return None
         
         piece_blundered = piece_name_from_move(fen_before, move_uci) if fen_before and move_uci else None
         piece_best_move = piece_name_from_san(fen_before, best_move_san) if fen_before and best_move_san else None
@@ -7756,17 +7772,19 @@ async def profile_overview(user_id: str):
             try:
                 def _fetch_profile_row():
                     return supabase_client.get_or_create_profile(user_id)
+
                 profile_row = await asyncio.to_thread(_fetch_profile_row)
                 if profile_row:
                     linked = profile_row.get("linked_accounts") or []
                     time_controls = profile_row.get("time_controls") or []
                     if linked or time_controls:
-                        try:
-                            profile_indexer.save_preferences(user_id, {"accounts": linked, "time_controls": time_controls})
-                        except Exception:
-                            pass
+                        profile_indexer.save_preferences(
+                            user_id,
+                            {"accounts": linked, "time_controls": time_controls},
+                        )
             except Exception:
                 pass
+
         try:
             asyncio.create_task(_warm_prefs_from_supabase())
         except Exception:

@@ -5773,17 +5773,18 @@ html, body {
   display: flex;
   flex-direction: column;
   height: 100%;
-  padding: 20px;
+  min-height: 0;
+  padding: 14px 16px;
   background: var(--bg-primary);
 }
 
 .session-header {
-  margin-bottom: 20px;
+  margin-bottom: 12px;
 }
 
 .session-header h3 {
   margin: 0 0 12px 0;
-  font-size: 1.5em;
+  font-size: 1.25em;
   color: var(--text-primary);
 }
 
@@ -5807,7 +5808,7 @@ html, body {
 .training-tabs {
   display: flex;
   gap: 8px;
-  margin-bottom: 20px;
+  margin-bottom: 12px;
   border-bottom: 2px solid var(--border-color);
 }
 
@@ -5836,13 +5837,14 @@ html, body {
 
 .training-content {
   flex: 1;
-  overflow-y: auto;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .training-drill-container {
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 14px;
 }
 
 .drill-header {
@@ -5895,13 +5897,14 @@ html, body {
   display: flex;
   gap: 20px;
   align-items: flex-start;
-  margin: 20px 0;
+  margin: 12px 0;
 }
 
 .drill-board-wrapper {
-  flex: 1;
-  max-width: 500px;
-  min-width: 400px;
+  flex: 0 0 auto;
+  width: clamp(320px, 42vmin, 640px);
+  max-width: 100%;
+  min-width: 0;
 }
 
 .drill-board-info {
@@ -5909,6 +5912,7 @@ html, body {
   display: flex;
   flex-direction: column;
   gap: 16px;
+  min-width: 0;
 }
 
 .position-info {
@@ -5975,6 +5979,7 @@ html, body {
   display: flex;
   gap: 12px;
   margin-top: 20px;
+  flex-wrap: wrap;
 }
 
 .hint-btn, .solution-btn, .skip-btn {
@@ -6101,6 +6106,7 @@ html, body {
   }
   
   .drill-board-wrapper {
+    width: min(92vw, 520px);
     max-width: 100%;
     min-width: auto;
   }
