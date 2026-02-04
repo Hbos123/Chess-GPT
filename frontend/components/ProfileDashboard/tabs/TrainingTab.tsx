@@ -507,7 +507,8 @@ export default function TrainingTab({ userId, backendBase }: TrainingTabProps) {
         )}
 
         {loading ? (
-          <div style={{ padding: "40px", textAlign: "center" }}>
+          <div className="dashboard-loading">
+            <div className="spinner"></div>
             <p>Loading drill suggestions...</p>
           </div>
         ) : suggestions.length === 0 ? (

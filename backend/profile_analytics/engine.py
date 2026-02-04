@@ -375,8 +375,8 @@ class ProfileAnalyticsEngine:
                 category = ply.get("category") or ""
                 if category not in {"mistake", "blunder"}:
                     continue
-                fen = ply.get("fen_before")
-                san = ply.get("san")
+                fen = ply.get("fen_before") or ply.get("fen")
+                san = ply.get("san") or ply.get("move_san")
                 if not fen or not san:
                     continue
                 cp_loss = float(ply.get("cp_loss", 0) or 0)
@@ -424,8 +424,9 @@ class ProfileAnalyticsEngine:
                     tags_lost = list(tags_start_set - tags_after_played_set)
                     
                     # Extract piece information
-                    move_uci = ply.get("uci")
-                    best_move_san = ply.get("engine", {}).get("best_move_san") if isinstance(ply.get("engine"), dict) else None
+                    move_uci = ply.get("uci") or ply.get("move_uci")
+                    engine_info = ply.get("engine") if isinstance(ply.get("engine"), dict) else {}
+                    best_move_san = engine_info.get("best_move_san")
                     
                     piece_blundered = self._piece_name_from_move(fen, move_uci)
                     piece_best_move = self._piece_name_from_san(fen, best_move_san) if best_move_san else None
@@ -444,8 +445,8 @@ class ProfileAnalyticsEngine:
                         "move_san": san,
                         "move_uci": move_uci,
                         "best_move_san": best_move_san,
-                        "best_move_uci": ply.get("engine", {}).get("best_move_uci") if isinstance(ply.get("engine"), dict) else None,
-                        "eval_cp": ply.get("engine", {}).get("eval_before_cp") if isinstance(ply.get("engine"), dict) else None,
+                        "best_move_uci": engine_info.get("best_move_uci"),
+                        "eval_cp": engine_info.get("eval_before_cp"),
                         "cp_loss": cp_loss,
                         "phase": ply.get("phase"),
                         "opening_name": g.get("opening_name") or ply.get("opening_name") or None,

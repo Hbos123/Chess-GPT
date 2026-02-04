@@ -1048,6 +1048,11 @@ class SupabaseClient:
                         
                         compact_ply.append(
                             {
+                                # Preserve ply index + FENs for training-position backfills and extraction.
+                                "ply": r.get("ply"),
+                                "fen_before": r.get("fen_before"),
+                                "fen_after": r.get("fen_after"),
+                                "uci": r.get("uci"),
                                 "side_moved": r.get("side_moved")
                                 or ("white" if int(r.get("ply") or 0) % 2 == 1 else "black"),
                                 "phase": r.get("phase"),
@@ -1063,6 +1068,17 @@ class SupabaseClient:
                                 # Keep cp_loss if present (helps future analytics/backfills).
                                 "cp_loss": r.get("cp_loss"),
                                 "time_spent_s": r.get("time_spent_s"),
+                                # Preserve minimal engine fields when available (backend-reviewed games).
+                                "engine": (
+                                    {
+                                        "best_move_san": (r.get("engine") or {}).get("best_move_san"),
+                                        "best_move_uci": (r.get("engine") or {}).get("best_move_uci"),
+                                        "eval_before_cp": (r.get("engine") or {}).get("eval_before_cp"),
+                                        "played_eval_after_cp": (r.get("engine") or {}).get("played_eval_after_cp"),
+                                    }
+                                    if isinstance(r.get("engine"), dict)
+                                    else {}
+                                ),
                                 "analyse": {"tags": tags_out_unique},
                                 # Preserve raw_before and raw_after tags for tag transitions
                                 "raw_before": {"tags": raw_before_tags_out} if raw_before_tags_out else {},
