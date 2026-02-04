@@ -7,6 +7,8 @@ import { getBackendBase } from "@/lib/backendBase";
 interface TrainingTabProps {
   userId: string;
   backendBase?: string;
+  onCreateNewTab?: (params: any) => void;
+  onCloseDashboard?: () => void;
 }
 
 interface TagTransition {
@@ -38,7 +40,7 @@ interface DrillSuggestion {
   difficulty: string;
 }
 
-export default function TrainingTab({ userId, backendBase }: TrainingTabProps) {
+export default function TrainingTab({ userId, backendBase, onCreateNewTab, onCloseDashboard }: TrainingTabProps) {
   const BACKEND_BASE = backendBase || getBackendBase();
   
   const [loading, setLoading] = useState(true); // Start with loading true
@@ -452,6 +454,25 @@ export default function TrainingTab({ userId, backendBase }: TrainingTabProps) {
           piece_context: drill.piece_context,
         })),
       };
+
+      // Prefer launching into the main app tab system so the dashboard modal closes
+      // and the user gets the full board/chat UX (insert/tools, etc).
+      if (onCreateNewTab) {
+        const firstFen =
+          session.cards?.[0]?.fen ||
+          "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+
+        onCreateNewTab({
+          action: "new_tab",
+          title: `Training: ${suggestion.description}`,
+          type: "training",
+          fen: firstFen,
+          pgn: "",
+          trainingSession: session,
+        });
+        onCloseDashboard?.();
+        return;
+      }
 
       setActiveSession(session);
     } catch (err: any) {

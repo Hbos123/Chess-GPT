@@ -13,9 +13,10 @@ import type { GameMetadata } from "@/lib/gameReviewTypes";
 
 interface PersonalReviewProps {
   onClose: () => void;
+  onCreateNewTab?: (params: any) => void;
 }
 
-export default function PersonalReview({ onClose }: PersonalReviewProps) {
+export default function PersonalReview({ onClose, onCreateNewTab }: PersonalReviewProps) {
   console.log("[PersonalReview] 🎬 Component rendering");
   
   const { user, loading: authLoading } = useAuth();
@@ -1152,6 +1153,11 @@ export default function PersonalReview({ onClose }: PersonalReviewProps) {
               onClose={() => setShowTraining(false)}
               initialAnalyzedGames={analyzedGamesForTraining}
               initialUsername={username}
+              onCreateNewTab={onCreateNewTab}
+              onCloseAll={() => {
+                setShowTraining(false);
+                onClose();
+              }}
             />
           )}
         </div>

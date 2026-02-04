@@ -8,12 +8,16 @@ interface TrainingManagerProps {
   onClose: () => void;
   initialAnalyzedGames?: any[];  // From Personal Review
   initialUsername?: string;
+  onCreateNewTab?: (params: any) => void;
+  onCloseAll?: () => void;
 }
 
 export default function TrainingManager({
   onClose,
   initialAnalyzedGames,
-  initialUsername
+  initialUsername,
+  onCreateNewTab,
+  onCloseAll,
 }: TrainingManagerProps) {
   const BACKEND_BASE = getBackendBase();
   const [username, setUsername] = useState(initialUsername || "");
@@ -82,6 +86,29 @@ export default function TrainingManager({
       }
       
       setProgressMessage("");
+
+      // Prefer launching into the main app tab system so this modal closes and the user gets the full UX.
+      if (onCreateNewTab) {
+        const firstFen =
+          sessionData?.cards?.[0]?.fen ||
+          sessionData?.cards?.[0]?.position?.fen ||
+          "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+
+        onCreateNewTab({
+          action: "new_tab",
+          title: `Training: ${trainingQuery.trim().slice(0, 40)}`,
+          type: "training",
+          fen: firstFen,
+          pgn: "",
+          trainingSession: sessionData,
+        });
+
+        // Close both this modal and its parent (Personal Review) if provided.
+        if (onCloseAll) onCloseAll();
+        else onClose();
+        return;
+      }
+
       setSession(sessionData);
     } catch (err) {
       console.error("Training generation error:", err);

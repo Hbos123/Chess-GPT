@@ -13719,6 +13719,20 @@ Provide 2-3 sentences of natural language commentary explaining why this deviati
   }
 
   const handleButtonAction = async (action: string, buttonId?: string) => {
+    // Training: flip current tab into training mode (uses pre-attached trainingSession)
+    if (action === "BEGIN_TRAINING_SESSION") {
+      const current = tabs.find(t => t.id === activeTabId);
+      if (!current?.trainingSession) {
+        addSystemMessage("No training session found for this tab.");
+        return;
+      }
+      // Ensure board is visible
+      if (!boardDockOpen) setBoardDockOpen(true);
+      // Switch tab into training mode (this will render TrainingSession)
+      updateActiveTab({ tabType: "training" } as any);
+      return;
+    }
+
     // Handle play-against-AI side selection
     if (action === "start_game_white" || action === "start_game_black") {
       // Disable the clicked button
@@ -14265,6 +14279,22 @@ Provide 2-3 sentences of natural language commentary explaining why this deviati
                         ? { ...t, tabType: 'discuss' }
                         : t
                     ));
+                    // Drop a Resume button into chat so the user can keep using the normal composer/tools.
+                    try {
+                      const resumeMsg: ChatMessage = {
+                        role: "button",
+                        content: "",
+                        buttonAction: "BEGIN_TRAINING_SESSION",
+                        buttonLabel: "Resume Drills",
+                        fen,
+                        tabId: activeTabId,
+                        meta: { buttonId: `btn-resume-${activeTabId}` },
+                      };
+                      setMessages(prev => [...prev, resumeMsg]);
+                      updateActiveTab({ messages: [...(activeTab?.messages || []), resumeMsg] } as any);
+                    } catch {
+                      // ignore
+                    }
                   }}
                 />
               ) : (
@@ -14327,6 +14357,28 @@ Provide 2-3 sentences of natural language commentary explaining why this deviati
                         ? { ...t, trainingSession: undefined, tabType: 'discuss' }
                         : t
                     ));
+                  }}
+                  onSwitchToChat={() => {
+                    setTabs(prev => prev.map(t =>
+                      t.id === activeTabId
+                        ? { ...t, tabType: 'discuss' }
+                        : t
+                    ));
+                    try {
+                      const resumeMsg: ChatMessage = {
+                        role: "button",
+                        content: "",
+                        buttonAction: "BEGIN_TRAINING_SESSION",
+                        buttonLabel: "Resume Drills",
+                        fen,
+                        tabId: activeTabId,
+                        meta: { buttonId: `btn-resume-${activeTabId}` },
+                      };
+                      setMessages(prev => [...prev, resumeMsg]);
+                      updateActiveTab({ messages: [...(activeTab?.messages || []), resumeMsg] } as any);
+                    } catch {
+                      // ignore
+                    }
                   }}
                 />
               ) : (
@@ -14608,7 +14660,133 @@ Provide 2-3 sentences of natural language commentary explaining why this deviati
         userId={user?.id}
       />
       {showPersonalReview && (
-        <PersonalReview onClose={() => setShowPersonalReview(false)} />
+        <PersonalReview
+          onClose={() => setShowPersonalReview(false)}
+          onCreateNewTab={(params: any) => {
+            // Reuse the same handler used by ProfileDashboard.
+            // This keeps training/lessons consistent no matter where they’re launched from.
+            setShowPersonalReview(false);
+            setShowProfileDashboard(false);
+            // Delegate to the ProfileDashboard handler by directly invoking the same logic below.
+            // (We inline here to avoid creating a separate component-level export.)
+            const newTabId =
+              typeof crypto !== "undefined" && "randomUUID" in crypto
+                ? `tab-${crypto.randomUUID()}`
+                : `tab-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
+            let newMoveTree = new MoveTree();
+            const baseFen = params.fen || INITIAL_FEN;
+            const basePgn = params.pgn || "";
+            const hasTrainingSession = Boolean(params.trainingSession);
+
+            const seededMessages: ChatMessage[] = hasTrainingSession
+              ? [
+                  {
+                    role: "system",
+                    content:
+                      params.trainingSession?.intro ||
+                      "Your training session is ready. Review the position, then press Begin Drills when you’re ready.",
+                    fen: baseFen,
+                    tabId: newTabId,
+                  },
+                  {
+                    role: "button",
+                    content: "",
+                    buttonAction: "BEGIN_TRAINING_SESSION",
+                    buttonLabel: "Begin Drills",
+                    fen: baseFen,
+                    tabId: newTabId,
+                    meta: { buttonId: `btn-begin-${newTabId}` },
+                  },
+                ]
+              : [];
+
+            const newTab: BoardTabState = {
+              ...createDefaultTab(tabs.length + 1),
+              id: newTabId,
+              name:
+                params.title ||
+                (params.type === "training"
+                  ? "Training"
+                  : params.type === "lesson"
+                    ? "Lesson"
+                    : "Review"),
+              // Training sessions start in discuss mode with a Begin button.
+              tabType: hasTrainingSession ? "discuss" : (params.type || "review"),
+              fen: baseFen,
+              pgn: basePgn,
+              game: new Chess(baseFen),
+              moveTree: newMoveTree,
+              isAnalyzing: false,
+              hasUnread: false,
+              isModified: false,
+              messages: seededMessages,
+              annotations: {
+                fen: baseFen,
+                pgn: basePgn,
+                arrows: [],
+                highlights: [],
+                comments: [],
+                nags: []
+              },
+              analysisCache: {},
+              moveHistory: [],
+              // Store the session; we’ll flip tabType to 'training' when user clicks Begin.
+              trainingSession: params.trainingSession || undefined
+            };
+
+            if (basePgn) {
+              try {
+                newMoveTree = MoveTree.fromPGN(basePgn);
+                newTab.moveTree = newMoveTree;
+                const gameFromPgn = new Chess();
+                gameFromPgn.loadPgn(basePgn);
+                newTab.game = gameFromPgn;
+                newTab.fen = gameFromPgn.fen();
+                newTab.annotations.fen = gameFromPgn.fen();
+                newTab.annotations.pgn = basePgn;
+                newTab.pgn = basePgn;
+              } catch (e) {
+                console.error("[newTab] Failed to load PGN:", e);
+                newTab.pgn = basePgn;
+                newTab.annotations.pgn = basePgn;
+              }
+            }
+
+            // Activate the new tab
+            setTabs((prev) => (prev.some((t) => t.id === newTabId) ? prev : [...prev, newTab]));
+            setActiveTabId(newTabId);
+            setFen(newTab.fen);
+            setPgn(newTab.pgn);
+            setGame(newTab.game);
+            setMoveTree(newTab.moveTree);
+            setMessages(seededMessages);
+
+            // Ensure board is visible when launching training/drills.
+            if (params.type === "training" || hasTrainingSession) {
+              setBoardDockOpen(true);
+            }
+
+            // Only send initial message through LLM pipeline for non-training tabs.
+            if (params.initialMessage && !params.trainingSession) {
+              const messageToSend = params.initialMessage;
+              const targetTabId = newTabId;
+              let initialMessageSent = false;
+              setTimeout(async () => {
+                setActiveTabId((currentId) => {
+                  if (currentId === targetTabId && !initialMessageSent) {
+                    initialMessageSent = true;
+                    handleSendMessage(messageToSend).catch((err) => {
+                      console.error("Failed to send initial message:", err);
+                      initialMessageSent = false;
+                    });
+                  }
+                  return currentId;
+                });
+              }, 1000);
+            }
+          }}
+        />
       )}
       
       {showTokenLimitModal && tokenLimitInfo && (
@@ -14649,22 +14827,49 @@ Provide 2-3 sentences of natural language commentary explaining why this deviati
             let initialMessageSent = false;
             
             let newMoveTree = new MoveTree();
+            const baseFen = params.fen || INITIAL_FEN;
+            const basePgn = params.pgn || "";
+            const hasTrainingSession = Boolean(params.trainingSession);
+
+            const seededMessages: ChatMessage[] = hasTrainingSession
+              ? [
+                  {
+                    role: "system",
+                    content:
+                      params.trainingSession?.intro ||
+                      "Your training session is ready. Review the position, then press Begin Drills when you’re ready.",
+                    fen: baseFen,
+                    tabId: newTabId,
+                  },
+                  {
+                    role: "button",
+                    content: "",
+                    buttonAction: "BEGIN_TRAINING_SESSION",
+                    buttonLabel: "Begin Drills",
+                    fen: baseFen,
+                    tabId: newTabId,
+                    meta: { buttonId: `btn-begin-${newTabId}` },
+                  },
+                ]
+              : [];
+
             const newTab: BoardTabState = {
               ...createDefaultTab(tabs.length + 1),
               id: newTabId,
               name: params.title || (params.type === 'training' ? 'Training' : params.type === 'lesson' ? 'Lesson' : 'Review'),
-              tabType: params.type || 'review',
-              fen: params.fen || INITIAL_FEN,
-              pgn: params.pgn || '',
-              game: new Chess(params.fen || INITIAL_FEN),
+              // Training sessions start in discuss mode with a Begin button.
+              tabType: hasTrainingSession ? "discuss" : (params.type || "review"),
+              fen: baseFen,
+              pgn: basePgn,
+              game: new Chess(baseFen),
               moveTree: newMoveTree,
               isAnalyzing: false,
               hasUnread: false,
               isModified: false,
-              messages: [], // Don't add initial message here - let handleSendMessage add it to prevent duplicates
+              messages: seededMessages,
               annotations: {
-                fen: params.fen || INITIAL_FEN,
-                pgn: params.pgn || '',
+                fen: baseFen,
+                pgn: basePgn,
                 arrows: [],
                 highlights: [],
                 comments: [],
@@ -14672,30 +14877,31 @@ Provide 2-3 sentences of natural language commentary explaining why this deviati
               },
               analysisCache: {},
               moveHistory: [],
-              trainingSession: params.trainingSession || undefined // Store training session if provided
+              // Store the session; we’ll flip tabType to 'training' when user clicks Begin.
+              trainingSession: params.trainingSession || undefined
             };
             
-            if (params.pgn) {
+            if (basePgn) {
               try {
-                newMoveTree = MoveTree.fromPGN(params.pgn);
+                newMoveTree = MoveTree.fromPGN(basePgn);
                 newTab.moveTree = newMoveTree;
                 const gameFromPgn = new Chess();
-                gameFromPgn.loadPgn(params.pgn);
+                gameFromPgn.loadPgn(basePgn);
                 newTab.game = gameFromPgn;
                 newTab.fen = gameFromPgn.fen();
                 newTab.annotations.fen = gameFromPgn.fen();
-                newTab.annotations.pgn = params.pgn;
-                newTab.pgn = params.pgn;
+                newTab.annotations.pgn = basePgn;
+                newTab.pgn = basePgn;
               } catch (e) {
                 console.error("[newTab] Failed to load PGN:", e);
-                newTab.pgn = params.pgn;
-                newTab.annotations.pgn = params.pgn;
+                newTab.pgn = basePgn;
+                newTab.annotations.pgn = basePgn;
               }
             }
             
             // CRITICAL: Initialize messages as empty - handleSendMessage will add the initial message
             // This prevents duplicate messages
-            setMessages([]);
+            setMessages(seededMessages);
             
             // Create and activate the new tab
             setTabs(prev => {
@@ -14709,6 +14915,11 @@ Provide 2-3 sentences of natural language commentary explaining why this deviati
             setPgn(newTab.pgn);
             setGame(newTab.game);
             setMoveTree(newTab.moveTree);
+
+            // Ensure board is visible when launching training/drills.
+            if (params.type === "training" || hasTrainingSession) {
+              setBoardDockOpen(true);
+            }
             
             // If there's an initial message AND it's NOT a training session, send it after tab is created and active
             // Training sessions should render TrainingSession component directly, not send messages to LLM
