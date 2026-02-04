@@ -3046,7 +3046,7 @@ async def _save_error_positions(
                 }
                 return labels.get(piece.piece_type)
             except Exception:
-                return None
+            return None
         
         def piece_name_from_san(fen: str, san: str) -> Optional[str]:
             if not fen or not san:
@@ -3068,7 +3068,7 @@ async def _save_error_positions(
                 }
                 return labels.get(piece.piece_type)
             except Exception:
-                return None
+            return None
         
         piece_blundered = piece_name_from_move(fen_before, move_uci) if fen_before and move_uci else None
         piece_best_move = piece_name_from_san(fen_before, best_move_san) if fen_before and best_move_san else None
@@ -7767,7 +7767,7 @@ async def profile_overview(user_id: str):
         prefs = {}
 
     # If prefs are missing, warm them in the background from Supabase and persist locally.
-    if (not prefs or not prefs.get("accounts")) and supabase_client:
+        if (not prefs or not prefs.get("accounts")) and supabase_client:
         async def _warm_prefs_from_supabase():
             try:
                 def _fetch_profile_row():
@@ -7785,10 +7785,10 @@ async def profile_overview(user_id: str):
             except Exception:
                 pass
 
-        try:
+            try:
             asyncio.create_task(_warm_prefs_from_supabase())
-        except Exception:
-            pass
+            except Exception:
+                pass
     try:
         full_status = profile_indexer.get_status(user_id) or {}
         
@@ -8182,24 +8182,8 @@ async def get_graph_data(
         # If we have pre-computed data, format and return it
         if precomputed is not None and len(precomputed) > 0:
             formatted = []
-            # If the precomputed table schema is behind (missing newer columns), we can lazily recompute
-            # the missing fields from the game_review JSON for just the games we return.
-            from profile_analytics.graph_data import build_graph_game_point
-
-            def fetch_game_for_point(game_id: str):
-                try:
-                    return (
-                        supabase_client.client.table("games")
-                        .select("id,game_date,created_at,updated_at,result,time_control,opening_eco,opening_name,game_review")
-                        .eq("id", game_id)
-                        .maybe_single()
-                        .execute()
-                    ).data
-                except Exception:
-                    return None
-
             for idx, point in enumerate(precomputed):
-                base_point = {
+                formatted.append({
                     "index": idx,
                     "game_id": point.get("game_id"),
                     "game_date": point.get("game_date"),
@@ -8208,27 +8192,11 @@ async def get_graph_data(
                     "opening_eco": point.get("opening_eco"),
                     "time_control": point.get("time_control"),
                     "overall_accuracy": float(point.get("overall_accuracy")) if point.get("overall_accuracy") is not None else None,
-                    "avg_cp_loss": float(point.get("avg_cp_loss")) if point.get("avg_cp_loss") is not None else None,
-                    "cp_loss_buckets": point.get("cp_loss_buckets") or None,
-                    "phase_accuracy": point.get("phase_accuracy") or None,
                     "piece_accuracy": point.get("piece_accuracy") or {},
                     "time_bucket_accuracy": point.get("time_bucket_accuracy") or {},
                     "tag_transitions": point.get("tag_transitions") or {"gained": {}, "lost": {}},
                     "static_tags": point.get("static_tags") or {},
-                }
-
-                # If newer fields are missing, try to recompute them quickly.
-                if base_point.get("cp_loss_buckets") is None or base_point.get("phase_accuracy") is None or base_point.get("avg_cp_loss") is None:
-                    gid = base_point.get("game_id")
-                    if gid:
-                        g = await asyncio.to_thread(fetch_game_for_point, gid)
-                        if isinstance(g, dict) and g.get("game_review"):
-                            rebuilt = build_graph_game_point(g, idx)
-                            base_point["avg_cp_loss"] = rebuilt.get("avg_cp_loss")
-                            base_point["cp_loss_buckets"] = rebuilt.get("cp_loss_buckets")
-                            base_point["phase_accuracy"] = rebuilt.get("phase_accuracy")
-
-                formatted.append(base_point)
+                })
             
             print(f"✅ [GRAPH_DATA_ENDPOINT] Returning {len(formatted)} pre-computed graph points for user_id: {user_id}")
             return {
@@ -8530,275 +8498,6 @@ async def backfill_detailed_analytics(user_id: Optional[str] = None):
         error_trace = traceback.format_exc()
         print(f"❌ [BACKFILL] Error: {e}\n{error_trace}")
         raise HTTPException(status_code=500, detail=f"Backfill failed: {str(e)}")
-
-
-class GenerateSampleAnalyticsRequest(BaseModel):
-    user_id: str
-    games_count: int = 40
-    overwrite: bool = False
-
-
-@app.post("/admin/generate-sample-analytics")
-async def generate_sample_analytics(request: GenerateSampleAnalyticsRequest):
-    """
-    Admin endpoint to generate sample detailed analytics data for testing.
-    Populates detailed_analytics_cache with realistic sample data.
-    """
-    if not supabase_client:
-        raise HTTPException(status_code=503, detail="Supabase client not initialized")
-    
-    try:
-        import random
-        
-        user_id = request.user_id
-        games_count = request.games_count
-        overwrite = request.overwrite
-        
-        # Check if cache already exists
-        if not overwrite:
-            try:
-                existing = supabase_client.client.table("detailed_analytics_cache")\
-                    .select("id")\
-                    .eq("user_id", user_id)\
-                    .maybe_single()\
-                    .execute()
-                
-                if existing.data:
-                    return {
-                        "status": "skipped",
-                        "message": "Cache already exists. Use overwrite=true to replace it.",
-                        "user_id": user_id
-                    }
-            except Exception:
-                pass  # Table might not exist, continue anyway
-        
-        # Generate sample analytics data
-        def generate_sample_data():
-            # Phase Analytics
-            phase_analytics = {
-                "opening": {
-                    "accuracy": round(random.uniform(75, 90), 1),
-                    "games_won": random.randint(8, 15),
-                    "games_lost": random.randint(3, 8),
-                    "games_drawn": random.randint(1, 4)
-                },
-                "middlegame": {
-                    "accuracy": round(random.uniform(70, 85), 1),
-                    "games_won": random.randint(10, 18),
-                    "games_lost": random.randint(5, 12),
-                    "games_drawn": random.randint(1, 5)
-                },
-                "endgame": {
-                    "accuracy": round(random.uniform(75, 88), 1),
-                    "games_won": random.randint(12, 20),
-                    "games_lost": random.randint(4, 10),
-                    "games_drawn": random.randint(1, 3)
-                }
-            }
-            
-            # Opening Detailed
-            opening_names = [
-                "Sicilian Defense", "Queen's Gambit", "King's Indian Defense",
-                "French Defense", "Caro-Kann Defense", "Italian Game",
-                "Ruy Lopez", "Nimzo-Indian Defense", "English Opening", "Pirc Defense"
-            ]
-            
-            opening_detailed = {}
-            selected_openings = random.sample(opening_names, random.randint(4, 7))
-            for opening in selected_openings:
-                freq = random.randint(2, 8)
-                wins = random.randint(1, freq - 1)
-                losses = random.randint(0, freq - wins)
-                draws = freq - wins - losses
-                opening_detailed[opening] = {
-                    "frequency": freq,
-                    "avg_accuracy": round(random.uniform(72, 88), 1),
-                    "win_rate": round(wins / freq, 3) if freq > 0 else 0,
-                    "wins": wins,
-                    "losses": losses,
-                    "draws": draws
-                }
-            
-            # Piece Accuracy
-            pieces = ["Pawn", "Knight", "Bishop", "Rook", "Queen", "King"]
-            piece_aggregate = {}
-            for piece in pieces:
-                piece_aggregate[piece] = {
-                    "accuracy": round(random.uniform(75, 90), 1),
-                    "count": random.randint(20, 150)
-                }
-            
-            sorted_pieces = sorted(piece_aggregate.items(), key=lambda x: x[1]["accuracy"])
-            piece_aggregate[sorted_pieces[0][0]]["accuracy"] = round(random.uniform(82, 92), 1)
-            piece_aggregate[sorted_pieces[-1][0]]["accuracy"] = round(random.uniform(70, 78), 1)
-            
-            piece_accuracy_detailed = {
-                "aggregate": piece_aggregate,
-                "per_game": []
-            }
-            
-            # Tag Transitions
-            tag_names = [
-                "tag.center.control.near", "tag.center.control.core", "tag.key.e4", "tag.key.e5",
-                "tag.space.advantage", "tag.piece.trapped", "tag.piece.overworked",
-                "tag.diagonal.open.d1-a4", "tag.diagonal.open.d5-b7", "tag.undeveloped.queen",
-                "tag.bishop.bad", "tag.knight.outpost"
-            ]
-            
-            tag_transitions = {"gained": {}, "lost": {}}
-            
-            gained_tags = random.sample(tag_names, random.randint(5, 8))
-            for tag in gained_tags:
-                count = random.randint(8, 25)
-                tag_transitions["gained"][tag] = {
-                    "count": count,
-                    "accuracy": round(random.uniform(85, 98), 1),
-                    "blunders": random.randint(0, max(1, count // 10)),
-                    "mistakes": random.randint(0, max(1, count // 8)),
-                    "inaccuracies": random.randint(0, max(1, count // 6)),
-                    "error_rate": round(random.uniform(0, 0.15), 3)
-                }
-            
-            lost_tags = random.sample([t for t in tag_names if t not in gained_tags], random.randint(4, 7))
-            for tag in lost_tags:
-                count = random.randint(6, 20)
-                tag_transitions["lost"][tag] = {
-                    "count": count,
-                    "accuracy": round(random.uniform(80, 95), 1),
-                    "blunders": random.randint(0, max(1, count // 8)),
-                    "mistakes": random.randint(0, max(1, count // 6)),
-                    "inaccuracies": random.randint(0, max(1, count // 5)),
-                    "error_rate": round(random.uniform(0, 0.20), 3)
-                }
-            
-            # Static Tags
-            static_tags = {}
-            static_tag_names = random.sample(tag_names, random.randint(6, 10))
-            for tag in static_tag_names:
-                count = random.randint(10, 35)
-                static_tags[tag] = {
-                    "count": count,
-                    "accuracy": round(random.uniform(82, 96), 1),
-                    "blunders": random.randint(0, max(1, count // 12)),
-                    "mistakes": random.randint(0, max(1, count // 10)),
-                    "inaccuracies": random.randint(0, max(1, count // 8)),
-                    "error_rate": round(random.uniform(0, 0.12), 3)
-                }
-            
-            # Time Buckets
-            time_buckets = {
-                "<5s": {
-                    "accuracy": round(random.uniform(65, 75), 1),
-                    "count": random.randint(15, 40),
-                    "blunders": random.randint(2, 8),
-                    "mistakes": random.randint(3, 10),
-                    "inaccuracies": random.randint(4, 12),
-                    "blunder_rate": round(random.uniform(0.10, 0.25), 3),
-                    "mistake_rate": round(random.uniform(0.15, 0.30), 3),
-                    "inaccuracy_rate": round(random.uniform(0.20, 0.35), 3)
-                },
-                "5-15s": {
-                    "accuracy": round(random.uniform(72, 82), 1),
-                    "count": random.randint(30, 60),
-                    "blunders": random.randint(2, 6),
-                    "mistakes": random.randint(4, 10),
-                    "inaccuracies": random.randint(5, 15),
-                    "blunder_rate": round(random.uniform(0.05, 0.15), 3),
-                    "mistake_rate": round(random.uniform(0.10, 0.20), 3),
-                    "inaccuracy_rate": round(random.uniform(0.15, 0.25), 3)
-                },
-                "15-30s": {
-                    "accuracy": round(random.uniform(78, 88), 1),
-                    "count": random.randint(40, 80),
-                    "blunders": random.randint(1, 5),
-                    "mistakes": random.randint(3, 8),
-                    "inaccuracies": random.randint(4, 12),
-                    "blunder_rate": round(random.uniform(0.03, 0.10), 3),
-                    "mistake_rate": round(random.uniform(0.05, 0.15), 3),
-                    "inaccuracy_rate": round(random.uniform(0.08, 0.18), 3)
-                },
-                "30s-1min": {
-                    "accuracy": round(random.uniform(80, 90), 1),
-                    "count": random.randint(35, 70),
-                    "blunders": random.randint(1, 4),
-                    "mistakes": random.randint(2, 6),
-                    "inaccuracies": random.randint(3, 10),
-                    "blunder_rate": round(random.uniform(0.02, 0.08), 3),
-                    "mistake_rate": round(random.uniform(0.04, 0.12), 3),
-                    "inaccuracy_rate": round(random.uniform(0.06, 0.15), 3)
-                },
-                "1min-2min30": {
-                    "accuracy": round(random.uniform(82, 92), 1),
-                    "count": random.randint(25, 55),
-                    "blunders": random.randint(0, 3),
-                    "mistakes": random.randint(1, 5),
-                    "inaccuracies": random.randint(2, 8),
-                    "blunder_rate": round(random.uniform(0.01, 0.06), 3),
-                    "mistake_rate": round(random.uniform(0.03, 0.10), 3),
-                    "inaccuracy_rate": round(random.uniform(0.05, 0.12), 3)
-                },
-                "2min30-5min": {
-                    "accuracy": round(random.uniform(84, 94), 1),
-                    "count": random.randint(15, 40),
-                    "blunders": random.randint(0, 2),
-                    "mistakes": random.randint(0, 4),
-                    "inaccuracies": random.randint(1, 6),
-                    "blunder_rate": round(random.uniform(0.00, 0.05), 3),
-                    "mistake_rate": round(random.uniform(0.02, 0.08), 3),
-                    "inaccuracy_rate": round(random.uniform(0.03, 0.10), 3)
-                },
-                "5min+": {
-                    "accuracy": round(random.uniform(86, 96), 1),
-                    "count": random.randint(10, 30),
-                    "blunders": random.randint(0, 1),
-                    "mistakes": random.randint(0, 2),
-                    "inaccuracies": random.randint(0, 4),
-                    "blunder_rate": round(random.uniform(0.00, 0.03), 3),
-                    "mistake_rate": round(random.uniform(0.00, 0.05), 3),
-                    "inaccuracy_rate": round(random.uniform(0.02, 0.08), 3)
-                }
-            }
-            
-            return {
-                "phase_analytics": phase_analytics,
-                "opening_detailed": opening_detailed,
-                "piece_accuracy_detailed": piece_accuracy_detailed,
-                "tag_transitions": tag_transitions,
-                "static_tags": static_tags,
-                "time_buckets": time_buckets
-            }
-        
-        analytics_data = await asyncio.to_thread(generate_sample_data)
-        
-        # Save to cache
-        if supabase_client._save_detailed_analytics_cache(user_id, analytics_data, games_count):
-            return {
-                "status": "success",
-                "message": f"Sample analytics generated for {games_count} simulated games",
-                "user_id": user_id,
-                "games_count": games_count,
-                "data_summary": {
-                    "phases": len(analytics_data.get("phase_analytics", {})),
-                    "openings": len(analytics_data.get("opening_detailed", {})),
-                    "pieces": len(analytics_data.get("piece_accuracy_detailed", {}).get("aggregate", {})),
-                    "tags_gained": len(analytics_data.get("tag_transitions", {}).get("gained", {})),
-                    "tags_lost": len(analytics_data.get("tag_transitions", {}).get("lost", {})),
-                    "static_tags": len(analytics_data.get("static_tags", {})),
-                    "time_buckets": len(analytics_data.get("time_buckets", {}))
-                }
-            }
-        else:
-            return {
-                "status": "failed",
-                "message": "Failed to save sample analytics cache",
-                "user_id": user_id
-            }
-    
-    except Exception as e:
-        import traceback
-        error_trace = traceback.format_exc()
-        print(f"❌ [GENERATE_SAMPLE] Error: {e}\n{error_trace}")
-        raise HTTPException(status_code=500, detail=f"Generate sample analytics failed: {str(e)}")
 
 
 class WipeUserDataRequest(BaseModel):

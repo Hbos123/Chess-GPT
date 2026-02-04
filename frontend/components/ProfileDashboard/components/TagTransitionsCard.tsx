@@ -164,10 +164,6 @@ export default function TagTransitionsCard({ tagTransitions }: TagTransitionsCar
           {highestGained.length > 0 ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '20px' }}>
               {highestGained.map(({ tag, ...data }) => {
-                const errorRate = data.count > 0 
-                  ? ((data.blunders + data.mistakes + data.inaccuracies) / data.count * 100)
-                  : 0;
-                
                 return (
                   <div key={tag} style={{
                     padding: '12px',
@@ -203,12 +199,6 @@ export default function TagTransitionsCard({ tagTransitions }: TagTransitionsCar
                       <span>Occurrences:</span>
                       <span>{data.count}</span>
                     </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: '#cbd5e1' }}>
-                      <span>Error Rate:</span>
-                      <span style={{ color: errorRate > 20 ? '#ef4444' : errorRate > 10 ? '#fbbf24' : '#10b981' }}>
-                        {errorRate.toFixed(1)}%
-                      </span>
-                    </div>
                     {data.trend && data.trend_value !== undefined && (
                       <div style={{ 
                         fontSize: '11px', 
@@ -220,7 +210,7 @@ export default function TagTransitionsCard({ tagTransitions }: TagTransitionsCar
                       }}>
                         {data.trend === 'improving' ? '↑' : data.trend === 'declining' ? '↓' : '→'}
                         <span>
-                          {data.trend_value > 0 ? '+' : ''}{data.trend_value}% over last 10 games
+                          {data.trend_value > 0 ? '+' : ''}{data.trend_value.toFixed(1)}% vs average (last 3 games)
                         </span>
                       </div>
                     )}
@@ -242,10 +232,6 @@ export default function TagTransitionsCard({ tagTransitions }: TagTransitionsCar
             {lowestGained.length > 0 ? (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                 {lowestGained.map(({ tag, ...data }) => {
-                  const errorRate = data.count > 0 
-                    ? ((data.blunders + data.mistakes + data.inaccuracies) / data.count * 100)
-                    : 0;
-                  
                   return (
                     <div key={tag} style={{
                       padding: '12px',
@@ -281,12 +267,6 @@ export default function TagTransitionsCard({ tagTransitions }: TagTransitionsCar
                       <span>Occurrences:</span>
                       <span>{data.count}</span>
                     </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: '#cbd5e1' }}>
-                      <span>Error Rate:</span>
-                      <span style={{ color: errorRate > 20 ? '#ef4444' : errorRate > 10 ? '#fbbf24' : '#10b981' }}>
-                        {errorRate.toFixed(1)}%
-                      </span>
-                    </div>
                     {data.trend && data.trend_value !== undefined && (
                       <div style={{ 
                         fontSize: '11px', 
@@ -298,7 +278,7 @@ export default function TagTransitionsCard({ tagTransitions }: TagTransitionsCar
                       }}>
                         {data.trend === 'improving' ? '↑' : data.trend === 'declining' ? '↓' : '→'}
                         <span>
-                          {data.trend_value > 0 ? '+' : ''}{data.trend_value}% over last 10 games
+                          {data.trend_value > 0 ? '+' : ''}{data.trend_value.toFixed(1)}% vs average (last 3 games)
                         </span>
                       </div>
                     )}
@@ -322,10 +302,6 @@ export default function TagTransitionsCard({ tagTransitions }: TagTransitionsCar
           {highestLost.length > 0 ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '20px' }}>
               {highestLost.map(({ tag, ...data }) => {
-                const errorRate = data.count > 0 
-                  ? ((data.blunders + data.mistakes + data.inaccuracies) / data.count * 100)
-                  : 0;
-                
                 return (
                   <div key={tag} style={{
                     padding: '12px',
@@ -361,12 +337,6 @@ export default function TagTransitionsCard({ tagTransitions }: TagTransitionsCar
                       <span>Occurrences:</span>
                       <span>{data.count}</span>
                     </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: '#cbd5e1' }}>
-                      <span>Error Rate:</span>
-                      <span style={{ color: errorRate > 20 ? '#ef4444' : errorRate > 10 ? '#fbbf24' : '#10b981' }}>
-                        {errorRate.toFixed(1)}%
-                      </span>
-                    </div>
                     {data.trend && data.trend_value !== undefined && (
                       <div style={{ 
                         fontSize: '11px', 
@@ -378,7 +348,7 @@ export default function TagTransitionsCard({ tagTransitions }: TagTransitionsCar
                       }}>
                         {data.trend === 'improving' ? '↑' : data.trend === 'declining' ? '↓' : '→'}
                         <span>
-                          {data.trend_value > 0 ? '+' : ''}{data.trend_value}% over last 10 games
+                          {data.trend_value > 0 ? '+' : ''}{data.trend_value.toFixed(1)}% vs average (last 3 games)
                         </span>
                       </div>
                     )}
@@ -399,10 +369,6 @@ export default function TagTransitionsCard({ tagTransitions }: TagTransitionsCar
             {lowestLost.length > 0 ? (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                 {lowestLost.map(({ tag, ...data }) => {
-                  const errorRate = data.count > 0 
-                    ? ((data.blunders + data.mistakes + data.inaccuracies) / data.count * 100)
-                    : 0;
-                  
                   return (
                     <div key={tag} style={{
                       padding: '12px',
@@ -438,12 +404,6 @@ export default function TagTransitionsCard({ tagTransitions }: TagTransitionsCar
                       <span>Occurrences:</span>
                       <span>{data.count}</span>
                     </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: '#cbd5e1' }}>
-                      <span>Error Rate:</span>
-                      <span style={{ color: errorRate > 20 ? '#ef4444' : errorRate > 10 ? '#fbbf24' : '#10b981' }}>
-                        {errorRate.toFixed(1)}%
-                      </span>
-                    </div>
                     {data.trend && data.trend_value !== undefined && (
                       <div style={{ 
                         fontSize: '11px', 
@@ -455,7 +415,7 @@ export default function TagTransitionsCard({ tagTransitions }: TagTransitionsCar
                       }}>
                         {data.trend === 'improving' ? '↑' : data.trend === 'declining' ? '↓' : '→'}
                         <span>
-                          {data.trend_value > 0 ? '+' : ''}{data.trend_value}% over last 10 games
+                          {data.trend_value > 0 ? '+' : ''}{data.trend_value.toFixed(1)}% vs average (last 3 games)
                         </span>
                       </div>
                       )}

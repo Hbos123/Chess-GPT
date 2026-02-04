@@ -2,7 +2,6 @@
 
 import { useState, useEffect } from "react";
 import DailyUsageDisplay from "@/components/DailyUsageDisplay";
-import { mean, weightedMean } from "@/components/ProfileDashboard/components/graphs/graphSeries";
 
 interface OverviewTabProps {
   data: any;
@@ -37,10 +36,6 @@ export default function OverviewTab({ data, profileStatus, onOpenPersonalReview,
   const [snapshot, setSnapshot] = useState<any | null>(null);
   const [snapshotLoading, setSnapshotLoading] = useState(false);
   const [snapshotError, setSnapshotError] = useState<string | null>(null);
-
-  // Graph data (for trends + cp-loss chart)
-  const [graphData, setGraphData] = useState<any[] | null>(null);
-  const [graphDataLoading, setGraphDataLoading] = useState(false);
   
   // Analysis progress state (for move-by-move updates)
   const [analysisProgress, setAnalysisProgress] = useState<{
@@ -142,34 +137,6 @@ export default function OverviewTab({ data, profileStatus, onOpenPersonalReview,
     };
 
     loadSnapshot();
-    return () => {
-      cancelled = true;
-    };
-  }, [userId, backendBase, isUnpaid]);
-
-  // Fetch per-game graph data (for trends + CP-loss-by-move chart)
-  useEffect(() => {
-    if (!userId || !backendBase || isUnpaid) return;
-    let cancelled = false;
-
-    const loadGraphData = async () => {
-      setGraphDataLoading(true);
-      try {
-        const baseUrl = backendBase.replace(/\/$/, "");
-        const url = `${baseUrl}/profile/analytics/${userId}/graph-data?limit=60`;
-        const res = await fetch(url, { cache: "no-store" });
-        if (!res.ok) throw new Error(`Failed to load graph data: ${res.status}`);
-        const payload = await res.json();
-        const games = Array.isArray(payload?.games) ? payload.games : [];
-        if (!cancelled) setGraphData(games);
-      } catch {
-        if (!cancelled) setGraphData(null);
-      } finally {
-        if (!cancelled) setGraphDataLoading(false);
-      }
-    };
-
-    loadGraphData();
     return () => {
       cancelled = true;
     };
@@ -290,105 +257,6 @@ export default function OverviewTab({ data, profileStatus, onOpenPersonalReview,
   const activeGames = rolling_window?.games || profileStatus?.deep_analyzed_games || 0;
   // targetGames is already defined at the top of the component (line 21)
   const progressPercent = Math.min((activeGames / targetGames) * 100, 100);
-
-  const computeLast3Trend = (values: Array<number | null | undefined>) => {
-    const overall = mean(values as any);
-    const last3 = mean(values.slice(-3) as any);
-    if (overall == null || last3 == null) return null;
-    return { overall, last3, delta: last3 - overall };
-  };
-
-  const TrendPill = ({ delta, fmt = (n: number) => n.toFixed(1) }: { delta: number; fmt?: (n: number) => string }) => {
-    const abs = Math.abs(delta);
-    const dir = abs < 0.05 ? "flat" : delta > 0 ? "up" : "down";
-    const symbol = dir === "up" ? "▲" : dir === "down" ? "▼" : "—";
-    const sign = dir === "flat" ? "" : delta > 0 ? "+" : "";
-    return (
-      <span className={`trend-pill ${dir}`} title="Last 3 games vs overall average">
-        {symbol} {sign}{fmt(delta)}
-      </span>
-    );
-  };
-
-  const gamesForTrends = Array.isArray(graphData) ? graphData : [];
-  const overallAccuracyTrend = computeLast3Trend(gamesForTrends.map((g: any) => g?.overall_accuracy));
-  const avgCpLossTrend = computeLast3Trend(gamesForTrends.map((g: any) => g?.avg_cp_loss));
-  const winRateTrend = (() => {
-    const toScore = (r: any) => {
-      const s = String(r || "").toLowerCase();
-      if (s === "win") return 1;
-      if (s === "draw") return 0.5;
-      if (s === "loss") return 0;
-      return null;
-    };
-    const overall = mean(gamesForTrends.map((g: any) => toScore(g?.result)).filter((v: any) => v != null) as any);
-    const last3 = mean(gamesForTrends.slice(-3).map((g: any) => toScore(g?.result)).filter((v: any) => v != null) as any);
-    if (overall == null || last3 == null) return null;
-    return { overall: overall * 100, last3: last3 * 100, delta: (last3 - overall) * 100 };
-  })();
-
-  const cpLossByMoveSeries = (() => {
-    // Aggregate per-game cp_loss_buckets into a weighted average series
-    const buckets: Record<string, { start: number; end: number; items: Array<{ value: number | null; weight: number }> }> = {};
-    for (const g of gamesForTrends) {
-      const bs = g?.cp_loss_buckets;
-      if (!Array.isArray(bs)) continue;
-      for (const b of bs) {
-        const start = Number(b?.start);
-        const end = Number(b?.end);
-        const val = typeof b?.avg_cp_loss === "number" ? b.avg_cp_loss : null;
-        const weight = typeof b?.count === "number" ? b.count : 0;
-        if (!Number.isFinite(start) || !Number.isFinite(end)) continue;
-        const key = `${start}-${end}`;
-        if (!buckets[key]) buckets[key] = { start, end, items: [] };
-        buckets[key].items.push({ value: val, weight });
-      }
-    }
-    const out = Object.values(buckets)
-      .sort((a, b) => a.start - b.start)
-      .map((b) => ({
-        start: b.start,
-        end: b.end,
-        avg_cp_loss: weightedMean(b.items),
-      }));
-    return out.length ? out : null;
-  })();
-
-  const CpLossSparkline = ({ series }: { series: Array<{ start: number; end: number; avg_cp_loss: number | null }> }) => {
-    const width = 520;
-    const height = 140;
-    const pad = 12;
-    const ys = series.map((p) => p.avg_cp_loss).filter((v): v is number => typeof v === "number" && Number.isFinite(v));
-    if (ys.length < 2) return null;
-    const minY = Math.min(...ys);
-    const maxY = Math.max(...ys);
-    const range = maxY - minY || 1;
-    const pts = series.map((p, i) => {
-      const x = pad + (i * (width - pad * 2)) / Math.max(1, series.length - 1);
-      const yv = typeof p.avg_cp_loss === "number" ? p.avg_cp_loss : null;
-      const y = yv == null ? null : pad + (1 - (yv - minY) / range) * (height - pad * 2);
-      return { x, y, yv };
-    });
-    const d = pts
-      .filter((p) => p.y != null)
-      .map((p, idx) => `${idx === 0 ? "M" : "L"} ${p.x.toFixed(1)} ${(p.y as number).toFixed(1)}`)
-      .join(" ");
-    return (
-      <svg width="100%" viewBox={`0 0 ${width} ${height}`} style={{ display: "block" }}>
-        <path d={d} fill="none" stroke="rgba(125, 211, 252, 0.95)" strokeWidth="3" strokeLinecap="round" />
-        <path d={`M ${pad} ${height - pad} L ${width - pad} ${height - pad}`} stroke="rgba(148, 163, 184, 0.25)" strokeWidth="1" />
-        <text x={pad} y={pad + 10} fontSize="11" fill="rgba(203, 213, 225, 0.9)">
-          {maxY.toFixed(0)}cp
-        </text>
-        <text x={pad} y={height - 2} fontSize="11" fill="rgba(203, 213, 225, 0.75)">
-          {series[0].start}
-        </text>
-        <text x={width - pad} y={height - 2} fontSize="11" textAnchor="end" fill="rgba(203, 213, 225, 0.75)">
-          {series[series.length - 1].end}
-        </text>
-      </svg>
-    );
-  };
   
   // Reduced logging - removed verbose target games logging
   
@@ -440,50 +308,6 @@ export default function OverviewTab({ data, profileStatus, onOpenPersonalReview,
 
   return (
     <div className="overview-tab">
-      {/* Summary Row */}
-      {!isUnpaid && (
-        <div className="tab-section overview-summary">
-          <h2>Performance Summary</h2>
-          <div className="stats-grid overview-summary-grid">
-            <div className="stat-card">
-              <span className="stat-label">Overall Accuracy</span>
-              <span className="stat-value">
-                {typeof snapshot?.avg_accuracy === "number" ? `${snapshot.avg_accuracy.toFixed(1)}%` : "—"}
-              </span>
-              {overallAccuracyTrend && <TrendPill delta={overallAccuracyTrend.delta} fmt={(n) => `${n.toFixed(1)}%`} />}
-            </div>
-            <div className="stat-card">
-              <span className="stat-label">Avg CP Loss</span>
-              <span className="stat-value">
-                {typeof avgCpLossTrend?.overall === "number" ? `${avgCpLossTrend.overall.toFixed(1)}` : "—"}
-              </span>
-              {avgCpLossTrend && <TrendPill delta={avgCpLossTrend.delta} fmt={(n) => `${n.toFixed(1)}cp`} />}
-            </div>
-            <div className="stat-card">
-              <span className="stat-label">Win Rate</span>
-              <span className="stat-value">
-                {snapshot?.rates?.win != null ? `${snapshot.rates.win.toFixed(1)}%` : "—"}
-              </span>
-              {winRateTrend && <TrendPill delta={winRateTrend.delta} fmt={(n) => `${n.toFixed(1)}%`} />}
-            </div>
-            <div className="stat-card">
-              <span className="stat-label">CP Loss by Move #</span>
-              {graphDataLoading ? (
-                <div style={{ color: "#93c5fd", fontSize: 13, marginTop: 10 }}>Loading…</div>
-              ) : cpLossByMoveSeries ? (
-                <div style={{ marginTop: 10 }}>
-                  <CpLossSparkline series={cpLossByMoveSeries} />
-                </div>
-              ) : (
-                <div style={{ color: "#9ca3af", fontSize: 13, marginTop: 10 }}>
-                  Not enough CP-loss data yet.
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* Progress Bar - Always show at top */}
       <div style={{ 
         padding: '16px', 
@@ -862,7 +686,7 @@ export default function OverviewTab({ data, profileStatus, onOpenPersonalReview,
             <span className="stat-value">
               {snapshot?.openings?.as_white?.name
                 ? `${snapshot.openings.as_white.name} (${snapshot.openings.as_white.pct ?? 0}%)`
-                : "Not enough opening data yet"}
+                : "---"}
             </span>
           </div>
           <div className="stat-card">
@@ -870,7 +694,7 @@ export default function OverviewTab({ data, profileStatus, onOpenPersonalReview,
             <span className="stat-value">
               {snapshot?.openings?.as_black_faced?.name
                 ? `${snapshot.openings.as_black_faced.name} (${snapshot.openings.as_black_faced.pct ?? 0}%)`
-                : "Not enough opening data yet"}
+                : "---"}
             </span>
           </div>
         </div>

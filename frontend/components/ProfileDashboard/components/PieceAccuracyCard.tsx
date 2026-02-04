@@ -12,18 +12,11 @@ interface PieceAccuracyCardProps {
       pieces: { [piece: string]: { accuracy: number; count: number } };
     }>;
   };
-  trends?: Partial<Record<"Pawn" | "Knight" | "Bishop" | "Rook" | "Queen" | "King", number>>;
 }
 
-export default function PieceAccuracyCard({ pieceData, trends }: PieceAccuracyCardProps) {
+export default function PieceAccuracyCard({ pieceData }: PieceAccuracyCardProps) {
   const aggregate = pieceData?.aggregate || {};
-  const pieces = ["Pawn", "Knight", "Bishop", "Rook", "Queen", "King"] as const;
-  type PieceName = (typeof pieces)[number];
-  const trendFor = (name: string): number | null => {
-    const key = name as PieceName;
-    const v = trends?.[key];
-    return typeof v === "number" ? v : null;
-  };
+  const pieces = ["Pawn", "Knight", "Bishop", "Rook", "Queen", "King"];
   
   // Sort pieces by accuracy (highest first)
   const sortedPieces = pieces
@@ -122,28 +115,6 @@ export default function PieceAccuracyCard({ pieceData, trends }: PieceAccuracyCa
           <div style={{ fontSize: '16px', color: '#d1fae5' }}>
             {bestPiece.data.accuracy.toFixed(1)}%
           </div>
-          {typeof trendFor(bestPiece.name) === "number" && (
-            <div style={{ marginTop: 8 }}>
-              <span
-                className={`trend-pill ${
-                  Math.abs(trendFor(bestPiece.name) as number) < 0.05
-                    ? "flat"
-                    : (trendFor(bestPiece.name) as number) > 0
-                      ? "up"
-                      : "down"
-                }`}
-                style={{ marginTop: 0 }}
-                title="Last 3 games vs overall average"
-              >
-                {Math.abs(trendFor(bestPiece.name) as number) < 0.05
-                  ? "—"
-                  : (trendFor(bestPiece.name) as number) > 0
-                    ? "▲"
-                    : "▼"}{" "}
-                {((trendFor(bestPiece.name) as number) > 0 ? "+" : "") + (trendFor(bestPiece.name) as number).toFixed(1)}%
-              </span>
-            </div>
-          )}
           <div style={{ fontSize: '11px', color: '#9ca3af', marginTop: '4px' }}>
             {bestPiece.data.count} moves
           </div>
@@ -162,28 +133,6 @@ export default function PieceAccuracyCard({ pieceData, trends }: PieceAccuracyCa
           <div style={{ fontSize: '16px', color: '#fee2e2' }}>
             {worstPiece.data.accuracy.toFixed(1)}%
           </div>
-          {typeof trendFor(worstPiece.name) === "number" && (
-            <div style={{ marginTop: 8 }}>
-              <span
-                className={`trend-pill ${
-                  Math.abs(trendFor(worstPiece.name) as number) < 0.05
-                    ? "flat"
-                    : (trendFor(worstPiece.name) as number) > 0
-                      ? "up"
-                      : "down"
-                }`}
-                style={{ marginTop: 0 }}
-                title="Last 3 games vs overall average"
-              >
-                {Math.abs(trendFor(worstPiece.name) as number) < 0.05
-                  ? "—"
-                  : (trendFor(worstPiece.name) as number) > 0
-                    ? "▲"
-                    : "▼"}{" "}
-                {((trendFor(worstPiece.name) as number) > 0 ? "+" : "") + (trendFor(worstPiece.name) as number).toFixed(1)}%
-              </span>
-            </div>
-          )}
           <div style={{ fontSize: '11px', color: '#9ca3af', marginTop: '4px' }}>
             {worstPiece.data.count} moves
           </div>
@@ -195,7 +144,6 @@ export default function PieceAccuracyCard({ pieceData, trends }: PieceAccuracyCa
         {sortedPieces.map((piece) => {
           const percentage = piece.data.accuracy;
           const color = percentage >= 80 ? '#10b981' : percentage >= 70 ? '#fbbf24' : '#ef4444';
-          const delta = trendFor(piece.name);
           
           return (
             <div key={piece.name} style={{
@@ -211,17 +159,6 @@ export default function PieceAccuracyCard({ pieceData, trends }: PieceAccuracyCa
               <div style={{ fontSize: '20px', fontWeight: 700, color, marginBottom: '4px' }}>
                 {piece.data.accuracy.toFixed(1)}%
               </div>
-              {typeof delta === "number" && (
-                <div style={{ display: "flex", justifyContent: "center", marginBottom: 6 }}>
-                  <span
-                    className={`trend-pill ${Math.abs(delta) < 0.05 ? "flat" : delta > 0 ? "up" : "down"}`}
-                    style={{ marginTop: 0, padding: "2px 8px", fontSize: 11 }}
-                    title="Last 3 games vs overall average"
-                  >
-                    {Math.abs(delta) < 0.05 ? "—" : delta > 0 ? "▲" : "▼"} {`${delta > 0 ? "+" : ""}${delta.toFixed(1)}%`}
-                  </span>
-                </div>
-              )}
               <div style={{ fontSize: '11px', color: '#9ca3af' }}>
                 {piece.data.count} moves
               </div>

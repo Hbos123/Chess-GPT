@@ -15,10 +15,9 @@ interface TimeManagementCardProps {
       inaccuracy_rate?: number;
     };
   };
-  trends?: Partial<Record<string, number>>;
 }
 
-export default function TimeManagementCard({ timeBuckets, trends }: TimeManagementCardProps) {
+export default function TimeManagementCard({ timeBuckets }: TimeManagementCardProps) {
   // Define the 7 buckets in order
   const bucketOrder = [
     "<5s",
@@ -149,24 +148,6 @@ export default function TimeManagementCard({ timeBuckets, trends }: TimeManageme
                   {data.accuracy.toFixed(1)}%
                 </span>
               </div>
-              {typeof trends?.[bucketName] === "number" && (
-                <div style={{ marginBottom: 8 }}>
-                  <span
-                    className={`trend-pill ${
-                      Math.abs(trends[bucketName] as number) < 0.05
-                        ? "flat"
-                        : (trends[bucketName] as number) > 0
-                          ? "up"
-                          : "down"
-                    }`}
-                    style={{ marginTop: 0, padding: "2px 8px", fontSize: 11 }}
-                    title="Last 3 games vs overall average"
-                  >
-                    {Math.abs(trends[bucketName] as number) < 0.05 ? "—" : (trends[bucketName] as number) > 0 ? "▲" : "▼"}{" "}
-                    {((trends[bucketName] as number) > 0 ? "+" : "") + (trends[bucketName] as number).toFixed(1)}%
-                  </span>
-                </div>
-              )}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '12px', color: '#cbd5e1' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                   <span>{data.count} moves</span>

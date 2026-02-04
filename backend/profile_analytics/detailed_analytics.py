@@ -899,16 +899,26 @@ class DetailedAnalyticsAggregator:
             "count": 0
         })
         
+        # Quality indicator tags that should be excluded from transitions
+        # (they're move quality indicators, not positional features)
+        QUALITY_TAGS = {"mistake", "blunder", "inaccuracy", "missed_win", "missed_critical_win"}
+        
         def extract_tag_names(tags):
-            """Extract tag names from various formats."""
+            """Extract tag names from various formats, excluding quality indicator tags."""
             tag_names = set()
             for tag in tags:
                 if isinstance(tag, str):
-                    tag_names.add(tag)
+                    tag_name_lower = tag.strip().lower()
+                    # Skip quality indicator tags - they're not positional features
+                    if tag_name_lower not in QUALITY_TAGS:
+                        tag_names.add(tag)
                 elif isinstance(tag, dict):
                     tag_name = tag.get("tag_name") or tag.get("name") or tag.get("tag", "")
                     if tag_name:
-                        tag_names.add(tag_name)
+                        tag_name_lower = tag_name.strip().lower()
+                        # Skip quality indicator tags
+                        if tag_name_lower not in QUALITY_TAGS:
+                            tag_names.add(tag_name)
             return tag_names
 
         # Resolve a stable player_color for summary/trend formatting.
@@ -1026,30 +1036,26 @@ class DetailedAnalyticsAggregator:
             result = {}
             
             # Build per-game accuracy tracking for trend calculation
-            tag_game_accuracies = defaultdict(lambda: {"recent": [], "older": []})
+            # Track last 3 games separately for trend calculation
+            tag_game_accuracies = defaultdict(lambda: {"last_3": [], "all": []})
             
             def extract_tag_names(tags):
                 tag_names = set()
                 for tag in tags:
                     if isinstance(tag, str):
-                        tag_names.add(tag)
+                        tag_name_lower = tag.strip().lower()
+                        if tag_name_lower not in QUALITY_TAGS:
+                            tag_names.add(tag)
                     elif isinstance(tag, dict):
                         tag_name = tag.get("tag_name") or tag.get("name") or tag.get("tag", "")
                         if tag_name:
-                            tag_names.add(tag_name)
+                            tag_name_lower = tag_name.strip().lower()
+                            if tag_name_lower not in QUALITY_TAGS:
+                                tag_names.add(tag_name)
                 return tag_names
             
-            # Split games into recent (last 10) and older for trend calculation
-            if len(games_list) > 10:
-                recent_games = games_list[-10:]
-                older_games = games_list[:-10]
-            else:
-                mid_point = len(games_list) // 2
-                recent_games = games_list[mid_point:] if mid_point > 0 else games_list
-                older_games = games_list[:mid_point] if mid_point > 0 else []
-            
-            # Track accuracies per tag per game for trend calculation
-            recent_indices = set(range(max(0, len(games_list) - 10), len(games_list))) if len(games_list) > 10 else set(range(len(games_list) // 2, len(games_list)))
+            # Track last 3 games for trend calculation
+            last_3_indices = set(range(max(0, len(games_list) - 3), len(games_list))) if len(games_list) >= 3 else set()
             
             for game_idx, game in enumerate(games_list):
                 game_review = game.get("game_review", {})
@@ -1057,7 +1063,7 @@ class DetailedAnalyticsAggregator:
                     continue
                 
                 ply_records = game_review.get("ply_records", [])
-                is_recent = game_idx in recent_indices
+                is_last_3 = game_idx in last_3_indices
                 infer_mode = self._should_infer_accuracy_for_game(ply_records, player_color_str)
                 
                 for i in range(1, len(ply_records)):
@@ -1089,10 +1095,11 @@ class DetailedAnalyticsAggregator:
                     
                     # Track for trend calculation
                     for tag_name in gained | lost:
-                        if is_recent:
-                            tag_game_accuracies[tag_name]["recent"].append(accuracy)
-                        else:
-                            tag_game_accuracies[tag_name]["older"].append(accuracy)
+                        # Always add to all
+                        tag_game_accuracies[tag_name]["all"].append(accuracy)
+                        # Add to last_3 if in last 3 games
+                        if is_last_3:
+                            tag_game_accuracies[tag_name]["last_3"].append(accuracy)
             
             for tag_name, data in tag_dict.items():
                 if data["count"] > 0:
@@ -1109,26 +1116,17 @@ class DetailedAnalyticsAggregator:
                     if significance_score < 20:
                         continue
                     
-                    # Calculate trend
+                    # Calculate trend: last 3 games average vs overall average
                     trend_value = 0
                     trend_direction = "stable"
                     
-                    recent_accs = tag_game_accuracies[tag_name]["recent"]
-                    older_accs = tag_game_accuracies[tag_name]["older"]
+                    last_3_accs = tag_game_accuracies[tag_name]["last_3"]
+                    overall_avg = statistics.mean(data["accuracies"]) if data["accuracies"] else 0
                     
-                    if len(recent_accs) > 0 and len(older_accs) > 0:
-                        recent_avg = statistics.mean(recent_accs)
-                        older_avg = statistics.mean(older_accs)
-                        trend_value = recent_avg - older_avg
-                        if trend_value > 2:
-                            trend_direction = "improving"
-                        elif trend_value < -2:
-                            trend_direction = "declining"
-                    elif len(recent_accs) > 0:
-                        # Only recent data, compare to overall average
-                        recent_avg = statistics.mean(recent_accs)
-                        overall_avg = statistics.mean(data["accuracies"]) if data["accuracies"] else 0
-                        trend_value = recent_avg - overall_avg
+                    if len(last_3_accs) > 0 and overall_avg > 0:
+                        last_3_avg = statistics.mean(last_3_accs)
+                        # Calculate percentage change: (last_3_avg - overall_avg) / overall_avg * 100
+                        trend_value = ((last_3_avg - overall_avg) / overall_avg * 100) if overall_avg > 0 else 0
                         if trend_value > 2:
                             trend_direction = "improving"
                         elif trend_value < -2:

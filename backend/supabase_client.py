@@ -3031,10 +3031,8 @@ class SupabaseClient:
             game_date = graph_point.get("game_date")
             if isinstance(game_date, str) and "T" in game_date:
                 game_date = game_date.split("T")[0]
-
-            # Try to save full point (newer schemas may have more columns). If columns are missing,
-            # fall back to the base schema so we still persist something.
-            payload_full = {
+            
+            self.client.table("game_graph_data").upsert({
                 "user_id": user_id,
                 "game_id": game_id,
                 "game_date": game_date,
@@ -3043,36 +3041,10 @@ class SupabaseClient:
                 "opening_eco": graph_point.get("opening_eco"),
                 "time_control": graph_point.get("time_control"),
                 "overall_accuracy": graph_point.get("overall_accuracy"),
-                "avg_cp_loss": graph_point.get("avg_cp_loss"),
-                "cp_loss_buckets": graph_point.get("cp_loss_buckets") or [],
-                "phase_accuracy": graph_point.get("phase_accuracy") or {},
                 "piece_accuracy": graph_point.get("piece_accuracy") or {},
                 "time_bucket_accuracy": graph_point.get("time_bucket_accuracy") or {},
                 "tag_transitions": graph_point.get("tag_transitions") or {"gained": {}, "lost": {}},
-                "static_tags": graph_point.get("static_tags") or {},
-            }
-            try:
-                self.client.table("game_graph_data").upsert(payload_full, on_conflict="user_id,game_id").execute()
-            except Exception as e:
-                # If new columns are missing, retry with legacy schema.
-                error_str = str(e).lower()
-                if "column" in error_str and ("does not exist" in error_str or "unknown column" in error_str or "pgrst" in error_str):
-                    payload_legacy = {
-                        "user_id": user_id,
-                        "game_id": game_id,
-                        "game_date": game_date,
-                        "result": graph_point.get("result"),
-                        "opening_name": graph_point.get("opening_name"),
-                        "opening_eco": graph_point.get("opening_eco"),
-                        "time_control": graph_point.get("time_control"),
-                        "overall_accuracy": graph_point.get("overall_accuracy"),
-                        "piece_accuracy": graph_point.get("piece_accuracy") or {},
-                        "time_bucket_accuracy": graph_point.get("time_bucket_accuracy") or {},
-                        "tag_transitions": graph_point.get("tag_transitions") or {"gained": {}, "lost": {}},
-                    }
-                    self.client.table("game_graph_data").upsert(payload_legacy, on_conflict="user_id,game_id").execute()
-                else:
-                    raise
+            }, on_conflict="user_id,game_id").execute()
             
             print(f"   ✅ [GRAPH_DATA] Saved pre-computed graph data for game {game_id}")
             return True

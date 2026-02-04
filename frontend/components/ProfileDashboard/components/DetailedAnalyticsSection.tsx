@@ -20,7 +20,6 @@ export default function DetailedAnalyticsSection({
 }: DetailedAnalyticsSectionProps) {
   const [detailedAnalytics, setDetailedAnalytics] = useState<any>(null); // Start with null instead of dummy data
   const [loadingDetailed, setLoadingDetailed] = useState(true); // Start with loading true
-  const [graphGames, setGraphGames] = useState<any[] | null>(null);
 
   useEffect(() => {
     if (!userId || !backendBase) return;
@@ -67,78 +66,6 @@ export default function DetailedAnalyticsSection({
 
     loadDetailedAnalytics();
   }, [userId, backendBase]);
-
-  // Fetch graph-data so we can compute "last 3 games vs overall" trends for key detailed analytics.
-  useEffect(() => {
-    if (!userId || !backendBase) return;
-    let cancelled = false;
-    const load = async () => {
-      try {
-        const baseUrl = backendBase.replace(/\/$/, "");
-        const url = `${baseUrl}/profile/analytics/${userId}/graph-data?limit=60`;
-        const res = await fetch(url, { cache: "no-store" });
-        if (!res.ok) throw new Error(String(res.status));
-        const payload = await res.json();
-        const games = Array.isArray(payload?.games) ? payload.games : [];
-        if (!cancelled) setGraphGames(games);
-      } catch {
-        if (!cancelled) setGraphGames(null);
-      }
-    };
-    load();
-    return () => {
-      cancelled = true;
-    };
-  }, [userId, backendBase]);
-
-  const safeMean = (vals: Array<number | null | undefined>) => {
-    const xs = vals.filter((v): v is number => typeof v === "number" && Number.isFinite(v));
-    if (!xs.length) return null;
-    return xs.reduce((a, b) => a + b, 0) / xs.length;
-  };
-
-  const deltaLast3 = (vals: Array<number | null | undefined>) => {
-    const overall = safeMean(vals);
-    const last3 = safeMean(vals.slice(-3));
-    if (overall == null || last3 == null) return null;
-    return last3 - overall;
-  };
-
-  const phaseTrendDeltas: Partial<Record<"opening" | "middlegame" | "endgame", number>> = (() => {
-    const games = Array.isArray(graphGames) ? graphGames : [];
-    const phases = ["opening", "middlegame", "endgame"] as const;
-    const out: any = {};
-    for (const ph of phases) {
-      const vals = games.map((g: any) => g?.phase_accuracy?.[ph]?.accuracy);
-      const d = deltaLast3(vals);
-      if (typeof d === "number") out[ph] = d;
-    }
-    return out;
-  })();
-
-  const pieceTrendDeltas: Partial<Record<"Pawn" | "Knight" | "Bishop" | "Rook" | "Queen" | "King", number>> = (() => {
-    const games = Array.isArray(graphGames) ? graphGames : [];
-    const pieces = ["Pawn", "Knight", "Bishop", "Rook", "Queen", "King"] as const;
-    const out: any = {};
-    for (const p of pieces) {
-      const vals = games.map((g: any) => g?.piece_accuracy?.[p]?.accuracy);
-      const d = deltaLast3(vals);
-      if (typeof d === "number") out[p] = d;
-    }
-    return out;
-  })();
-
-  const timeTrendDeltas: Partial<Record<string, number>> = (() => {
-    const games = Array.isArray(graphGames) ? graphGames : [];
-    const buckets = ["<5s", "5-15s", "15-30s", "30s-1min", "1min-2min30", "2min30-5min", "5min+"] as const;
-    const out: any = {};
-    for (const b of buckets) {
-      const vals = games.map((g: any) => g?.time_bucket_accuracy?.[b]?.accuracy);
-      const d = deltaLast3(vals);
-      if (typeof d === "number") out[b] = d;
-    }
-    return out;
-  })();
 
   return (
     <div className="tab-section">
@@ -187,7 +114,7 @@ export default function DetailedAnalyticsSection({
           )}
 
           {detailedAnalytics.phase_analytics && (
-            <PhasePerformanceCard phaseAnalytics={detailedAnalytics.phase_analytics} trends={phaseTrendDeltas} />
+            <PhasePerformanceCard phaseAnalytics={detailedAnalytics.phase_analytics} />
           )}
 
           {detailedAnalytics.opening_detailed &&
@@ -253,7 +180,7 @@ export default function DetailedAnalyticsSection({
             )}
 
           {detailedAnalytics.piece_accuracy_detailed && (
-            <PieceAccuracyCard pieceData={detailedAnalytics.piece_accuracy_detailed} trends={pieceTrendDeltas} />
+            <PieceAccuracyCard pieceData={detailedAnalytics.piece_accuracy_detailed} />
           )}
 
           {detailedAnalytics.tag_transitions && (
@@ -263,7 +190,7 @@ export default function DetailedAnalyticsSection({
           <StaticTagsCard staticTags={detailedAnalytics.static_tags || {}} />
 
           {detailedAnalytics.time_buckets && Object.keys(detailedAnalytics.time_buckets).length > 0 && (
-            <TimeManagementCard timeBuckets={detailedAnalytics.time_buckets} trends={timeTrendDeltas} />
+            <TimeManagementCard timeBuckets={detailedAnalytics.time_buckets} />
           )}
         </>
       ) : (
