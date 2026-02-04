@@ -216,6 +216,11 @@ async def backfill_user_positions_from_pgn(
             
             if idx == 1:
                 print(f"   🔍 Debug: Game {game_id} has {total_plys} ply_records, {len(fen_befores)} moves in PGN")
+                if ply_records:
+                    sample_rec = ply_records[0]
+                    print(f"   🔍 Sample ply_record keys: {list(sample_rec.keys()) if isinstance(sample_rec, dict) else 'not a dict'}")
+                    if isinstance(sample_rec, dict):
+                        print(f"   🔍 Sample ply_record: {str(sample_rec)[:200]}...")
             
             for rec_idx, rec in enumerate(ply_records):
                 if not isinstance(rec, dict):
@@ -231,15 +236,17 @@ async def backfill_user_positions_from_pgn(
                     continue
                 
                 category = infer_category(rec)
+                if idx == 1 and rec_idx < 3:
+                    cp_loss_raw = rec.get("cp_loss") or rec.get("cpLoss") or rec.get("cp_loss_pct") or rec.get("cpLossPct")
+                    print(f"      Ply {ply_i}: category={category}, cp_loss fields: cp_loss={rec.get('cp_loss')}, cpLoss={rec.get('cpLoss')}, keys={list(rec.keys())[:10]}")
+                
                 if category:
                     plys_with_category += 1
-                    if idx == 1 and rec_idx < 5:
-                        print(f"      Ply {ply_i}: category={category}, cp_loss={rec.get('cp_loss')}")
                 
                 if category not in ("blunder", "mistake"):
                     continue
                 
-                cp_loss = rec.get("cp_loss")
+                cp_loss = rec.get("cp_loss") or rec.get("cpLoss") or rec.get("cp_loss_pct") or rec.get("cpLossPct")
                 try:
                     cp_loss_f = float(cp_loss or 0)
                 except Exception:
