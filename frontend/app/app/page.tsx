@@ -1547,6 +1547,8 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
   const enterLessonMode = useCallback(() => {
     console.log("[LESSON DEBUG] enterLessonMode invoked");
     setLessonMode(true);
+    // Lessons require the board; ensure it's visible and uses the available viewport.
+    setBoardDockOpen(true);
     setAiGameActive(false);
     setWaitingForEngine(false);
     setMode((prev) => {
@@ -2610,6 +2612,9 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
   const boardChatTotal = layoutSizes.board + layoutSizes.chat || 1;
   const boardFraction = boardDockOpen ? (layoutSizes.board / boardChatTotal) : 0;
   const chatFraction = boardDockOpen ? (layoutSizes.chat / boardChatTotal) : 1;
+  const lessonLayoutLock = lessonMode && boardDockOpen && !isMobileMode;
+  const boardFractionEffective = lessonLayoutLock ? 0.6 : boardFraction;
+  const chatFractionEffective = lessonLayoutLock ? 0.4 : chatFraction;
   const beginDrag = (
     type: DragType,
     axis: "x" | "y",
@@ -2630,22 +2635,22 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
   };
   const layoutStyle: CSSProperties | undefined = boardDockOpen
     ? ({
-        "--board-column-width": `${(boardFraction * 100).toFixed(2)}%`,
-        "--chat-column-width": `${(chatFraction * 100).toFixed(2)}%`,
-        "--composer-offset": `${(boardFraction * 100).toFixed(2)}%`,
+        "--board-column-width": `${(boardFractionEffective * 100).toFixed(2)}%`,
+        "--chat-column-width": `${(chatFractionEffective * 100).toFixed(2)}%`,
+        "--composer-offset": `${(boardFractionEffective * 100).toFixed(2)}%`,
       } as CSSProperties)
     : undefined;
   const boardColumnStyle = boardDockOpen
     ? (isMobileMode
         ? // Mobile is vertical: treat board/chat split as a row height ratio.
-          ({ flex: `0 0 ${(boardFraction * 100).toFixed(2)}%` } as CSSProperties)
-        : ({ flexBasis: `${(boardFraction * 100).toFixed(2)}%` } as CSSProperties))
+          ({ flex: `0 0 ${(boardFractionEffective * 100).toFixed(2)}%` } as CSSProperties)
+        : ({ flexBasis: `${(boardFractionEffective * 100).toFixed(2)}%` } as CSSProperties))
     : undefined;
   const chatColumnStyle = boardDockOpen
     ? (isMobileMode
         ? // Let chat fill the rest on mobile.
           ({ flex: "1 1 0" } as CSSProperties)
-        : ({ flexBasis: `${(chatFraction * 100).toFixed(2)}%` } as CSSProperties))
+        : ({ flexBasis: `${(chatFractionEffective * 100).toFixed(2)}%` } as CSSProperties))
     : undefined;
 
   // Helper function to call LLM through backend (avoids CORS)
@@ -13890,7 +13895,10 @@ Provide 2-3 sentences of natural language commentary explaining why this deviati
   const boardHighlights = lessonMode ? [] : annotations.highlights;
 
   return (
-    <div data-theme={theme} className="app-shell">
+    <div
+      data-theme={theme}
+      className={`app-shell${lessonMode ? " lesson-fullscreen" : ""}`}
+    >
       <TopBar
         onToggleHistory={() => setShowHistory(!showHistory)}
         onSignIn={handleSignInClick}
@@ -14179,7 +14187,7 @@ Provide 2-3 sentences of natural language commentary explaining why this deviati
         // CHAT STATE: Conversation with optional board
         <main
           ref={layoutRef}
-          className={`chat-layout ${boardDockOpen ? 'with-board' : ''} ${isMobileMode ? 'mobile-mode' : ''}`}
+          className={`chat-layout ${boardDockOpen ? 'with-board' : ''} ${isMobileMode ? 'mobile-mode' : ''} ${lessonMode ? 'lesson-fullscreen' : ''}`}
           style={layoutStyle}
         >
           {boardDockOpen ? (

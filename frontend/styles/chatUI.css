@@ -105,6 +105,37 @@ html, body {
 }
 
 /* ========================================
+   LESSON FULLSCREEN LAYOUT
+   ======================================== */
+
+.app-shell.lesson-fullscreen .top-bar {
+  height: 72px;
+  padding: 0 var(--shell-gutter);
+}
+
+.app-shell.lesson-fullscreen .wordmark {
+  font-size: calc(28px * var(--font-scale));
+}
+
+.chat-layout.lesson-fullscreen {
+  max-width: 100%;
+  margin: 0;
+}
+
+.chat-layout.lesson-fullscreen.with-board .board-column {
+  padding: 0 clamp(10px, 1.6vw, 14px);
+}
+
+.chat-layout.lesson-fullscreen.with-board .chat-column {
+  padding: 0 clamp(10px, 1.6vw, 14px);
+}
+
+/* Keep the floating Lesson Data button from overlapping the fixed composer. */
+.app-shell.lesson-fullscreen .lesson-data-button {
+  bottom: calc(var(--bottom-composer-overlay-reserve) + 16px);
+}
+
+/* ========================================
    TOP BAR
    ======================================== */
 
