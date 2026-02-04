@@ -64,6 +64,7 @@ import { wipeMyData } from "@/lib/wipeUserData";
 import { resetMyTokens } from "@/lib/resetTokens";
 import { updateMySubscription } from "@/lib/updateSubscription";
 import { resetDetailedAnalytics } from "@/lib/resetDetailedAnalytics";
+import { generateSampleAnalytics } from "@/lib/generateSampleAnalytics";
 import "../../styles/chatUI.css";
 import "../styles.css";
 
@@ -236,7 +237,8 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
       (window as any).resetMyTokens = resetMyTokens;
       (window as any).updateMySubscription = updateMySubscription;
       (window as any).resetDetailedAnalytics = resetDetailedAnalytics;
-      console.log('💡 Console helpers loaded! Type: await wipeMyData(), await resetMyTokens(), await updateMySubscription("lite"), or await resetDetailedAnalytics()');
+      (window as any).generateSampleAnalytics = generateSampleAnalytics;
+      console.log('💡 Console helpers loaded! Type: await wipeMyData(), await resetMyTokens(), await updateMySubscription("lite"), await resetDetailedAnalytics(), or await generateSampleAnalytics()');
     }
   }, []);
   

@@ -8532,6 +8532,275 @@ async def backfill_detailed_analytics(user_id: Optional[str] = None):
         raise HTTPException(status_code=500, detail=f"Backfill failed: {str(e)}")
 
 
+class GenerateSampleAnalyticsRequest(BaseModel):
+    user_id: str
+    games_count: int = 40
+    overwrite: bool = False
+
+
+@app.post("/admin/generate-sample-analytics")
+async def generate_sample_analytics(request: GenerateSampleAnalyticsRequest):
+    """
+    Admin endpoint to generate sample detailed analytics data for testing.
+    Populates detailed_analytics_cache with realistic sample data.
+    """
+    if not supabase_client:
+        raise HTTPException(status_code=503, detail="Supabase client not initialized")
+    
+    try:
+        import random
+        
+        user_id = request.user_id
+        games_count = request.games_count
+        overwrite = request.overwrite
+        
+        # Check if cache already exists
+        if not overwrite:
+            try:
+                existing = supabase_client.client.table("detailed_analytics_cache")\
+                    .select("id")\
+                    .eq("user_id", user_id)\
+                    .maybe_single()\
+                    .execute()
+                
+                if existing.data:
+                    return {
+                        "status": "skipped",
+                        "message": "Cache already exists. Use overwrite=true to replace it.",
+                        "user_id": user_id
+                    }
+            except Exception:
+                pass  # Table might not exist, continue anyway
+        
+        # Generate sample analytics data
+        def generate_sample_data():
+            # Phase Analytics
+            phase_analytics = {
+                "opening": {
+                    "accuracy": round(random.uniform(75, 90), 1),
+                    "games_won": random.randint(8, 15),
+                    "games_lost": random.randint(3, 8),
+                    "games_drawn": random.randint(1, 4)
+                },
+                "middlegame": {
+                    "accuracy": round(random.uniform(70, 85), 1),
+                    "games_won": random.randint(10, 18),
+                    "games_lost": random.randint(5, 12),
+                    "games_drawn": random.randint(1, 5)
+                },
+                "endgame": {
+                    "accuracy": round(random.uniform(75, 88), 1),
+                    "games_won": random.randint(12, 20),
+                    "games_lost": random.randint(4, 10),
+                    "games_drawn": random.randint(1, 3)
+                }
+            }
+            
+            # Opening Detailed
+            opening_names = [
+                "Sicilian Defense", "Queen's Gambit", "King's Indian Defense",
+                "French Defense", "Caro-Kann Defense", "Italian Game",
+                "Ruy Lopez", "Nimzo-Indian Defense", "English Opening", "Pirc Defense"
+            ]
+            
+            opening_detailed = {}
+            selected_openings = random.sample(opening_names, random.randint(4, 7))
+            for opening in selected_openings:
+                freq = random.randint(2, 8)
+                wins = random.randint(1, freq - 1)
+                losses = random.randint(0, freq - wins)
+                draws = freq - wins - losses
+                opening_detailed[opening] = {
+                    "frequency": freq,
+                    "avg_accuracy": round(random.uniform(72, 88), 1),
+                    "win_rate": round(wins / freq, 3) if freq > 0 else 0,
+                    "wins": wins,
+                    "losses": losses,
+                    "draws": draws
+                }
+            
+            # Piece Accuracy
+            pieces = ["Pawn", "Knight", "Bishop", "Rook", "Queen", "King"]
+            piece_aggregate = {}
+            for piece in pieces:
+                piece_aggregate[piece] = {
+                    "accuracy": round(random.uniform(75, 90), 1),
+                    "count": random.randint(20, 150)
+                }
+            
+            sorted_pieces = sorted(piece_aggregate.items(), key=lambda x: x[1]["accuracy"])
+            piece_aggregate[sorted_pieces[0][0]]["accuracy"] = round(random.uniform(82, 92), 1)
+            piece_aggregate[sorted_pieces[-1][0]]["accuracy"] = round(random.uniform(70, 78), 1)
+            
+            piece_accuracy_detailed = {
+                "aggregate": piece_aggregate,
+                "per_game": []
+            }
+            
+            # Tag Transitions
+            tag_names = [
+                "tag.center.control.near", "tag.center.control.core", "tag.key.e4", "tag.key.e5",
+                "tag.space.advantage", "tag.piece.trapped", "tag.piece.overworked",
+                "tag.diagonal.open.d1-a4", "tag.diagonal.open.d5-b7", "tag.undeveloped.queen",
+                "tag.bishop.bad", "tag.knight.outpost"
+            ]
+            
+            tag_transitions = {"gained": {}, "lost": {}}
+            
+            gained_tags = random.sample(tag_names, random.randint(5, 8))
+            for tag in gained_tags:
+                count = random.randint(8, 25)
+                tag_transitions["gained"][tag] = {
+                    "count": count,
+                    "accuracy": round(random.uniform(85, 98), 1),
+                    "blunders": random.randint(0, max(1, count // 10)),
+                    "mistakes": random.randint(0, max(1, count // 8)),
+                    "inaccuracies": random.randint(0, max(1, count // 6)),
+                    "error_rate": round(random.uniform(0, 0.15), 3)
+                }
+            
+            lost_tags = random.sample([t for t in tag_names if t not in gained_tags], random.randint(4, 7))
+            for tag in lost_tags:
+                count = random.randint(6, 20)
+                tag_transitions["lost"][tag] = {
+                    "count": count,
+                    "accuracy": round(random.uniform(80, 95), 1),
+                    "blunders": random.randint(0, max(1, count // 8)),
+                    "mistakes": random.randint(0, max(1, count // 6)),
+                    "inaccuracies": random.randint(0, max(1, count // 5)),
+                    "error_rate": round(random.uniform(0, 0.20), 3)
+                }
+            
+            # Static Tags
+            static_tags = {}
+            static_tag_names = random.sample(tag_names, random.randint(6, 10))
+            for tag in static_tag_names:
+                count = random.randint(10, 35)
+                static_tags[tag] = {
+                    "count": count,
+                    "accuracy": round(random.uniform(82, 96), 1),
+                    "blunders": random.randint(0, max(1, count // 12)),
+                    "mistakes": random.randint(0, max(1, count // 10)),
+                    "inaccuracies": random.randint(0, max(1, count // 8)),
+                    "error_rate": round(random.uniform(0, 0.12), 3)
+                }
+            
+            # Time Buckets
+            time_buckets = {
+                "<5s": {
+                    "accuracy": round(random.uniform(65, 75), 1),
+                    "count": random.randint(15, 40),
+                    "blunders": random.randint(2, 8),
+                    "mistakes": random.randint(3, 10),
+                    "inaccuracies": random.randint(4, 12),
+                    "blunder_rate": round(random.uniform(0.10, 0.25), 3),
+                    "mistake_rate": round(random.uniform(0.15, 0.30), 3),
+                    "inaccuracy_rate": round(random.uniform(0.20, 0.35), 3)
+                },
+                "5-15s": {
+                    "accuracy": round(random.uniform(72, 82), 1),
+                    "count": random.randint(30, 60),
+                    "blunders": random.randint(2, 6),
+                    "mistakes": random.randint(4, 10),
+                    "inaccuracies": random.randint(5, 15),
+                    "blunder_rate": round(random.uniform(0.05, 0.15), 3),
+                    "mistake_rate": round(random.uniform(0.10, 0.20), 3),
+                    "inaccuracy_rate": round(random.uniform(0.15, 0.25), 3)
+                },
+                "15-30s": {
+                    "accuracy": round(random.uniform(78, 88), 1),
+                    "count": random.randint(40, 80),
+                    "blunders": random.randint(1, 5),
+                    "mistakes": random.randint(3, 8),
+                    "inaccuracies": random.randint(4, 12),
+                    "blunder_rate": round(random.uniform(0.03, 0.10), 3),
+                    "mistake_rate": round(random.uniform(0.05, 0.15), 3),
+                    "inaccuracy_rate": round(random.uniform(0.08, 0.18), 3)
+                },
+                "30s-1min": {
+                    "accuracy": round(random.uniform(80, 90), 1),
+                    "count": random.randint(35, 70),
+                    "blunders": random.randint(1, 4),
+                    "mistakes": random.randint(2, 6),
+                    "inaccuracies": random.randint(3, 10),
+                    "blunder_rate": round(random.uniform(0.02, 0.08), 3),
+                    "mistake_rate": round(random.uniform(0.04, 0.12), 3),
+                    "inaccuracy_rate": round(random.uniform(0.06, 0.15), 3)
+                },
+                "1min-2min30": {
+                    "accuracy": round(random.uniform(82, 92), 1),
+                    "count": random.randint(25, 55),
+                    "blunders": random.randint(0, 3),
+                    "mistakes": random.randint(1, 5),
+                    "inaccuracies": random.randint(2, 8),
+                    "blunder_rate": round(random.uniform(0.01, 0.06), 3),
+                    "mistake_rate": round(random.uniform(0.03, 0.10), 3),
+                    "inaccuracy_rate": round(random.uniform(0.05, 0.12), 3)
+                },
+                "2min30-5min": {
+                    "accuracy": round(random.uniform(84, 94), 1),
+                    "count": random.randint(15, 40),
+                    "blunders": random.randint(0, 2),
+                    "mistakes": random.randint(0, 4),
+                    "inaccuracies": random.randint(1, 6),
+                    "blunder_rate": round(random.uniform(0.00, 0.05), 3),
+                    "mistake_rate": round(random.uniform(0.02, 0.08), 3),
+                    "inaccuracy_rate": round(random.uniform(0.03, 0.10), 3)
+                },
+                "5min+": {
+                    "accuracy": round(random.uniform(86, 96), 1),
+                    "count": random.randint(10, 30),
+                    "blunders": random.randint(0, 1),
+                    "mistakes": random.randint(0, 2),
+                    "inaccuracies": random.randint(0, 4),
+                    "blunder_rate": round(random.uniform(0.00, 0.03), 3),
+                    "mistake_rate": round(random.uniform(0.00, 0.05), 3),
+                    "inaccuracy_rate": round(random.uniform(0.02, 0.08), 3)
+                }
+            }
+            
+            return {
+                "phase_analytics": phase_analytics,
+                "opening_detailed": opening_detailed,
+                "piece_accuracy_detailed": piece_accuracy_detailed,
+                "tag_transitions": tag_transitions,
+                "static_tags": static_tags,
+                "time_buckets": time_buckets
+            }
+        
+        analytics_data = await asyncio.to_thread(generate_sample_data)
+        
+        # Save to cache
+        if supabase_client._save_detailed_analytics_cache(user_id, analytics_data, games_count):
+            return {
+                "status": "success",
+                "message": f"Sample analytics generated for {games_count} simulated games",
+                "user_id": user_id,
+                "games_count": games_count,
+                "data_summary": {
+                    "phases": len(analytics_data.get("phase_analytics", {})),
+                    "openings": len(analytics_data.get("opening_detailed", {})),
+                    "pieces": len(analytics_data.get("piece_accuracy_detailed", {}).get("aggregate", {})),
+                    "tags_gained": len(analytics_data.get("tag_transitions", {}).get("gained", {})),
+                    "tags_lost": len(analytics_data.get("tag_transitions", {}).get("lost", {})),
+                    "static_tags": len(analytics_data.get("static_tags", {})),
+                    "time_buckets": len(analytics_data.get("time_buckets", {}))
+                }
+            }
+        else:
+            return {
+                "status": "failed",
+                "message": "Failed to save sample analytics cache",
+                "user_id": user_id
+            }
+    
+    except Exception as e:
+        import traceback
+        error_trace = traceback.format_exc()
+        print(f"❌ [GENERATE_SAMPLE] Error: {e}\n{error_trace}")
+        raise HTTPException(status_code=500, detail=f"Generate sample analytics failed: {str(e)}")
+
+
 class WipeUserDataRequest(BaseModel):
     user_id: str
 
