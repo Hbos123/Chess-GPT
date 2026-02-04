@@ -536,10 +536,28 @@ class DetailedAnalyticsAggregator:
     
     def _determine_ending_phase(self, ply_records: List[Dict], player_color: str) -> str:
         """Determine which phase the game ended in."""
+        if not ply_records:
+            return "middlegame"
+        
+        # Get the last move's phase (most reliable indicator)
+        last_record = ply_records[-1]
+        last_phase = last_record.get("phase", "middlegame")
+        
+        # If last move was by the player, use its phase directly
+        if last_record.get("side_moved") == player_color:
+            return last_phase
+        
+        # If last move was by opponent, check the player's last move
+        # Find the last move by the player
+        for record in reversed(ply_records):
+            if record.get("side_moved") == player_color:
+                return record.get("phase", "middlegame")
+        
+        # Fallback: check last few moves to determine phase
         if len(ply_records) < 10:
             return "opening"
         
-        # Check last 10 moves
+        # Check last 10 moves for phase distribution
         last_phases = [
             r.get("phase", "middlegame") 
             for r in ply_records[-10:] 
@@ -549,12 +567,24 @@ class DetailedAnalyticsAggregator:
         if not last_phases:
             return "middlegame"
         
-        # If majority are endgame, game ended in endgame
+        # Count phases in last moves
+        opening_count = sum(1 for p in last_phases if p == "opening")
         endgame_count = sum(1 for p in last_phases if p == "endgame")
+        middlegame_count = sum(1 for p in last_phases if p == "middlegame")
+        
+        # If majority are endgame, game ended in endgame
         if endgame_count >= len(last_phases) * 0.6:
             return "endgame"
         
-        # If game is short, likely opening
+        # If majority are opening and game is short, ended in opening
+        if opening_count >= len(last_phases) * 0.5 and len(ply_records) < 30:
+            return "opening"
+        
+        # If majority are middlegame, ended in middlegame
+        if middlegame_count >= len(last_phases) * 0.5:
+            return "middlegame"
+        
+        # Default based on game length
         if len(ply_records) < 20:
             return "opening"
         

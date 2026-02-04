@@ -8,7 +8,14 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional, Tuple
 from collections import defaultdict
 import statistics
+import math
 from datetime import datetime as dt
+
+# Compatibility shim: some codepaths (or third-party code) may call `statistics.isfinite`,
+# but the stdlib `statistics` module does not expose `isfinite` (it's in `math`).
+# This prevents AttributeError surfacing in production graph endpoints.
+if not hasattr(statistics, "isfinite"):
+    setattr(statistics, "isfinite", math.isfinite)  # type: ignore[attr-defined]
 
 
 TIME_BUCKET_RANGES: List[Tuple[float, float, str]] = [

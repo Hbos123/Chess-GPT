@@ -1874,60 +1874,124 @@ class SupabaseClient:
         Appends game_id to source_game_ids array.
         Returns count of positions saved.
         """
-        saved_count = 0
+        if not positions:
+            return 0
+
+        # Ensure array fields default to empty lists if not provided
+        array_fields = [
+            "tags_start",
+            "tags_after_played",
+            "tags_after_best",
+            "tags_gained",
+            "tags_lost",
+            "tags",
+        ]
+
+        def _safe_list(v):
+            if v is None:
+                return []
+            return v if isinstance(v, list) else [v]
+
+        def _chunked(items: List[Dict], size: int) -> List[List[Dict]]:
+            return [items[i : i + size] for i in range(0, len(items), size)]
+
+        # Deduplicate within this call (same fen+side can appear multiple times)
+        by_key: Dict[tuple, Dict[str, Any]] = {}
+        for position_data in positions:
+            if not isinstance(position_data, dict):
+                continue
+            fen = position_data.get("fen")
+            side = position_data.get("side_to_move")
+            if not fen or not side:
+                continue
+
+            position_data = dict(position_data)  # avoid mutating caller data
+            position_data["user_id"] = user_id
+
+            # Normalize arrays
+            for field in array_fields:
+                position_data[field] = _safe_list(position_data.get(field))
+
+            # Ensure source_game_ids is a list and include this game_id
+            position_data["source_game_ids"] = _safe_list(position_data.get("source_game_ids"))
+            if game_id and game_id not in position_data["source_game_ids"]:
+                position_data["source_game_ids"].append(game_id)
+
+            key = (fen, side)
+            if key not in by_key:
+                by_key[key] = position_data
+            else:
+                # Merge duplicate entries in this batch.
+                existing = by_key[key]
+                merged_sources = set(_safe_list(existing.get("source_game_ids"))) | set(
+                    _safe_list(position_data.get("source_game_ids"))
+                )
+                existing.update(position_data)  # prefer last write for scalar fields
+                existing["source_game_ids"] = list(merged_sources)
+
+        if not by_key:
+            return 0
+
+        deduped_rows: List[Dict[str, Any]] = list(by_key.values())
+        fens = list({row.get("fen") for row in deduped_rows if row.get("fen")})
+        sides = list({row.get("side_to_move") for row in deduped_rows if row.get("side_to_move")})
+
+        # Bulk fetch existing source_game_ids in ONE call (or a few, if chunked).
+        existing_sources_by_key: Dict[tuple, List[Any]] = {}
         try:
-            for position_data in positions:
-                position_data["user_id"] = user_id
-                
-                # Ensure source_game_ids is a list
-                if "source_game_ids" not in position_data:
-                    position_data["source_game_ids"] = []
-                
-                # Append game_id if not already present
-                if game_id not in position_data["source_game_ids"]:
-                    position_data["source_game_ids"].append(game_id)
-                
-                # Ensure array fields default to empty lists if not provided
-                array_fields = ["tags_start", "tags_after_played", "tags_after_best", 
-                               "tags_gained", "tags_lost", "tags"]
-                for field in array_fields:
-                    if field not in position_data:
-                        position_data[field] = []
-                    elif position_data[field] is None:
-                        position_data[field] = []
-                
-                # Try to find existing position
-                existing = self.client.table("positions")\
-                    .select("id, source_game_ids")\
-                    .eq("user_id", user_id)\
-                    .eq("fen", position_data["fen"])\
-                    .eq("side_to_move", position_data["side_to_move"])\
-                    .execute()
-                
-                if existing.data and len(existing.data) > 0:
-                    # Update existing - append game_id to source_game_ids
-                    existing_id = existing.data[0]["id"]
-                    existing_sources = existing.data[0].get("source_game_ids", [])
-                    if game_id not in existing_sources:
-                        existing_sources.append(game_id)
-                    
-                    self.client.table("positions")\
-                        .update({
-                            **position_data,
-                            "source_game_ids": existing_sources
-                        })\
-                        .eq("id", existing_id)\
-                        .execute()
-                else:
-                    # Insert new
-                    self.client.table("positions").insert(position_data).execute()
-                
-                saved_count += 1
-        
+            # Chunk fens defensively to avoid huge query strings / URL limits.
+            # Typical workloads are small (<=30), so this usually stays at 1 request.
+            for fen_chunk in [fens[i : i + 200] for i in range(0, len(fens), 200)]:
+                q = (
+                    self.client.table("positions")
+                    .select("fen, side_to_move, source_game_ids")
+                    .eq("user_id", user_id)
+                    .in_("fen", fen_chunk)
+                )
+                if sides:
+                    q = q.in_("side_to_move", sides)
+                res = q.execute()
+                for r in (res.data or []):
+                    k = (r.get("fen"), r.get("side_to_move"))
+                    if k[0] and k[1]:
+                        existing_sources_by_key[k] = _safe_list(r.get("source_game_ids"))
         except Exception as e:
-            print(f"Error batch upserting positions: {e}")
-        
-        return saved_count
+            # Non-fatal: we can still upsert without pre-merge (will overwrite source_game_ids).
+            # Keep going, but log so we can spot issues.
+            print(f"⚠️ [positions] bulk prefetch failed, proceeding without merge: {e}")
+            existing_sources_by_key = {}
+
+        # Merge in existing sources so we don't lose historical provenance.
+        for row in deduped_rows:
+            k = (row.get("fen"), row.get("side_to_move"))
+            existing_sources = existing_sources_by_key.get(k, [])
+            merged = set(_safe_list(existing_sources)) | set(_safe_list(row.get("source_game_ids")))
+            if game_id:
+                merged.add(game_id)
+            row["source_game_ids"] = list(merged)
+
+        # Bulk upsert (chunked). This is the critical win: far fewer HTTP calls.
+        # Requires unique constraint on (user_id, fen, side_to_move).
+        try:
+            total = 0
+            for chunk in _chunked(deduped_rows, 200):
+                self.client.table("positions").upsert(
+                    chunk, on_conflict="user_id,fen,side_to_move"
+                ).execute()
+                total += len(chunk)
+            return total
+        except Exception as e:
+            # Fallback to legacy slow path if conflict target isn't available yet in DB.
+            # This keeps the app functioning even if migrations haven't been applied.
+            print(f"⚠️ [positions] bulk upsert failed, falling back to per-row mode: {e}")
+            saved_count = 0
+            try:
+                for position_data in deduped_rows:
+                    self.client.table("positions").insert(position_data).execute()
+                    saved_count += 1
+            except Exception as e2:
+                print(f"Error batch upserting positions (fallback): {e2}")
+            return saved_count
     
     def search_user_positions(
         self, 

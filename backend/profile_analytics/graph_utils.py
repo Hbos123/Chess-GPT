@@ -6,7 +6,13 @@ Replicates frontend graphSeries.ts logic in Python
 from typing import Dict, List, Any, Optional, Tuple
 from collections import defaultdict
 import statistics
+import math
 import uuid
+
+# Compatibility shim: some codepaths (or third-party code) may call `statistics.isfinite`,
+# but the stdlib `statistics` module does not expose `isfinite` (it's in `math`).
+if not hasattr(statistics, "isfinite"):
+    setattr(statistics, "isfinite", math.isfinite)  # type: ignore[attr-defined]
 
 
 def group_by_game(games: List[Dict]) -> List[Dict]:

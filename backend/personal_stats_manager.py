@@ -2042,18 +2042,40 @@ class PersonalStatsManager:
             phase_counts[phase]["count"] += 1
         
         # Determine which phase the game ended in
-        # Check last 10 moves to determine endgame phase
+        # Check the last move's phase first
         ending_phase = "middlegame"
-        if len(ply_records) >= 10:
-            last_phases = [r.get("phase", "middlegame") for r in ply_records[-10:] if r.get("side_moved") == player_color]
-            if last_phases:
-                # If majority of last moves are in endgame, game ended in endgame
-                endgame_count = sum(1 for p in last_phases if p == "endgame")
-                if endgame_count >= len(last_phases) * 0.6:
-                    ending_phase = "endgame"
-                elif len(ply_records) < 20:
-                    # Game ended early, likely in opening
-                    ending_phase = "opening"
+        
+        if ply_records:
+            # Get the last move's phase
+            last_record = ply_records[-1]
+            last_phase = last_record.get("phase", "middlegame")
+            
+            # If last move was by the player, use its phase directly
+            if last_record.get("side_moved") == player_color:
+                ending_phase = last_phase
+            else:
+                # Find the player's last move
+                for record in reversed(ply_records):
+                    if record.get("side_moved") == player_color:
+                        ending_phase = record.get("phase", "middlegame")
+                        break
+            
+            # Fallback: check last 10 moves if we couldn't determine from last move
+            if ending_phase == "middlegame" and len(ply_records) >= 10:
+                last_phases = [r.get("phase", "middlegame") for r in ply_records[-10:] if r.get("side_moved") == player_color]
+                if last_phases:
+                    endgame_count = sum(1 for p in last_phases if p == "endgame")
+                    opening_count = sum(1 for p in last_phases if p == "opening")
+                    middlegame_count = sum(1 for p in last_phases if p == "middlegame")
+                    
+                    if endgame_count >= len(last_phases) * 0.6:
+                        ending_phase = "endgame"
+                    elif opening_count >= len(last_phases) * 0.5 and len(ply_records) < 30:
+                        ending_phase = "opening"
+                    elif middlegame_count >= len(last_phases) * 0.5:
+                        ending_phase = "middlegame"
+                    elif len(ply_records) < 20:
+                        ending_phase = "opening"
         
         # Merge into stats
         for phase_name, data in phase_counts.items():

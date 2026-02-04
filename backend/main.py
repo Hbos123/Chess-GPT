@@ -3046,7 +3046,7 @@ async def _save_error_positions(
                 }
                 return labels.get(piece.piece_type)
             except Exception:
-            return None
+                return None
         
         def piece_name_from_san(fen: str, san: str) -> Optional[str]:
             if not fen or not san:
@@ -3068,7 +3068,7 @@ async def _save_error_positions(
                 }
                 return labels.get(piece.piece_type)
             except Exception:
-            return None
+                return None
         
         piece_blundered = piece_name_from_move(fen_before, move_uci) if fen_before and move_uci else None
         piece_best_move = piece_name_from_san(fen_before, best_move_san) if fen_before and best_move_san else None
@@ -7767,7 +7767,7 @@ async def profile_overview(user_id: str):
         prefs = {}
 
     # If prefs are missing, warm them in the background from Supabase and persist locally.
-        if (not prefs or not prefs.get("accounts")) and supabase_client:
+    if (not prefs or not prefs.get("accounts")) and supabase_client:
         async def _warm_prefs_from_supabase():
             try:
                 def _fetch_profile_row():
@@ -7785,10 +7785,10 @@ async def profile_overview(user_id: str):
             except Exception:
                 pass
 
-            try:
+        try:
             asyncio.create_task(_warm_prefs_from_supabase())
-            except Exception:
-                pass
+        except Exception:
+            pass
     try:
         full_status = profile_indexer.get_status(user_id) or {}
         
