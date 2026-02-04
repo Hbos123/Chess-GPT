@@ -85,6 +85,14 @@ async def best_move_for_fen(engine: chess.engine.SimpleEngine, fen: str, depth: 
     return best_san, best_uci, float(eval_cp)
 
 
+async def eval_for_fen(engine: chess.engine.SimpleEngine, fen: str, depth: int) -> float:
+    board = chess.Board(fen)
+    info = await engine.analyse(board, chess.engine.Limit(depth=depth), multipv=1)
+    score = info["score"].white()
+    eval_cp = score.score(mate_score=10000) if not score.is_mate() else (10000 if score.mate() > 0 else -10000)
+    return float(eval_cp)
+
+
 def infer_category(rec: Dict) -> str:
     cat = str(rec.get("category") or "").strip().lower()
     if cat in ("blunder", "mistake", "inaccuracy"):
@@ -174,8 +182,8 @@ async def backfill_user_positions_from_pgn(
                 continue
             
             ply_records = game_review.get("ply_records", [])
-            if not isinstance(ply_records, list) or not ply_records:
-                continue
+            if not isinstance(ply_records, list):
+                ply_records = []
             
             if not isinstance(pgn, str) or not pgn.strip():
                 continue
@@ -184,21 +192,6 @@ async def backfill_user_positions_from_pgn(
                 game_obj = chess.pgn.read_game(io.StringIO(pgn))
                 if not game_obj:
                     continue
-                
-                board = game_obj.board()
-                fen_befores: List[str] = []
-                uci_moves: List[str] = []
-                san_moves: List[str] = []
-                side_moveds: List[str] = []
-                
-                ply_no = 0
-                for mv in game_obj.mainline_moves():
-                    ply_no += 1
-                    fen_befores.append(board.fen())
-                    uci_moves.append(mv.uci())
-                    san_moves.append(board.san(mv))
-                    side_moveds.append("white" if board.turn else "black")
-                    board.push(mv)
             except Exception as e:
                 print(f"   ⚠️ Error parsing PGN for game {game_id}: {e}")
                 continue
@@ -208,119 +201,110 @@ async def backfill_user_positions_from_pgn(
             player_color = "black" if str(player_color).lower().strip() == "black" else "white"
             
             positions_to_save = []
-            
-            total_plys = len(ply_records)
-            plys_with_category = 0
-            plys_with_cp_loss = 0
-            plys_meeting_criteria = 0
-            
-            if idx == 1:
-                print(f"   🔍 Debug: Game {game_id} has {total_plys} ply_records, {len(fen_befores)} moves in PGN")
-                if ply_records:
-                    sample_rec = ply_records[0]
-                    print(f"   🔍 Sample ply_record keys: {list(sample_rec.keys()) if isinstance(sample_rec, dict) else 'not a dict'}")
-                    if isinstance(sample_rec, dict):
-                        print(f"   🔍 Sample ply_record: {str(sample_rec)[:200]}...")
-            
-            for rec_idx, rec in enumerate(ply_records):
-                if not isinstance(rec, dict):
-                    continue
-                
-                ply = rec.get("ply")
+
+            # Recompute cp_loss from PGN + engine so backfill works even when stored reviews are "thin".
+            board = game_obj.board()
+            total_plys = sum(1 for _ in game_obj.mainline_moves())
+            try:
+                eval_before = await eval_for_fen(engine, board.fen(), verify_depth)
+            except Exception as e:
+                print(f"   ⚠️ Error evaluating initial position for game {game_id}: {e}")
+                continue
+
+            ply_i = 0
+            for mv in game_obj.mainline_moves():
+                ply_i += 1
+                fen_before = board.fen()
+                side_to_move = "white" if board.turn else "black"
+                move_san = board.san(mv)
+                move_uci = mv.uci()
+
+                # Apply played move
+                board.push(mv)
+                fen_after = board.fen()
+
+                # Evaluate resulting position once; reuse as next ply's eval_before.
                 try:
-                    ply_i = int(ply) if ply is not None else (rec_idx + 1)
+                    eval_after = await eval_for_fen(engine, fen_after, verify_depth)
                 except Exception:
-                    ply_i = rec_idx + 1
-                
-                if ply_i <= 0 or ply_i > len(fen_befores):
-                    continue
-                
-                category = infer_category(rec)
-                if idx == 1 and rec_idx < 3:
-                    cp_loss_raw = rec.get("cp_loss") or rec.get("cpLoss") or rec.get("cp_loss_pct") or rec.get("cpLossPct")
-                    print(f"      Ply {ply_i}: category={category}, cp_loss fields: cp_loss={rec.get('cp_loss')}, cpLoss={rec.get('cpLoss')}, keys={list(rec.keys())[:10]}")
-                
-                if category:
-                    plys_with_category += 1
-                
-                if category not in ("blunder", "mistake"):
-                    continue
-                
-                cp_loss = rec.get("cp_loss") or rec.get("cpLoss") or rec.get("cp_loss_pct") or rec.get("cpLossPct")
-                try:
-                    cp_loss_f = float(cp_loss or 0)
-                except Exception:
-                    cp_loss_f = 0.0
-                
-                if cp_loss_f > 0:
-                    plys_with_cp_loss += 1
-                
-                if cp_loss_f < min_cp_loss:
-                    if idx == 1 and rec_idx < 5:
-                        print(f"      Ply {ply_i}: cp_loss {cp_loss_f} < {min_cp_loss}, skipping")
-                    continue
-                
-                plys_meeting_criteria += 1
-                
-                side_moved = rec.get("side_moved") or side_moveds[ply_i - 1]
-                error_side = "player" if side_moved == player_color else "opponent"
-                
-                fen_before = rec.get("fen_before") or fen_befores[ply_i - 1]
-                move_san = rec.get("san") or rec.get("move_san") or san_moves[ply_i - 1]
-                move_uci = rec.get("uci") or uci_moves[ply_i - 1]
-                
+                    eval_after = eval_before
+
+                # Compute cp_loss from mover perspective using white-eval scores.
+                sign = 1.0 if side_to_move == "white" else -1.0
+                mover_eval_before = sign * float(eval_before)
+                mover_eval_after = sign * float(eval_after)
+                cp_loss_f = max(0.0, mover_eval_before - mover_eval_after)
+
+                # Optional: pull tags/time/phase from stored ply_records if present.
+                rec = ply_records[ply_i - 1] if (ply_i - 1) < len(ply_records) and isinstance(ply_records[ply_i - 1], dict) else {}
+                phase = rec.get("phase")
+                time_spent_s = rec.get("time_spent_s")
                 raw_before = rec.get("raw_before", {}) if isinstance(rec.get("raw_before"), dict) else {}
                 raw_after = rec.get("raw_after", {}) if isinstance(rec.get("raw_after"), dict) else {}
                 analyse = rec.get("analyse", {}) if isinstance(rec.get("analyse"), dict) else {}
-                
                 tags_start = extract_tag_names(raw_before.get("tags")) if raw_before else []
                 tags_after_played = extract_tag_names(raw_after.get("tags")) if raw_after else extract_tag_names(analyse.get("tags"))
                 tags_gained = list(set(tags_after_played) - set(tags_start))
                 tags_lost = list(set(tags_start) - set(tags_after_played))
-                
+
+                # Determine error category from cp_loss thresholds.
+                if cp_loss_f >= 200:
+                    category = "blunder"
+                elif cp_loss_f >= 100:
+                    category = "mistake"
+                elif cp_loss_f >= 50:
+                    category = "inaccuracy"
+                else:
+                    category = ""
+
+                if cp_loss_f < min_cp_loss or category not in ("blunder", "mistake"):
+                    eval_before = eval_after
+                    continue
+
+                error_side = "player" if side_to_move == player_color else "opponent"
+
+                # Compute best move only for positions we keep.
                 try:
                     best_san, best_uci, eval_cp = await best_move_for_fen(engine, fen_before, verify_depth)
-                except Exception as e:
-                    print(f"   ⚠️ Error computing best move for game {game_id} ply {ply_i}: {e}")
-                    continue
-                
-                fen_parts = fen_before.split()
-                side_to_move = "white" if len(fen_parts) > 1 and fen_parts[1] == "w" else "black"
-                
-                positions_to_save.append({
-                    "fen": fen_before,
-                    "side_to_move": side_to_move,
-                    "from_game_id": game_id,
-                    "source_ply": ply_i,
-                    "move_san": move_san,
-                    "move_uci": move_uci,
-                    "best_move_san": best_san,
-                    "best_move_uci": best_uci,
-                    "eval_cp": eval_cp,
-                    "cp_loss": cp_loss_f,
-                    "phase": rec.get("phase"),
-                    "opening_name": g.get("opening_name") or None,
-                    "is_critical": cp_loss_f >= 200,
-                    "is_error": True,
-                    "error_category": category,
-                    "error_side": error_side,
-                    "error_note": f"{category.capitalize()}: {move_san} (cp_loss: {round(cp_loss_f, 1)})",
-                    "tags_start": tags_start,
-                    "tags_after_played": tags_after_played,
-                    "tags_after_best": [],
-                    "tags_gained": tags_gained,
-                    "tags_lost": tags_lost,
-                    "time_spent_s": rec.get("time_spent_s"),
-                    "piece_blundered": rec.get("piece_blundered"),
-                    "piece_best_move": rec.get("piece_best_move"),
-                })
-                
+                except Exception:
+                    best_san, best_uci, eval_cp = "", "", float(eval_before)
+
+                positions_to_save.append(
+                    {
+                        "fen": fen_before,
+                        "side_to_move": side_to_move,
+                        "from_game_id": game_id,
+                        "source_ply": ply_i,
+                        "move_san": move_san,
+                        "move_uci": move_uci,
+                        "best_move_san": best_san,
+                        "best_move_uci": best_uci,
+                        "eval_cp": eval_cp,
+                        "cp_loss": cp_loss_f,
+                        "phase": phase,
+                        "opening_name": g.get("opening_name") or None,
+                        "is_critical": cp_loss_f >= 200,
+                        "is_error": True,
+                        "error_category": category,
+                        "error_side": error_side,
+                        "error_note": f"{category.capitalize()}: {move_san} (cp_loss: {round(cp_loss_f, 1)})",
+                        "tags_start": tags_start,
+                        "tags_after_played": tags_after_played,
+                        "tags_after_best": [],
+                        "tags_gained": tags_gained,
+                        "tags_lost": tags_lost,
+                        "time_spent_s": time_spent_s,
+                        "piece_blundered": rec.get("piece_blundered"),
+                        "piece_best_move": rec.get("piece_best_move"),
+                    }
+                )
+
                 if max_positions_per_game and len(positions_to_save) >= max_positions_per_game:
                     break
+
+                eval_before = eval_after
             
             if not positions_to_save:
-                if idx <= 3:
-                    print(f"   ⚠️ Game {game_id}: {total_plys} plys, {plys_with_category} with category, {plys_with_cp_loss} with cp_loss>0, {plys_meeting_criteria} meeting criteria (blunder/mistake + cp_loss>={min_cp_loss})")
                 continue
             
             games_with_positions += 1

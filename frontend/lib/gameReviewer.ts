@@ -64,6 +64,45 @@ export async function reviewGame(
   // (closest parity to legacy backend tagging, minimal server load).
   const bestMoveFenAfterByPly: Record<number, string> = {};
 
+  const applyVerboseMove = (board: Chess, m: any) => {
+    try {
+      if (m && typeof m === "object" && m.from && m.to) {
+        // Prefer from/to to avoid SAN parsing edge cases.
+        const moved = (board as any).move(
+          { from: m.from, to: m.to, promotion: (m.promotion as any) || undefined },
+          { sloppy: true }
+        );
+        return moved;
+      }
+      if (typeof m?.san === "string") {
+        return (board as any).move(m.san, { sloppy: true });
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  };
+
+  const getEvalCp = (analysis: any): number => {
+    const direct = analysis?.eval_cp;
+    if (typeof direct === "number") return direct;
+    const cm0 = analysis?.candidate_moves?.[0];
+    if (cm0 && typeof cm0.eval_cp === "number") return cm0.eval_cp;
+    // Back-compat with older shapes
+    const c0 = analysis?.candidates?.[0];
+    if (c0 && typeof c0.eval_cp === "number") return c0.eval_cp;
+    return 0;
+  };
+
+  const getBestMove = (analysis: any): { san: string; uci?: string; evalCp: number } => {
+    const cm0 = analysis?.candidate_moves?.[0];
+    if (cm0 && typeof cm0.move === "string") {
+      return { san: cm0.move || "", uci: typeof cm0.uci === "string" ? cm0.uci : undefined, evalCp: typeof cm0.eval_cp === "number" ? cm0.eval_cp : 0 };
+    }
+    const best = typeof analysis?.best_move === "string" ? analysis.best_move : "";
+    return { san: best || "", uci: undefined, evalCp: getEvalCp(analysis) };
+  };
+
   for (const move of history) {
     moveIndex++;
     const ply = moveIndex;
@@ -72,7 +111,10 @@ export async function reviewGame(
 
     // Skip if not focusing on this color
     if (focusColor !== "both" && moveColor !== focusColor) {
-      currentBoard.move(move.san);
+      const moved = applyVerboseMove(currentBoard, move);
+      if (!moved) {
+        throw new Error(`Invalid move while replaying PGN (skip path): ${JSON.stringify({ ply, move })}`);
+      }
       continue;
     }
 
@@ -95,17 +137,18 @@ export async function reviewGame(
     // Analyze position before move
     try {
       const analysisBefore = await analyzePositionWasm(fenBefore, 1, depth);
-      const evalBeforeCp =
-        analysisBefore.candidates?.[0]?.eval_cp || 0;
+      const evalBeforeCp = getEvalCp(analysisBefore);
 
       // Make the move
-      currentBoard.move(move.san);
+      const moved = applyVerboseMove(currentBoard, move);
+      if (!moved) {
+        throw new Error(`Invalid move while analyzing (ply ${ply}): ${JSON.stringify({ from: (move as any)?.from, to: (move as any)?.to, san: (move as any)?.san })}`);
+      }
       const fenAfter = currentBoard.fen();
 
       // Analyze position after move
       const analysisAfter = await analyzePositionWasm(fenAfter, 1, depth);
-      const evalAfterCp =
-        analysisAfter.candidates?.[0]?.eval_cp || 0;
+      const evalAfterCp = getEvalCp(analysisAfter);
 
       // Calculate CP loss (from player's perspective)
       // If player is black, flip the evaluation
@@ -118,8 +161,10 @@ export async function reviewGame(
       const cpLoss = Math.max(0, playerEvalBefore - playerEvalAfter);
 
       // Get best move
-      const bestMove = analysisBefore.candidates?.[0]?.move || "";
-      const bestMoveEvalCp = analysisBefore.candidates?.[0]?.eval_cp || 0;
+      const best = getBestMove(analysisBefore);
+      const bestMove = best.san || "";
+      const bestMoveUci = best.uci;
+      const bestMoveEvalCp = best.evalCp || 0;
       const bestMoveEvalFromPlayer =
         moveColor === "white" ? bestMoveEvalCp : -bestMoveEvalCp;
 
@@ -127,6 +172,13 @@ export async function reviewGame(
       const isBlunder = cpLoss >= 200;
       const isMistake = cpLoss >= 100 && cpLoss < 200;
       const isInaccuracy = cpLoss >= 50 && cpLoss < 100;
+      const category = isBlunder
+        ? "blunder"
+        : isMistake
+          ? "mistake"
+          : isInaccuracy
+            ? "inaccuracy"
+            : "good";
 
       // Check for missed win (if best move was much better)
       const missedWinThreshold = 300;
@@ -160,16 +212,21 @@ export async function reviewGame(
       const plyRecord: PlyRecord = {
         ply,
         move_san: move.san,
+        uci: typeof (move as any)?.from === "string" && typeof (move as any)?.to === "string"
+          ? `${(move as any).from}${(move as any).to}${(move as any).promotion || ""}`
+          : undefined,
         fen_before: fenBefore,
         fen_after: fenAfter,
         eval_before_cp: evalBeforeCp,
         eval_after_cp: evalAfterCp,
         cp_loss: cpLoss,
+        category,
         is_blunder: isBlunder,
         is_mistake: isMistake,
         is_inaccuracy: isInaccuracy,
         is_missed_win: isMissedWin,
         best_move_san: bestMove,
+        best_move_uci: bestMoveUci,
         best_move_eval_cp: bestMoveEvalCp,
         phase,
         side_moved: moveColor,
@@ -186,6 +243,8 @@ export async function reviewGame(
         engine: {
           played_eval_after_cp: evalAfterCp,
           eval_before_cp: evalBeforeCp,
+          best_move_san: bestMove,
+          best_move_uci: bestMoveUci,
           best_move_tags: [], // Filled via backend batch tagger after analysis
         },
       };
@@ -197,8 +256,8 @@ export async function reviewGame(
       }
     } catch (error) {
       console.error(`[GameReviewer] Error analyzing move ${moveIndex}:`, error);
-      // Continue with next move
-      currentBoard.move(move.san);
+      // Abort this game to avoid board desync producing corrupt ply_records.
+      throw error;
     }
   }
 

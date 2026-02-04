@@ -30,16 +30,19 @@ export interface GameMetadata {
 export interface PlyRecord {
   ply: number;
   move_san: string;
+  uci?: string;
   fen_before: string;
   fen_after: string;
   eval_before_cp: number;
   eval_after_cp: number;
   cp_loss?: number;
+  category?: string;
   is_blunder?: boolean;
   is_mistake?: boolean;
   is_inaccuracy?: boolean;
   is_missed_win?: boolean;
   best_move_san?: string;
+  best_move_uci?: string;
   best_move_eval_cp?: number;
   phase?: "opening" | "middlegame" | "endgame";
   // Tag extraction fields (matching backend format)

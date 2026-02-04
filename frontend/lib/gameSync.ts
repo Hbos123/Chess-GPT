@@ -28,6 +28,9 @@ export async function saveGameReview(
       let withAfter = 0;
       let withEither = 0;
       let withAnalyse = 0;
+      let withCpLoss = 0;
+      let withCategory = 0;
+      let maxCpLoss = 0;
       for (const r of ply) {
         const a = (r?.analyse && Array.isArray(r.analyse.tags)) ? r.analyse.tags : [];
         const b = (r?.raw_before && Array.isArray(r.raw_before.tags)) ? r.raw_before.tags : [];
@@ -36,10 +39,27 @@ export async function saveGameReview(
         if (b.length > 0) withBefore += 1;
         if (c.length > 0) withAfter += 1;
         if (b.length > 0 || c.length > 0) withEither += 1;
+        const cp = typeof r?.cp_loss === "number" ? r.cp_loss : undefined;
+        if (typeof cp === "number" && cp > 0) {
+          withCpLoss += 1;
+          if (cp > maxCpLoss) maxCpLoss = cp;
+        }
+        if (typeof r?.category === "string" && r.category) withCategory += 1;
       }
       console.log(
-        `[GameSync] /save_game_review payload tag coverage: plies=${ply.length}, withAnalyseTags=${withAnalyse}, withRawBefore=${withBefore}, withRawAfter=${withAfter}, withEitherRaw=${withEither}`,
+        `[GameSync] /save_game_review payload coverage: plies=${ply.length}, withCpLoss=${withCpLoss}, maxCpLoss=${maxCpLoss.toFixed?.(1) ?? maxCpLoss}, withCategory=${withCategory}, withAnalyseTags=${withAnalyse}, withRawBefore=${withBefore}, withRawAfter=${withAfter}, withEitherRaw=${withEither}`,
       );
+      if (ply[0] && typeof ply[0] === "object") {
+        console.log("[GameSync] sample ply_record keys:", Object.keys(ply[0]).slice(0, 30));
+        console.log("[GameSync] sample ply_record core:", {
+          ply: ply[0].ply,
+          move_san: ply[0].move_san,
+          uci: ply[0].uci,
+          cp_loss: ply[0].cp_loss,
+          category: ply[0].category,
+          fen_before: typeof ply[0].fen_before === "string" ? `${ply[0].fen_before.slice(0, 32)}...` : undefined,
+        });
+      }
       const sample = ply.find((r: any) => (r?.raw_before?.tags?.length || 0) > 0 || (r?.raw_after?.tags?.length || 0) > 0);
       if (sample) {
         console.log("[GameSync] sample ply record with raw tags:", {
