@@ -4901,10 +4901,27 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
   useEffect(() => {
     if (typeof window === "undefined") return;
 
-    const handleOpeningLesson = (event: CustomEvent<OpeningLessonResponse>) => {
-      const payload = event.detail;
+    const handleOpeningLesson = (event: CustomEvent<any>) => {
+      const payload = event.detail as any;
       if (!payload || !payload.lesson) {
         addSystemMessage("Opening lesson payload missing.");
+        return;
+      }
+
+      // If caller requested the lesson start in a specific tab, make sure we switch first.
+      const targetTabId: string | undefined = payload?._targetTabId;
+      const handoff: boolean = payload?._handoff === true;
+      if (targetTabId && handoff && targetTabId !== activeTabId) {
+        handleTabSelect(targetTabId);
+        setTimeout(() => {
+          if (typeof window !== "undefined") {
+            window.dispatchEvent(
+              new CustomEvent("startOpeningLesson", {
+                detail: { ...payload, _handoff: false },
+              })
+            );
+          }
+        }, 250);
         return;
       }
 
@@ -13310,9 +13327,70 @@ Provide 2-3 sentences of natural language commentary explaining why this deviati
   };
 
   const handleOpeningLessonResult = (payload: OpeningLessonResponse) => {
-    if (typeof window !== "undefined") {
-      window.dispatchEvent(new CustomEvent("startOpeningLesson", { detail: payload }));
+    if (typeof window === "undefined") return;
+
+    // Always bring the user back to the main chat/board area.
+    setShowProfileDashboard(false);
+
+    const lessonTitle =
+      (payload as any)?.lesson?.title ||
+      (payload as any)?.lesson?.name ||
+      "Opening Lesson";
+
+    // Prefer a new board tab for lessons so the lesson runs in the main chat (not under dashboard overlays).
+    const canCreateNewTab = tabs.length < 5;
+    const newTabId =
+      typeof crypto !== "undefined" && "randomUUID" in crypto
+        ? `tab-${crypto.randomUUID()}`
+        : `tab-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
+    const targetTabId = canCreateNewTab ? newTabId : activeTabId;
+
+    if (canCreateNewTab) {
+      const lessonTab: BoardTabState = {
+        ...createDefaultTab(tabs.length + 1),
+        id: newTabId,
+        name: `Lesson: ${lessonTitle}`,
+        tabType: "lesson",
+        fen: INITIAL_FEN,
+        pgn: "",
+        moveHistory: [],
+        annotations: {
+          fen: INITIAL_FEN,
+          pgn: "",
+          comments: [],
+          nags: [],
+          arrows: [],
+          highlights: [],
+        },
+        analysisCache: {},
+        messages: [],
+        game: new Chess(INITIAL_FEN),
+        moveTree: new MoveTree(),
+        isAnalyzing: false,
+        hasUnread: false,
+        isModified: false,
+      };
+
+      setTabs((prev) => [...prev, lessonTab]);
+    } else {
+      // Tab limit reached: reuse current tab as a lesson tab (least surprising vs silently closing tabs).
+      updateActiveTab({ tabType: "lesson", name: `Lesson: ${lessonTitle}` } as any);
     }
+
+    // Two-phase handoff:
+    // 1) Switch to the target tab
+    // 2) Re-dispatch to start the lesson after tab state is loaded
+    setTimeout(() => {
+      if (targetTabId && targetTabId !== activeTabId) {
+        handleTabSelect(targetTabId);
+      }
+      window.dispatchEvent(
+        new CustomEvent("startOpeningLesson", {
+          detail: { ...payload, _targetTabId: targetTabId, _handoff: true },
+        })
+      );
+    }, 0);
   };
 
   const handleGenerateOpeningLesson = async (source: "button" | "intent", explicitQuery?: string) => {
