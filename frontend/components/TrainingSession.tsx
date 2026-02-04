@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Chess } from "chess.js";
 import TrainingDrill from "./TrainingDrill";
 import { getBackendBase } from "@/lib/backendBase";
 
@@ -10,6 +11,11 @@ interface TrainingSessionProps {
   onComplete: (results: any) => void;
   onClose: () => void;
   onSwitchToChat?: () => void; // New prop to switch to chat
+  // Optional: integrate with the main board (left dock) so it becomes the primary move entry UI.
+  onRegisterExternalMoveHandler?: (
+    handler: ((from: string, to: string, promotion?: string) => void) | null
+  ) => void;
+  onExternalSetPosition?: (fen: string, orientation?: "white" | "black") => void;
 }
 
 export default function TrainingSession({
@@ -17,13 +23,39 @@ export default function TrainingSession({
   username,
   onComplete,
   onClose,
-  onSwitchToChat
+  onSwitchToChat,
+  onRegisterExternalMoveHandler,
+  onExternalSetPosition
 }: TrainingSessionProps) {
   const BACKEND_BASE = getBackendBase();
   const [currentDrillIndex, setCurrentDrillIndex] = useState(0);
   const [results, setResults] = useState<any[]>([]);
   const [isComplete, setIsComplete] = useState(false);
   const [activeTab, setActiveTab] = useState<'training' | 'chat'>('training');
+  const useExternalBoard = Boolean(onRegisterExternalMoveHandler && onExternalSetPosition);
+  const resultsRef = useRef<any[]>([]);
+  useEffect(() => {
+    resultsRef.current = results;
+  }, [results]);
+
+  // External-board drill state (kept in TrainingSession so we can remove the mini board).
+  const [showHint, setShowHint] = useState(false);
+  const [hintsUsed, setHintsUsed] = useState(0);
+  const [feedback, setFeedback] = useState<{ type: "correct" | "incorrect" | ""; message: string }>({
+    type: "",
+    message: "",
+  });
+  const [showSolution, setShowSolution] = useState(false);
+  const startTimeRef = useRef<number>(Date.now());
+
+  const currentDrill = session?.cards?.[currentDrillIndex];
+  const drillFen = useMemo(() => {
+    return currentDrill?.fen || "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+  }, [currentDrill?.fen]);
+  const drillOrientation = useMemo<"white" | "black">(() => {
+    const stm = String(currentDrill?.side_to_move || "").toLowerCase();
+    return stm === "black" ? "black" : "white";
+  }, [currentDrill?.side_to_move]);
 
   // Guard: Check if session has valid cards
   if (!session?.cards || session.cards.length === 0) {
@@ -40,7 +72,7 @@ export default function TrainingSession({
     );
   }
 
-  const handleDrillComplete = async (correct: boolean, timeS: number, hintsUsed: number) => {
+  const handleDrillComplete = useCallback(async (correct: boolean, timeS: number, hintsUsed: number) => {
     const drill = session.cards[currentDrillIndex];
     
     if (!drill) {
@@ -56,7 +88,7 @@ export default function TrainingSession({
       hints_used: hintsUsed
     };
     
-    setResults([...results, result]);
+    setResults((prev) => [...prev, result]);
     
     // Update backend SRS
     try {
@@ -83,14 +115,114 @@ export default function TrainingSession({
     } else {
       setTimeout(() => {
         setIsComplete(true);
-        onComplete([...results, result]);
+        onComplete([...resultsRef.current, result]);
       }, 500);
     }
-  };
+  }, [BACKEND_BASE, currentDrillIndex, onComplete, session.cards, username]);
 
-  const handleSkip = () => {
+  const handleSkip = useCallback(() => {
     // Mark as incorrect skip
     handleDrillComplete(false, 0, 0);
+  }, [handleDrillComplete]);
+
+  // Keep external board synced to the current drill.
+  useEffect(() => {
+    if (!useExternalBoard) return;
+    // Reset per-drill UI state
+    setShowHint(false);
+    setHintsUsed(0);
+    setFeedback({ type: "", message: "" });
+    setShowSolution(false);
+    startTimeRef.current = Date.now();
+    onExternalSetPosition?.(drillFen, drillOrientation);
+  }, [useExternalBoard, drillFen, drillOrientation, onExternalSetPosition, currentDrillIndex]);
+
+  // Register a move handler so the main board can drive training validation.
+  useEffect(() => {
+    if (!useExternalBoard) return;
+    const handler = (from: string, to: string, promotion?: string) => {
+      // Ignore moves while feedback is shown or solution revealed.
+      if (showSolution || Boolean(feedback.message)) return;
+
+      try {
+        const tmp = new Chess(drillFen);
+        const move = tmp.move({ from, to, promotion: promotion as any });
+        if (!move) {
+          setFeedback({ type: "incorrect", message: "❌ Illegal move. Try again." });
+          setTimeout(() => setFeedback({ type: "", message: "" }), 1200);
+          // Reset board
+          onExternalSetPosition?.(drillFen, drillOrientation);
+          return;
+        }
+
+        // Show the played move briefly on the main board.
+        onExternalSetPosition?.(tmp.fen(), drillOrientation);
+
+        const spentS = (Date.now() - startTimeRef.current) / 1000;
+
+        const bestUci = String(currentDrill?.best_move_uci || "").trim().toLowerCase();
+        const bestSan = String(currentDrill?.best_move_san || "").trim().toLowerCase();
+        const playedUci = `${String(move.from || "").toLowerCase()}${String(move.to || "").toLowerCase()}${String(
+          move.promotion || ""
+        ).toLowerCase()}`.trim();
+        const playedSan = String(move.san || "").trim().toLowerCase();
+
+        const correct =
+          (bestUci && playedUci && playedUci === bestUci) || (bestSan && playedSan && playedSan === bestSan);
+
+        if (correct) {
+          setFeedback({ type: "correct", message: "✅ Correct!" });
+          setTimeout(() => {
+            handleDrillComplete(true, spentS, hintsUsed);
+          }, 1200);
+          return;
+        }
+
+        setFeedback({ type: "incorrect", message: "❌ Not quite. Try again, or give up to reveal the solution." });
+        setTimeout(() => {
+          setFeedback({ type: "", message: "" });
+          onExternalSetPosition?.(drillFen, drillOrientation);
+        }, 1800);
+      } catch (e) {
+        setFeedback({ type: "incorrect", message: "❌ Invalid move. Try again." });
+        setTimeout(() => setFeedback({ type: "", message: "" }), 1200);
+        onExternalSetPosition?.(drillFen, drillOrientation);
+      }
+    };
+
+    onRegisterExternalMoveHandler?.(handler);
+    return () => {
+      onRegisterExternalMoveHandler?.(null);
+    };
+  }, [
+    useExternalBoard,
+    onRegisterExternalMoveHandler,
+    onExternalSetPosition,
+    drillFen,
+    drillOrientation,
+    currentDrill?.best_move_uci,
+    currentDrill?.best_move_san,
+    showSolution,
+    feedback.message,
+    hintsUsed,
+    handleDrillComplete,
+  ]);
+
+  const handleShowHint = () => {
+    setShowHint(true);
+    setHintsUsed((v) => v + 1);
+  };
+
+  const handleGiveUp = () => {
+    setShowSolution(true);
+    const spentS = (Date.now() - startTimeRef.current) / 1000;
+    setFeedback({
+      type: "correct",
+      message: `💡 Solution: ${currentDrill?.best_move_san || currentDrill?.best_move_uci || "—"}. ${currentDrill?.hint || ""}`,
+    });
+    setTimeout(() => {
+      handleDrillComplete(false, spentS, hintsUsed + 1);
+    }, 2200);
   };
 
   if (isComplete) {
@@ -172,13 +304,61 @@ export default function TrainingSession({
 
       {activeTab === 'training' && (
         <div className="training-content">
-          <TrainingDrill
-            drill={session.cards[currentDrillIndex]}
-            onComplete={handleDrillComplete}
-            onSkip={handleSkip}
-            currentIndex={currentDrillIndex}
-            totalDrills={session.cards.length}
-          />
+          {useExternalBoard ? (
+            <div className="training-drill-container">
+              <div className="drill-header">
+                <div className="drill-progress">
+                  Drill {currentDrillIndex + 1} of {session.cards.length}
+                </div>
+                <div className="drill-type-badge">{currentDrill?.type || "tactics"}</div>
+              </div>
+
+              <div className="drill-question">
+                <h3>{currentDrill?.question || "Find the best move"}</h3>
+                {currentDrill?.phase && (
+                  <div className="drill-meta">
+                    Phase: {currentDrill.phase} {currentDrill.opening && `• Opening: ${currentDrill.opening}`}
+                  </div>
+                )}
+                <div className="drill-meta" style={{ marginTop: 8 }}>
+                  Use the main board on the left to play your move.
+                </div>
+                <div className="drill-meta">
+                  {String(currentDrill?.side_to_move || "white").toLowerCase() === "black" ? "Black" : "White"} to move
+                </div>
+              </div>
+
+              {feedback.message && <div className={`drill-feedback ${feedback.type}`}>{feedback.message}</div>}
+
+              {showHint && !showSolution && (
+                <div className="drill-hint">{currentDrill?.hint || "No hint available for this position."}</div>
+              )}
+
+              <div className="drill-actions">
+                {!showSolution && !feedback.message && (
+                  <>
+                    <button onClick={handleShowHint} className="hint-btn" disabled={showHint}>
+                      {showHint ? `💡 ${currentDrill?.hint || "No hint available"}` : "Show Hint"}
+                    </button>
+                    <button onClick={handleGiveUp} className="solution-btn">
+                      Give up (show solution)
+                    </button>
+                    <button onClick={handleSkip} className="skip-btn">
+                      Skip
+                    </button>
+                  </>
+                )}
+              </div>
+            </div>
+          ) : (
+            <TrainingDrill
+              drill={session.cards[currentDrillIndex]}
+              onComplete={handleDrillComplete}
+              onSkip={handleSkip}
+              currentIndex={currentDrillIndex}
+              totalDrills={session.cards.length}
+            />
+          )}
         </div>
       )}
 

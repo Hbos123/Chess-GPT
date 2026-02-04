@@ -435,6 +435,8 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
   const [activeTabId, setActiveTabId] = useState<string>(() => tabs[0]?.id || '');
   // Backend D2/D16 tree node pointer per tab (thread_id = tab.id)
   const backendTreeNodeByTabRef = useRef<Record<string, string>>({});
+  // Training: when active, intercept board moves and validate against the current drill.
+  const trainingMoveHandlerRef = useRef<((from: string, to: string, promotion?: string) => void) | null>(null);
 
   // NEW: UI Command Handler Integration
   const executeUICommands = useCallback((commands: any[], sendMessageFn?: (msg: string) => void) => {
@@ -7261,6 +7263,17 @@ Examples:
   async function handleMove(from: string, to: string, promotion?: string) {
     console.log("🎯 handleMove called:", { from, to, promotion, mode, llmEnabled });
     if (waitingForEngine) return;
+
+    // Training sessions: the main left board becomes the drill input UI.
+    // If a training handler is registered, delegate and do NOT update move tree/PGN.
+    try {
+      if (activeTab?.tabType === "training" && activeTab?.trainingSession && trainingMoveHandlerRef.current) {
+        trainingMoveHandlerRef.current(from, to, promotion);
+        return;
+      }
+    } catch {
+      // ignore
+    }
 
     try {
       // Create a new game from current FEN to ensure state sync
@@ -14292,6 +14305,45 @@ Provide 2-3 sentences of natural language commentary explaining why this deviati
                       };
                       setMessages(prev => [...prev, resumeMsg]);
                       updateActiveTab({ messages: [...(activeTab?.messages || []), resumeMsg] } as any);
+                    } catch {
+                      // ignore
+                    }
+                  }}
+                  onRegisterExternalMoveHandler={(handler) => {
+                    trainingMoveHandlerRef.current = handler;
+                  }}
+                  onExternalSetPosition={(nextFen, nextOrientation) => {
+                    try {
+                      const g = new Chess(nextFen);
+                      const resolvedFen = g.fen();
+                      setGame(g);
+                      setFen(resolvedFen);
+                      // Do not touch moveTree/PGN during drills.
+                      if (nextOrientation) setBoardOrientation(nextOrientation);
+                      updateActiveTab({
+                        fen: resolvedFen,
+                        game: g,
+                        annotations: { ...(activeTab?.annotations || {}), fen: resolvedFen },
+                      } as any);
+                    } catch {
+                      // ignore
+                    }
+                  }}
+                  onRegisterExternalMoveHandler={(handler) => {
+                    trainingMoveHandlerRef.current = handler;
+                  }}
+                  onExternalSetPosition={(nextFen, nextOrientation) => {
+                    try {
+                      const g = new Chess(nextFen);
+                      const resolvedFen = g.fen();
+                      setGame(g);
+                      setFen(resolvedFen);
+                      if (nextOrientation) setBoardOrientation(nextOrientation);
+                      updateActiveTab({
+                        fen: resolvedFen,
+                        game: g,
+                        annotations: { ...(activeTab?.annotations || {}), fen: resolvedFen },
+                      } as any);
                     } catch {
                       // ignore
                     }
