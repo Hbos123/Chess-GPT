@@ -75,7 +75,8 @@ async def initialize_engine(stockfish_path: str) -> Optional[chess.engine.Simple
 
 async def best_move_for_fen(engine: chess.engine.SimpleEngine, fen: str, depth: int) -> tuple[str, str, float]:
     board = chess.Board(fen)
-    info = await engine.analyse(board, chess.engine.Limit(depth=depth), multipv=1)
+    info_any = await engine.analyse(board, chess.engine.Limit(depth=depth), multipv=1)
+    info = info_any[0] if isinstance(info_any, list) and len(info_any) > 0 else info_any
     pv = info["pv"]
     move = pv[0]
     best_san = board.san(move)
@@ -87,7 +88,8 @@ async def best_move_for_fen(engine: chess.engine.SimpleEngine, fen: str, depth: 
 
 async def eval_for_fen(engine: chess.engine.SimpleEngine, fen: str, depth: int) -> float:
     board = chess.Board(fen)
-    info = await engine.analyse(board, chess.engine.Limit(depth=depth), multipv=1)
+    info_any = await engine.analyse(board, chess.engine.Limit(depth=depth), multipv=1)
+    info = info_any[0] if isinstance(info_any, list) and len(info_any) > 0 else info_any
     score = info["score"].white()
     eval_cp = score.score(mate_score=10000) if not score.is_mate() else (10000 if score.mate() > 0 else -10000)
     return float(eval_cp)
