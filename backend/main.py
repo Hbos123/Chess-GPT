@@ -8182,8 +8182,24 @@ async def get_graph_data(
         # If we have pre-computed data, format and return it
         if precomputed is not None and len(precomputed) > 0:
             formatted = []
+            # If the precomputed table schema is behind (missing newer columns), we can lazily recompute
+            # the missing fields from the game_review JSON for just the games we return.
+            from profile_analytics.graph_data import build_graph_game_point
+
+            def fetch_game_for_point(game_id: str):
+                try:
+                    return (
+                        supabase_client.client.table("games")
+                        .select("id,game_date,created_at,updated_at,result,time_control,opening_eco,opening_name,game_review")
+                        .eq("id", game_id)
+                        .maybe_single()
+                        .execute()
+                    ).data
+                except Exception:
+                    return None
+
             for idx, point in enumerate(precomputed):
-                formatted.append({
+                base_point = {
                     "index": idx,
                     "game_id": point.get("game_id"),
                     "game_date": point.get("game_date"),
@@ -8192,11 +8208,27 @@ async def get_graph_data(
                     "opening_eco": point.get("opening_eco"),
                     "time_control": point.get("time_control"),
                     "overall_accuracy": float(point.get("overall_accuracy")) if point.get("overall_accuracy") is not None else None,
+                    "avg_cp_loss": float(point.get("avg_cp_loss")) if point.get("avg_cp_loss") is not None else None,
+                    "cp_loss_buckets": point.get("cp_loss_buckets") or None,
+                    "phase_accuracy": point.get("phase_accuracy") or None,
                     "piece_accuracy": point.get("piece_accuracy") or {},
                     "time_bucket_accuracy": point.get("time_bucket_accuracy") or {},
                     "tag_transitions": point.get("tag_transitions") or {"gained": {}, "lost": {}},
                     "static_tags": point.get("static_tags") or {},
-                })
+                }
+
+                # If newer fields are missing, try to recompute them quickly.
+                if base_point.get("cp_loss_buckets") is None or base_point.get("phase_accuracy") is None or base_point.get("avg_cp_loss") is None:
+                    gid = base_point.get("game_id")
+                    if gid:
+                        g = await asyncio.to_thread(fetch_game_for_point, gid)
+                        if isinstance(g, dict) and g.get("game_review"):
+                            rebuilt = build_graph_game_point(g, idx)
+                            base_point["avg_cp_loss"] = rebuilt.get("avg_cp_loss")
+                            base_point["cp_loss_buckets"] = rebuilt.get("cp_loss_buckets")
+                            base_point["phase_accuracy"] = rebuilt.get("phase_accuracy")
+
+                formatted.append(base_point)
             
             print(f"✅ [GRAPH_DATA_ENDPOINT] Returning {len(formatted)} pre-computed graph points for user_id: {user_id}")
             return {

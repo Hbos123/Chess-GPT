@@ -505,6 +505,59 @@
 .stat-trend.stable { color: #94a3b8; }
 
 /* Overview Tab */
+.overview-tab .tab-section {
+  margin-bottom: 28px;
+}
+
+.overview-tab .tab-section h2 {
+  font-size: 20px;
+  margin-bottom: 14px;
+}
+
+.overview-tab .stat-card {
+  padding: 16px;
+}
+
+.overview-tab .stat-value {
+  font-size: 22px;
+}
+
+.overview-tab .stat-label {
+  font-size: 13px;
+}
+
+.overview-summary-grid .stat-card {
+  background: linear-gradient(180deg, rgba(34, 34, 34, 0.98), rgba(26, 26, 26, 0.98));
+}
+
+.trend-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  background: rgba(148, 163, 184, 0.08);
+  margin-top: 10px;
+}
+
+.trend-pill.up {
+  color: #10b981;
+  border-color: rgba(16, 185, 129, 0.35);
+  background: rgba(16, 185, 129, 0.12);
+}
+
+.trend-pill.down {
+  color: #ef4444;
+  border-color: rgba(239, 68, 68, 0.35);
+  background: rgba(239, 68, 68, 0.12);
+}
+
+.trend-pill.flat {
+  color: #cbd5e1;
+}
+
 .repertoire-item {
   display: flex;
   justify-content: space-between;

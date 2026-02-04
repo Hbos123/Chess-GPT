@@ -9,6 +9,9 @@ export type GraphGamePoint = {
   opening_eco: string;
   time_control?: string | null;
   overall_accuracy: number | null;
+  avg_cp_loss?: number | null;
+  cp_loss_buckets?: Array<{ start: number; end: number; avg_cp_loss: number | null; count: number }> | null;
+  phase_accuracy?: Record<string, { accuracy: number | null; count: number }> | null;
   piece_accuracy?: Record<string, { accuracy: number | null; count: number }>;
   time_bucket_accuracy?: Record<string, { accuracy: number | null; count: number }>;
   tag_transitions?: {

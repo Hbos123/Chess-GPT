@@ -79,6 +79,85 @@ def _extract_tag_names(tags: Any) -> set:
     return out
 
 
+def _cp_loss_from_record(r: Dict[str, Any]) -> Optional[float]:
+    v = r.get("cp_loss")
+    if isinstance(v, (int, float)) and statistics.isfinite(float(v)):
+        return float(v)
+    return None
+
+
+def _move_no_from_ply(ply: Any) -> Optional[int]:
+    if not isinstance(ply, int) or ply <= 0:
+        return None
+    # ply is 1-indexed half-move; fullmove number is ceil(ply/2)
+    return (ply + 1) // 2
+
+
+def _cp_loss_buckets(
+    ply_records: List[Dict[str, Any]],
+    player_color: str,
+    bucket_size: int = 5,
+    max_move: int = 60,
+) -> List[Dict[str, Any]]:
+    """
+    Returns a fixed set of buckets across move numbers with avg CP loss for player moves only.
+    Each bucket is {start, end, avg_cp_loss, count}.
+    """
+    buckets: List[Dict[str, Any]] = []
+    for start in range(1, max_move + 1, bucket_size):
+        buckets.append({"start": start, "end": min(max_move, start + bucket_size - 1), "_sum": 0.0, "count": 0})
+
+    for r in ply_records:
+        if r.get("side_moved") != player_color:
+            continue
+        cp = _cp_loss_from_record(r)
+        if cp is None:
+            continue
+        move_no = _move_no_from_ply(r.get("ply"))
+        if move_no is None or move_no < 1 or move_no > max_move:
+            continue
+        idx = (move_no - 1) // bucket_size
+        if idx < 0 or idx >= len(buckets):
+            continue
+        buckets[idx]["_sum"] += float(cp)
+        buckets[idx]["count"] += 1
+
+    out: List[Dict[str, Any]] = []
+    for b in buckets:
+        c = int(b.get("count") or 0)
+        s = float(b.get("_sum") or 0.0)
+        out.append(
+            {
+                "start": int(b["start"]),
+                "end": int(b["end"]),
+                "avg_cp_loss": round(s / c, 1) if c > 0 else None,
+                "count": c,
+            }
+        )
+    return out
+
+
+def _phase_accuracy_per_game(ply_records: List[Dict[str, Any]], player_color: str) -> Dict[str, Any]:
+    phases = ["opening", "middlegame", "endgame"]
+    accs: Dict[str, List[float]] = {p: [] for p in phases}
+    counts: Dict[str, int] = {p: 0 for p in phases}
+    for r in ply_records:
+        if r.get("side_moved") != player_color:
+            continue
+        ph = r.get("phase")
+        if ph not in phases:
+            continue
+        a = r.get("accuracy_pct")
+        if isinstance(a, (int, float)) and statistics.isfinite(float(a)):
+            accs[ph].append(float(a))
+            counts[ph] += 1
+    out: Dict[str, Any] = {}
+    for ph in phases:
+        m = _safe_mean(accs[ph])
+        out[ph] = {"accuracy": round(m, 1) if m is not None else None, "count": counts[ph]}
+    return out
+
+
 def build_graph_game_point(game: Dict[str, Any], index: int) -> Dict[str, Any]:
     """
     Build a compact per-game structure suitable for charting.
@@ -219,6 +298,19 @@ def build_graph_game_point(game: Dict[str, Any], index: int) -> Dict[str, Any]:
     opening_name = game.get("opening_name") or metadata.get("opening_name") or "Unknown"
     opening_eco = game.get("opening_eco") or metadata.get("opening_eco") or "Unknown"
 
+    # Avg CP loss per game (player moves only; requires cp_loss on ply_records)
+    cp_losses: List[float] = []
+    for r in ply_records:
+        if r.get("side_moved") != player_color:
+            continue
+        cp = _cp_loss_from_record(r)
+        if cp is not None:
+            cp_losses.append(float(cp))
+    avg_cp_loss = round(_safe_mean(cp_losses), 1) if cp_losses else None
+
+    cp_loss_buckets = _cp_loss_buckets(ply_records, player_color)
+    phase_accuracy = _phase_accuracy_per_game(ply_records, player_color)
+
     return {
         "index": index,
         "game_id": game.get("id") or game.get("external_id") or "",
@@ -228,6 +320,9 @@ def build_graph_game_point(game: Dict[str, Any], index: int) -> Dict[str, Any]:
         "opening_eco": opening_eco,
         "time_control": game.get("time_control") or metadata.get("time_control"),
         "overall_accuracy": round(float(overall_accuracy), 1) if isinstance(overall_accuracy, (int, float)) else None,
+        "avg_cp_loss": avg_cp_loss,
+        "cp_loss_buckets": cp_loss_buckets,
+        "phase_accuracy": phase_accuracy,
         "piece_accuracy": piece_accuracy,
         "time_bucket_accuracy": time_bucket_accuracy,
         "tag_transitions": tag_transitions,

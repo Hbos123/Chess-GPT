@@ -8,9 +8,10 @@ interface PhasePerformanceCardProps {
     middlegame?: { accuracy: number; games_won: number; games_lost: number; games_drawn: number };
     endgame?: { accuracy: number; games_won: number; games_lost: number; games_drawn: number };
   };
+  trends?: Partial<Record<"opening" | "middlegame" | "endgame", number>>;
 }
 
-export default function PhasePerformanceCard({ phaseAnalytics }: PhasePerformanceCardProps) {
+export default function PhasePerformanceCard({ phaseAnalytics, trends }: PhasePerformanceCardProps) {
   const phases = [
     { key: "opening", label: "Opening", data: phaseAnalytics.opening },
     { key: "middlegame", label: "Middlegame", data: phaseAnalytics.middlegame },
@@ -76,6 +77,28 @@ export default function PhasePerformanceCard({ phaseAnalytics }: PhasePerformanc
               <div style={{ fontSize: '24px', fontWeight: 700, color: '#e0e7ff', marginBottom: '4px' }}>
                 {data.accuracy.toFixed(1)}%
               </div>
+              {typeof trends?.[phase.key as "opening" | "middlegame" | "endgame"] === "number" && (
+                <span
+                  className={`trend-pill ${
+                    Math.abs(trends[phase.key as "opening" | "middlegame" | "endgame"] as number) < 0.05
+                      ? "flat"
+                      : (trends[phase.key as "opening" | "middlegame" | "endgame"] as number) > 0
+                        ? "up"
+                        : "down"
+                  }`}
+                  style={{ display: "inline-flex", marginTop: 0, marginBottom: 10 }}
+                  title="Last 3 games vs overall average"
+                >
+                  {Math.abs(trends[phase.key as "opening" | "middlegame" | "endgame"] as number) < 0.05
+                    ? "—"
+                    : (trends[phase.key as "opening" | "middlegame" | "endgame"] as number) > 0
+                      ? "▲"
+                      : "▼"}{" "}
+                  {((trends[phase.key as "opening" | "middlegame" | "endgame"] as number) > 0 ? "+" : "") +
+                    (trends[phase.key as "opening" | "middlegame" | "endgame"] as number).toFixed(1)}
+                  %
+                </span>
+              )}
               <div style={{ fontSize: '12px', color: '#cbd5e1', marginBottom: '12px' }}>
                 Accuracy
               </div>
