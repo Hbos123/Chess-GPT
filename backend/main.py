@@ -9898,7 +9898,7 @@ async def admin_backfill_positions_from_pgn(request: BackfillPositionsFromPgnReq
                         "is_error": True,
                         "error_category": category,
                         "error_side": error_side,
-                        "error_note": f\"{category.capitalize()}: {move_san} (cp_loss: {round(cp_loss_f, 1)})\",
+                        "error_note": f"{category.capitalize()}: {move_san} (cp_loss: {round(cp_loss_f, 1)})",
                         "tags_start": tags_start,
                         "tags_after_played": tags_after_played,
                         "tags_after_best": [],

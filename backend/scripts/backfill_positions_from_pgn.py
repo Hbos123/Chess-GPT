@@ -1,11 +1,4 @@
 #!/usr/bin/env python3
-"""
-Backfill script to extract and save critical positions from existing analyzed games
-by reconstructing fen_before from PGN and using stored ply_records.
-
-This script is primarily needed for older games whose compact game_review dropped 
-fen_before / engine fields, resulting in 0 drill positions available.
-"""
 
 import sys
 import os
@@ -15,10 +8,8 @@ import argparse
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 
-# Add parent directory to path
 script_dir = Path(__file__).parent
 backend_dir = script_dir.parent
-project_root = backend_dir.parent
 sys.path.insert(0, str(backend_dir))
 
 from dotenv import load_dotenv
@@ -30,12 +21,11 @@ import chess.engine
 
 
 def get_supabase_client():
-    """Initialize the appropriate database client."""
     supabase_url = os.getenv("SUPABASE_URL")
     supabase_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
     
     if not supabase_url or not supabase_key:
-        print("❌ Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY in environment")
+        print("❌ Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY")
         return None
     
     from supabase_client import SupabaseClient
@@ -44,20 +34,17 @@ def get_supabase_client():
 
 
 def get_stockfish_path() -> Optional[str]:
-    """Get the Stockfish executable path."""
-    # Check common locations
     possible_paths = [
         os.path.join(backend_dir, "stockfish"),
         os.path.join(backend_dir, "stockfish.exe"),
         "/usr/local/bin/stockfish",
         "/usr/bin/stockfish",
-        "stockfish",  # In PATH
+        "stockfish",
     ]
     
     for path in possible_paths:
         if os.path.exists(path) and os.access(path, os.X_OK):
             return path
-        # Try without extension
         if os.path.exists(path) and not path.endswith(".exe"):
             try:
                 os.chmod(path, os.stat(path).st_mode | 0o111)
@@ -66,25 +53,20 @@ def get_stockfish_path() -> Optional[str]:
             except:
                 pass
     
-    # Check if stockfish is in PATH
     import shutil
     stockfish_cmd = shutil.which("stockfish")
     if stockfish_cmd:
         return stockfish_cmd
     
-    print("⚠️  Stockfish not found. Please ensure Stockfish is installed and accessible.")
+    print("⚠️  Stockfish not found")
     return None
 
 
 async def initialize_engine(stockfish_path: str) -> Optional[chess.engine.SimpleEngine]:
-    """Initialize a Stockfish engine instance."""
     try:
         transport, engine = await chess.engine.popen_uci(stockfish_path)
-        await engine.configure({
-            "Threads": 1,
-            "Hash": 32
-        })
-        print(f"✅ Stockfish engine initialized at {stockfish_path}")
+        await engine.configure({"Threads": 1, "Hash": 32})
+        print(f"✅ Stockfish initialized")
         return engine
     except Exception as e:
         print(f"❌ Failed to initialize Stockfish: {e}")
@@ -92,7 +74,6 @@ async def initialize_engine(stockfish_path: str) -> Optional[chess.engine.Simple
 
 
 async def best_move_for_fen(engine: chess.engine.SimpleEngine, fen: str, depth: int) -> tuple[str, str, float]:
-    """Compute best move for a FEN position."""
     board = chess.Board(fen)
     info = await engine.analyse(board, chess.engine.Limit(depth=depth), multipv=1)
     pv = info["pv"]
@@ -105,20 +86,15 @@ async def best_move_for_fen(engine: chess.engine.SimpleEngine, fen: str, depth: 
 
 
 def infer_category(rec: Dict) -> str:
-    """Infer move category (blunder/mistake/inaccuracy) from ply record."""
     cat = str(rec.get("category") or "").strip().lower()
     if cat in ("blunder", "mistake", "inaccuracy"):
         return cat
-    
-    # Frontend may omit category; infer from boolean fields
     if rec.get("is_blunder"):
         return "blunder"
     if rec.get("is_mistake"):
         return "mistake"
     if rec.get("is_inaccuracy"):
         return "inaccuracy"
-    
-    # Infer from analyse.tags
     analyse = rec.get("analyse") if isinstance(rec.get("analyse"), dict) else {}
     tags = analyse.get("tags", []) if isinstance(analyse.get("tags"), list) else []
     tags_norm = set()
@@ -129,19 +105,16 @@ def infer_category(rec: Dict) -> str:
             nm = t.get("tag_name") or t.get("name") or t.get("tag")
             if isinstance(nm, str):
                 tags_norm.add(nm.strip().lower())
-    
     if "blunder" in tags_norm:
         return "blunder"
     if "mistake" in tags_norm:
         return "mistake"
     if "inaccuracy" in tags_norm:
         return "inaccuracy"
-    
     return ""
 
 
 def extract_tag_names(tags) -> List[str]:
-    """Extract tag names from various tag formats."""
     out = []
     for t in (tags or []):
         if isinstance(t, str) and t.strip():
@@ -162,11 +135,9 @@ async def backfill_user_positions_from_pgn(
     min_cp_loss: float = 100,
     verify_depth: int = 14
 ) -> Dict[str, Any]:
-    """Backfill critical positions for a user by reconstructing from PGN."""
     print(f"\n🔄 Processing user: {user_id}")
     
     try:
-        # Fetch analyzed games with PGN + compact/full review
         def fetch_games():
             q = (
                 supabase_client.client.table("games")
@@ -185,15 +156,9 @@ async def backfill_user_positions_from_pgn(
         
         games = await asyncio.to_thread(fetch_games)
         if not games:
-            return {
-                "status": "ok",
-                "user_id": user_id,
-                "games": 0,
-                "positions_saved": 0,
-                "note": "No analyzed games found"
-            }
+            return {"status": "ok", "user_id": user_id, "games": 0, "positions_saved": 0, "note": "No analyzed games found"}
         
-        print(f"   📚 Found {len(games)} games with reviews")
+        print(f"   📚 Found {len(games)} games")
         
         saved_total = 0
         games_processed = 0
@@ -215,7 +180,6 @@ async def backfill_user_positions_from_pgn(
             if not isinstance(pgn, str) or not pgn.strip():
                 continue
             
-            # Reconstruct fen_before by walking PGN
             try:
                 game_obj = chess.pgn.read_game(io.StringIO(pgn))
                 if not game_obj:
@@ -226,7 +190,6 @@ async def backfill_user_positions_from_pgn(
                 uci_moves: List[str] = []
                 san_moves: List[str] = []
                 side_moveds: List[str] = []
-                ply_nums: List[int] = []
                 
                 ply_no = 0
                 for mv in game_obj.mainline_moves():
@@ -235,20 +198,17 @@ async def backfill_user_positions_from_pgn(
                     uci_moves.append(mv.uci())
                     san_moves.append(board.san(mv))
                     side_moveds.append("white" if board.turn else "black")
-                    ply_nums.append(ply_no)
                     board.push(mv)
             except Exception as e:
                 print(f"   ⚠️ Error parsing PGN for game {game_id}: {e}")
                 continue
             
-            # Determine player color
             meta = game_review.get("metadata", {}) if isinstance(game_review.get("metadata"), dict) else {}
             player_color = (meta.get("player_color") or g.get("user_color") or "white")
             player_color = "black" if str(player_color).lower().strip() == "black" else "white"
             
             positions_to_save = []
             
-            # Iterate ply_records aligned by ply number (fallback to index)
             for rec_idx, rec in enumerate(ply_records):
                 if not isinstance(rec, dict):
                     continue
@@ -282,7 +242,6 @@ async def backfill_user_positions_from_pgn(
                 move_san = rec.get("san") or rec.get("move_san") or san_moves[ply_i - 1]
                 move_uci = rec.get("uci") or uci_moves[ply_i - 1]
                 
-                # Tag transition arrays (if present)
                 raw_before = rec.get("raw_before", {}) if isinstance(rec.get("raw_before"), dict) else {}
                 raw_after = rec.get("raw_after", {}) if isinstance(rec.get("raw_after"), dict) else {}
                 analyse = rec.get("analyse", {}) if isinstance(rec.get("analyse"), dict) else {}
@@ -292,7 +251,6 @@ async def backfill_user_positions_from_pgn(
                 tags_gained = list(set(tags_after_played) - set(tags_start))
                 tags_lost = list(set(tags_start) - set(tags_after_played))
                 
-                # Compute best move with engine (needed for drills)
                 try:
                     best_san, best_uci, eval_cp = await best_move_for_fen(engine, fen_before, verify_depth)
                 except Exception as e:
@@ -338,7 +296,6 @@ async def backfill_user_positions_from_pgn(
             
             games_with_positions += 1
             
-            # Save positions to database
             saved_count = await asyncio.to_thread(
                 supabase_client.batch_upsert_positions,
                 user_id,
@@ -351,8 +308,8 @@ async def backfill_user_positions_from_pgn(
                 print(f"   📊 Processed {idx}/{len(games)} games, {games_with_positions} with positions, {saved_total} positions saved")
         
         print(f"   ✅ Processed {games_processed} games")
-        print(f"   ✅ {games_with_positions} games had critical positions")
-        print(f"   ✅ {saved_total} positions extracted and saved")
+        print(f"   ✅ {games_with_positions} games had positions")
+        print(f"   ✅ {saved_total} positions saved")
         
         return {
             "status": "ok",
@@ -361,48 +318,52 @@ async def backfill_user_positions_from_pgn(
             "games_processed": games_processed,
             "games_with_positions": games_with_positions,
             "positions_saved": saved_total,
-            "min_cp_loss": min_cp_loss,
-            "max_positions_per_game": max_positions_per_game,
-            "verify_depth": verify_depth,
         }
         
     except Exception as e:
-        print(f"   ❌ Error processing user {user_id}: {e}")
+        print(f"   ❌ Error: {e}")
         import traceback
         traceback.print_exc()
-        return {
-            "status": "error",
-            "user_id": user_id,
-            "error": str(e)
-        }
+        return {"status": "error", "user_id": user_id, "error": str(e)}
 
 
 async def main_async(args):
-    """Async main function."""
-    # Initialize client
     supabase_client = get_supabase_client()
     if not supabase_client:
-        print("❌ Failed to initialize database client")
         return
     
     print("✅ Connected to database")
     
-    # Initialize engine
     stockfish_path = get_stockfish_path()
     if not stockfish_path:
-        print("❌ Stockfish not found. Cannot proceed.")
         return
     
     engine = await initialize_engine(stockfish_path)
     if not engine:
-        print("❌ Failed to initialize engine. Cannot proceed.")
         return
     
     try:
-        if args.user_id:
-            # Backfill specific user
+        print("🔍 Finding all users with analyzed games...")
+        if hasattr(supabase_client, 'client'):
+            result = supabase_client.client.table("games")\
+                .select("user_id")\
+                .not_.is_("game_review", "null")\
+                .execute()
+            user_ids = list(set([g.get("user_id") for g in (result.data or []) if g.get("user_id")]))
+        else:
+            result = supabase_client._execute_query(
+                "SELECT DISTINCT user_id FROM public.games WHERE game_review IS NOT NULL",
+                ()
+            )
+            user_ids = [row["user_id"] for row in result if row.get("user_id")]
+        
+        print(f"📊 Found {len(user_ids)} users")
+        
+        total_saved = 0
+        for i, user_id in enumerate(user_ids, 1):
+            print(f"\n[{i}/{len(user_ids)}] Processing user {user_id[:8]}...")
             result = await backfill_user_positions_from_pgn(
-                args.user_id,
+                user_id,
                 supabase_client,
                 engine,
                 max_games=args.max_games,
@@ -410,50 +371,10 @@ async def main_async(args):
                 min_cp_loss=args.min_cp_loss,
                 verify_depth=args.verify_depth
             )
-            print(f"\n✅ Backfill complete for user {args.user_id}")
-            print(f"   Games processed: {result.get('games_processed', 0)}")
-            print(f"   Games with positions: {result.get('games_with_positions', 0)}")
-            print(f"   Positions saved: {result.get('positions_saved', 0)}")
-        else:
-            # Backfill all users
-            print("🔍 Finding all users with analyzed games...")
-            try:
-                if hasattr(supabase_client, 'client'):  # Supabase
-                    result = supabase_client.client.table("games")\
-                        .select("user_id")\
-                        .not_.is_("game_review", "null")\
-                        .execute()
-                    user_ids = list(set([g.get("user_id") for g in (result.data or []) if g.get("user_id")]))
-                else:  # LocalPostgres
-                    result = supabase_client._execute_query(
-                        "SELECT DISTINCT user_id FROM public.games WHERE game_review IS NOT NULL",
-                        ()
-                    )
-                    user_ids = [row["user_id"] for row in result if row.get("user_id")]
-                
-                print(f"📊 Found {len(user_ids)} users with analyzed games")
-                
-                total_saved = 0
-                for i, user_id in enumerate(user_ids, 1):
-                    print(f"\n[{i}/{len(user_ids)}] Processing user {user_id[:8]}...")
-                    result = await backfill_user_positions_from_pgn(
-                        user_id,
-                        supabase_client,
-                        engine,
-                        max_games=args.max_games,
-                        max_positions_per_game=args.max_positions_per_game,
-                        min_cp_loss=args.min_cp_loss,
-                        verify_depth=args.verify_depth
-                    )
-                    total_saved += result.get("positions_saved", 0)
-                
-                print(f"\n✅ Backfill complete: {total_saved} positions saved across {len(user_ids)} users")
-            except Exception as e:
-                print(f"❌ Error finding users: {e}")
-                import traceback
-                traceback.print_exc()
+            total_saved += result.get("positions_saved", 0)
+        
+        print(f"\n✅ Backfill complete: {total_saved} positions saved across {len(user_ids)} users")
     finally:
-        # Cleanup engine
         if engine:
             try:
                 await engine.quit()
@@ -462,44 +383,42 @@ async def main_async(args):
 
 
 def main():
-    """Main entry point."""
-    parser = argparse.ArgumentParser(
-        description="Backfill critical positions from PGN + compact game_review ply_records"
-    )
-    parser.add_argument(
-        "--user-id",
-        type=str,
-        help="Specific user ID to backfill (optional, defaults to all users)"
-    )
-    parser.add_argument(
-        "--max-games",
-        type=int,
-        default=200,
-        help="Maximum number of games to process per user (default: 200)"
-    )
-    parser.add_argument(
-        "--max-positions-per-game",
-        type=int,
-        default=30,
-        help="Maximum positions to extract per game (default: 30)"
-    )
-    parser.add_argument(
-        "--min-cp-loss",
-        type=float,
-        default=100.0,
-        help="Minimum centipawn loss to include (default: 100.0)"
-    )
-    parser.add_argument(
-        "--verify-depth",
-        type=int,
-        default=14,
-        help="Engine depth for best move verification (default: 14)"
-    )
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--user-id", type=str, help="Specific user ID (optional)")
+    parser.add_argument("--max-games", type=int, default=200)
+    parser.add_argument("--max-positions-per-game", type=int, default=30)
+    parser.add_argument("--min-cp-loss", type=float, default=100.0)
+    parser.add_argument("--verify-depth", type=int, default=14)
     
     args = parser.parse_args()
     
-    # Run async main
-    asyncio.run(main_async(args))
+    if args.user_id:
+        async def run_single():
+            supabase_client = get_supabase_client()
+            if not supabase_client:
+                return
+            stockfish_path = get_stockfish_path()
+            if not stockfish_path:
+                return
+            engine = await initialize_engine(stockfish_path)
+            if not engine:
+                return
+            try:
+                result = await backfill_user_positions_from_pgn(
+                    args.user_id, supabase_client, engine,
+                    args.max_games, args.max_positions_per_game,
+                    args.min_cp_loss, args.verify_depth
+                )
+                print(f"\n✅ Complete: {result.get('positions_saved', 0)} positions saved")
+            finally:
+                if engine:
+                    try:
+                        await engine.quit()
+                    except:
+                        pass
+        asyncio.run(run_single())
+    else:
+        asyncio.run(main_async(args))
 
 
 if __name__ == "__main__":
