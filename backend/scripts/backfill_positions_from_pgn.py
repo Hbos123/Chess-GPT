@@ -233,6 +233,8 @@ async def backfill_user_positions_from_pgn(
                 category = infer_category(rec)
                 if category:
                     plys_with_category += 1
+                    if idx == 1 and rec_idx < 5:
+                        print(f"      Ply {ply_i}: category={category}, cp_loss={rec.get('cp_loss')}")
                 
                 if category not in ("blunder", "mistake"):
                     continue
@@ -247,6 +249,8 @@ async def backfill_user_positions_from_pgn(
                     plys_with_cp_loss += 1
                 
                 if cp_loss_f < min_cp_loss:
+                    if idx == 1 and rec_idx < 5:
+                        print(f"      Ply {ply_i}: cp_loss {cp_loss_f} < {min_cp_loss}, skipping")
                     continue
                 
                 plys_meeting_criteria += 1
