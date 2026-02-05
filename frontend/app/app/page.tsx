@@ -14738,9 +14738,31 @@ Provide 2-3 sentences of natural language commentary explaining why this deviati
               ? [
                   {
                     role: "system",
-                    content:
-                      params.trainingSession?.intro ||
-                      "Your training session is ready. Review the position, then press Begin Drills when you’re ready.",
+                    content: (() => {
+                      const session = params.trainingSession;
+                      if (session?.intro) return session.intro;
+                      
+                      const cardCount = session?.cards?.length || session?.total_cards || 0;
+                      const mode = session?.mode || "Training";
+                      const composition = session?.composition || {};
+                      const newCount = composition.new || 0;
+                      const learningCount = composition.learning || 0;
+                      const reviewCount = composition.review || 0;
+                      
+                      let description = `🎯 Your ${mode} session is ready!\n\n`;
+                      description += `📊 **Session Overview:**\n`;
+                      description += `• ${cardCount} position${cardCount !== 1 ? 's' : ''} to practice\n`;
+                      if (newCount > 0) description += `• ${newCount} new position${newCount !== 1 ? 's' : ''}\n`;
+                      if (learningCount > 0) description += `• ${learningCount} learning position${learningCount !== 1 ? 's' : ''}\n`;
+                      if (reviewCount > 0) description += `• ${reviewCount} review position${reviewCount !== 1 ? 's' : ''}\n`;
+                      description += `\n💡 **How it works:**\n`;
+                      description += `• Use the main board on the left to play your moves\n`;
+                      description += `• Each position will show you what was lost or missed\n`;
+                      description += `• Find the best move to improve your pattern recognition\n`;
+                      description += `\nPress **Begin Drills** when you're ready to start!`;
+                      
+                      return description;
+                    })(),
                     fen: baseFen,
                     tabId: newTabId,
                   },
@@ -14890,9 +14912,31 @@ Provide 2-3 sentences of natural language commentary explaining why this deviati
               ? [
                   {
                     role: "system",
-                    content:
-                      params.trainingSession?.intro ||
-                      "Your training session is ready. Review the position, then press Begin Drills when you’re ready.",
+                    content: (() => {
+                      const session = params.trainingSession;
+                      if (session?.intro) return session.intro;
+                      
+                      const cardCount = session?.cards?.length || session?.total_cards || 0;
+                      const mode = session?.mode || "Training";
+                      const composition = session?.composition || {};
+                      const newCount = composition.new || 0;
+                      const learningCount = composition.learning || 0;
+                      const reviewCount = composition.review || 0;
+                      
+                      let description = `🎯 Your ${mode} session is ready!\n\n`;
+                      description += `📊 **Session Overview:**\n`;
+                      description += `• ${cardCount} position${cardCount !== 1 ? 's' : ''} to practice\n`;
+                      if (newCount > 0) description += `• ${newCount} new position${newCount !== 1 ? 's' : ''}\n`;
+                      if (learningCount > 0) description += `• ${learningCount} learning position${learningCount !== 1 ? 's' : ''}\n`;
+                      if (reviewCount > 0) description += `• ${reviewCount} review position${reviewCount !== 1 ? 's' : ''}\n`;
+                      description += `\n💡 **How it works:**\n`;
+                      description += `• Use the main board on the left to play your moves\n`;
+                      description += `• Each position will show you what was lost or missed\n`;
+                      description += `• Find the best move to improve your pattern recognition\n`;
+                      description += `\nPress **Begin Drills** when you're ready to start!`;
+                      
+                      return description;
+                    })(),
                     fen: baseFen,
                     tabId: newTabId,
                   },
