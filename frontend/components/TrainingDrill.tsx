@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { Chess } from "chess.js";
 import Board from "./Board";
+import { formatTagName } from "@/lib/tagGroups";
 
 interface TrainingDrillProps {
   drill: any;
@@ -254,6 +255,68 @@ export default function TrainingDrill({
     return parts.length > 0 ? parts.join(" • ") : "";
   }, [drill.origin, drill.opening, drill.phase, drill.source]);
 
+  // Generate intelligent position description based on drill context
+  const positionDescription = useMemo(() => {
+    const parts: string[] = [];
+    
+    // Determine who played the previous move
+    const source = drill.source || {};
+    const errorSide = source.error_side; // "white" or "black" - who made the mistake
+    const currentSide = drill.side_to_move; // who is to move now
+    
+    // If error_side matches current side, opponent just played; otherwise user just played
+    const previousMoveWasByUser = errorSide && errorSide === currentSide;
+    const actor = previousMoveWasByUser ? "You" : "Your opponent";
+    const poss = previousMoveWasByUser ? "your" : "their";
+    
+    // Get tag transitions
+    const tagTransitions = drill.tag_transitions || {};
+    const tagsLost = tagTransitions.lost || [];
+    const tagsGained = tagTransitions.gained || [];
+    const tagsMissed = tagTransitions.missed || [];
+    
+    // Get piece context
+    const pieceContext = drill.piece_context || {};
+    const blunderedPiece = pieceContext.blundered;
+    const bestMovePiece = pieceContext.best_move;
+    
+    // Build description based on what was lost
+    if (tagsLost.length > 0) {
+      const primaryTag = tagsLost[0];
+      const tagDisplay = formatTagName(primaryTag);
+      
+      if (blunderedPiece) {
+        parts.push(`${actor} played ${poss} ${blunderedPiece.toLowerCase()}, losing the chance to maintain ${tagDisplay}.`);
+      } else {
+        parts.push(`${actor} played a move losing the chance to maintain ${tagDisplay}.`);
+      }
+    } else if (tagsMissed.length > 0) {
+      const primaryTag = tagsMissed[0];
+      const tagDisplay = formatTagName(primaryTag);
+      parts.push(`${actor} missed the opportunity to gain ${tagDisplay}.`);
+    } else if (tagsGained.length > 0 && errorSide) {
+      // If tags were gained but it was a mistake, describe what was lost
+      const primaryTag = tagsGained[0];
+      const tagDisplay = formatTagName(primaryTag);
+      parts.push(`${actor} played a move that gained ${tagDisplay}, but at a cost.`);
+    } else {
+      // Fallback: generic description
+      if (errorSide) {
+        parts.push(`${actor} played a suboptimal move in this position.`);
+      } else {
+        parts.push(`Find the best move in this position.`);
+      }
+    }
+    
+    // Add phase/opening context if available
+    if (drill.phase) {
+      const phaseText = drill.phase.charAt(0).toUpperCase() + drill.phase.slice(1);
+      parts.push(`This is a ${phaseText.toLowerCase()} position.`);
+    }
+    
+    return parts.join(" ");
+  }, [drill.source, drill.side_to_move, drill.tag_transitions, drill.piece_context, drill.phase]);
+
   return (
     <div className="training-drill-container">
       <div className="drill-header">
@@ -293,18 +356,18 @@ export default function TrainingDrill({
         </div>
         <div className="drill-board-info">
           <div className="position-info">
-            {drill.side_to_move === "white" ? "White" : "Black"} to move
+            <div className="position-side">
+              {drill.side_to_move === "white" ? "White" : "Black"} to move
+            </div>
+            {positionDescription && (
+              <div className="position-description">
+                {positionDescription}
+              </div>
+            )}
           </div>
           {!showSolution && !feedback.message && (
             <div className="move-input-section">
-              <label>Or enter move notation:</label>
-              <input
-                type="text"
-                placeholder="e.g., Nxd5"
-                className="move-input"
-                onKeyDown={handleTextMove}
-                disabled={showSolution || !!feedback.message}
-              />
+              <label>Use the main board on the left to play your move.</label>
             </div>
           )}
         </div>

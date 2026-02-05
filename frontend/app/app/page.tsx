@@ -14206,6 +14206,7 @@ Provide 2-3 sentences of natural language commentary explaining why this deviati
                 onDeleteVariation={handleDeleteVariation}
                 onPromoteVariation={handlePromoteVariation}
                 onAddComment={handleAddComment}
+                isTrainingMode={activeTab?.tabType === 'training' && !!activeTab?.trainingSession}
               />
             </div>
           )}
@@ -14247,6 +14248,7 @@ Provide 2-3 sentences of natural language commentary explaining why this deviati
                   onDeleteVariation={handleDeleteVariation}
                   onPromoteVariation={handlePromoteVariation}
                   onAddComment={handleAddComment}
+                  isTrainingMode={activeTab?.tabType === 'training' && !!activeTab?.trainingSession}
                 />
               </div>
               {isMobileMode ? (

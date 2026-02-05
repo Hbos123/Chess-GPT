@@ -351,13 +351,13 @@ export default function TrainingSession({
               </div>
             </div>
           ) : (
-            <TrainingDrill
-              drill={session.cards[currentDrillIndex]}
-              onComplete={handleDrillComplete}
-              onSkip={handleSkip}
-              currentIndex={currentDrillIndex}
-              totalDrills={session.cards.length}
-            />
+          <TrainingDrill
+            drill={session.cards[currentDrillIndex]}
+            onComplete={handleDrillComplete}
+            onSkip={handleSkip}
+            currentIndex={currentDrillIndex}
+            totalDrills={session.cards.length}
+          />
           )}
         </div>
       )}

@@ -24,6 +24,7 @@ interface BoardDockProps {
   onDeleteVariation?: (node: MoveNode) => void;
   onPromoteVariation?: (node: MoveNode) => void;
   onAddComment?: (node: MoveNode, comment: string) => void;
+  isTrainingMode?: boolean; // Hide Stockfish analysis during training
 }
 
 export default function BoardDock({ 
@@ -42,7 +43,8 @@ export default function BoardDock({
   onDeleteMove,
   onDeleteVariation,
   onPromoteVariation,
-  onAddComment
+  onAddComment,
+  isTrainingMode = false
 }: BoardDockProps) {
   const [showFen, setShowFen] = useState(false);
   const [currentEval, setCurrentEval] = useState(0);
@@ -57,12 +59,14 @@ export default function BoardDock({
     <div className="board-dock">
       <div className="board-dock-inner">
         <div className="board-with-eval">
-          {/* Evaluation bar on the left */}
-          <EvaluationBar 
-            evalCp={currentEval}
-            orientation={orientation}
-            mate={currentMate}
-          />
+          {/* Evaluation bar on the left - hidden during training */}
+          {!isTrainingMode && (
+            <EvaluationBar 
+              evalCp={currentEval}
+              orientation={orientation}
+              mate={currentMate}
+            />
+          )}
           
           {/* Board and analysis container */}
           <div className="board-and-analysis">
@@ -77,13 +81,15 @@ export default function BoardDock({
               />
             </div>
             
-            {/* Stockfish analysis below board */}
-            <StockfishAnalysis 
-              fen={fen}
-              depth={15}
-              maxLines={3}
-              onEvalUpdate={handleEvalUpdate}
-            />
+            {/* Stockfish analysis below board - hidden during training */}
+            {!isTrainingMode && (
+              <StockfishAnalysis 
+                fen={fen}
+                depth={15}
+                maxLines={3}
+                onEvalUpdate={handleEvalUpdate}
+              />
+            )}
             
             {/* PGN viewer placed in the same width container as the board */}
             {pgn && rootNode && currentNode && (

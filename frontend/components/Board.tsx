@@ -32,6 +32,7 @@ export default function Board({
   const [customSquareStyles, setCustomSquareStyles] = useState<{
     [square: string]: React.CSSProperties;
   }>({});
+  const [promotionSquare, setPromotionSquare] = useState<{ from: string; to: string } | null>(null);
   
   // Use ref to track previous FEN to prevent unnecessary updates
   const prevFenRef = useRef<string>(fen);
@@ -74,11 +75,20 @@ export default function Board({
     if (disabled) return false;
 
     try {
-      // Check if it's a pawn promotion
+      const pieceType = piece[1].toLowerCase();
+      const isPawn = pieceType === "p";
+      const isPromotionSquare = targetSquare[1] === "8" || targetSquare[1] === "1";
+      
+      // If pawn reaches promotion square, show promotion dialog
+      if (isPawn && isPromotionSquare) {
+        setPromotionSquare({ from: sourceSquare, to: targetSquare });
+        return false; // Prevent move until promotion is selected
+      }
+
       const move = game.move({
         from: sourceSquare as Square,
         to: targetSquare as Square,
-        promotion: piece[1].toLowerCase() === "p" && (targetSquare[1] === "8" || targetSquare[1] === "1") ? "q" : undefined,
+        promotion: undefined,
       });
 
       if (move === null) return false;
@@ -91,6 +101,32 @@ export default function Board({
       return true;
     } catch (e) {
       return false;
+    }
+  }
+
+  function onPromotionPieceSelect(piece: "q" | "r" | "b" | "n") {
+    if (!promotionSquare) return;
+
+    try {
+      const move = game.move({
+        from: promotionSquare.from as Square,
+        to: promotionSquare.to as Square,
+        promotion: piece,
+      });
+
+      if (move === null) {
+        setPromotionSquare(null);
+        return;
+      }
+
+      // Undo the move since parent handles state
+      game.undo();
+
+      // Notify parent
+      onMove(promotionSquare.from, promotionSquare.to, piece);
+      setPromotionSquare(null);
+    } catch (e) {
+      setPromotionSquare(null);
     }
   }
 
@@ -107,7 +143,31 @@ export default function Board({
         customArrowColor="rgb(0,170,0)"
         customArrows={boardArrows as any}
         arePiecesDraggable={!disabled}
+        promotionToSquare={promotionSquare?.to || undefined}
+        promotionPieceOptions={["q", "r", "b", "n"]}
+        onPromotionPieceSelect={onPromotionPieceSelect}
       />
+      {promotionSquare && (
+        <div className="promotion-dialog-overlay" onClick={() => setPromotionSquare(null)}>
+          <div className="promotion-dialog" onClick={(e) => e.stopPropagation()}>
+            <div className="promotion-title">Choose promotion piece:</div>
+            <div className="promotion-pieces">
+              <button onClick={() => onPromotionPieceSelect("q")} className="promotion-piece">
+                ♕ Queen
+              </button>
+              <button onClick={() => onPromotionPieceSelect("r")} className="promotion-piece">
+                ♖ Rook
+              </button>
+              <button onClick={() => onPromotionPieceSelect("b")} className="promotion-piece">
+                ♗ Bishop
+              </button>
+              <button onClick={() => onPromotionPieceSelect("n")} className="promotion-piece">
+                ♘ Knight
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
