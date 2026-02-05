@@ -104,19 +104,29 @@ export default function Board({
     }
   }
 
-  function onPromotionPieceSelect(piece: "q" | "r" | "b" | "n") {
-    if (!promotionSquare) return;
+  function onPromotionPieceSelect(
+    piece?: "q" | "r" | "b" | "n",
+    promoteFromSquare?: Square,
+    promoteToSquare?: Square
+  ): boolean {
+    if (!promotionSquare || !piece) {
+      setPromotionSquare(null);
+      return false;
+    }
 
     try {
+      const fromSquare = (promoteFromSquare || promotionSquare.from) as Square;
+      const toSquare = (promoteToSquare || promotionSquare.to) as Square;
+      
       const move = game.move({
-        from: promotionSquare.from as Square,
-        to: promotionSquare.to as Square,
+        from: fromSquare,
+        to: toSquare,
         promotion: piece,
       });
 
       if (move === null) {
         setPromotionSquare(null);
-        return;
+        return false;
       }
 
       // Undo the move since parent handles state
@@ -125,9 +135,16 @@ export default function Board({
       // Notify parent
       onMove(promotionSquare.from, promotionSquare.to, piece);
       setPromotionSquare(null);
+      return true;
     } catch (e) {
       setPromotionSquare(null);
+      return false;
     }
+  }
+  
+  // Internal handler for our custom promotion dialog buttons
+  function handleCustomPromotionSelect(piece: "q" | "r" | "b" | "n") {
+    onPromotionPieceSelect(piece);
   }
 
   // Convert arrows to compatible format
@@ -152,16 +169,16 @@ export default function Board({
           <div className="promotion-dialog" onClick={(e) => e.stopPropagation()}>
             <div className="promotion-title">Choose promotion piece:</div>
             <div className="promotion-pieces">
-              <button onClick={() => onPromotionPieceSelect("q")} className="promotion-piece">
+              <button onClick={() => handleCustomPromotionSelect("q")} className="promotion-piece">
                 ♕ Queen
               </button>
-              <button onClick={() => onPromotionPieceSelect("r")} className="promotion-piece">
+              <button onClick={() => handleCustomPromotionSelect("r")} className="promotion-piece">
                 ♖ Rook
               </button>
-              <button onClick={() => onPromotionPieceSelect("b")} className="promotion-piece">
+              <button onClick={() => handleCustomPromotionSelect("b")} className="promotion-piece">
                 ♗ Bishop
               </button>
-              <button onClick={() => onPromotionPieceSelect("n")} className="promotion-piece">
+              <button onClick={() => handleCustomPromotionSelect("n")} className="promotion-piece">
                 ♘ Knight
               </button>
             </div>
