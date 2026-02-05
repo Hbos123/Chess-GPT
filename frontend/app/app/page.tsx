@@ -14329,25 +14329,6 @@ Provide 2-3 sentences of natural language commentary explaining why this deviati
                       // ignore
                     }
                   }}
-                  onRegisterExternalMoveHandler={(handler) => {
-                    trainingMoveHandlerRef.current = handler;
-                  }}
-                  onExternalSetPosition={(nextFen, nextOrientation) => {
-                    try {
-                      const g = new Chess(nextFen);
-                      const resolvedFen = g.fen();
-                      setGame(g);
-                      setFen(resolvedFen);
-                      if (nextOrientation) setBoardOrientation(nextOrientation);
-                      updateActiveTab({
-                        fen: resolvedFen,
-                        game: g,
-                        annotations: { ...(activeTab?.annotations || {}), fen: resolvedFen },
-                      } as any);
-                    } catch {
-                      // ignore
-                    }
-                  }}
                 />
               ) : (
                 <Conversation 
@@ -14428,6 +14409,26 @@ Provide 2-3 sentences of natural language commentary explaining why this deviati
                       };
                       setMessages(prev => [...prev, resumeMsg]);
                       updateActiveTab({ messages: [...(activeTab?.messages || []), resumeMsg] } as any);
+                    } catch {
+                      // ignore
+                    }
+                  }}
+                  onRegisterExternalMoveHandler={(handler) => {
+                    trainingMoveHandlerRef.current = handler;
+                  }}
+                  onExternalSetPosition={(nextFen, nextOrientation) => {
+                    try {
+                      const g = new Chess(nextFen);
+                      const resolvedFen = g.fen();
+                      setGame(g);
+                      setFen(resolvedFen);
+                      // Do not touch moveTree/PGN during drills.
+                      if (nextOrientation) setBoardOrientation(nextOrientation);
+                      updateActiveTab({
+                        fen: resolvedFen,
+                        game: g,
+                        annotations: { ...(activeTab?.annotations || {}), fen: resolvedFen },
+                      } as any);
                     } catch {
                       // ignore
                     }
