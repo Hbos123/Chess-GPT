@@ -189,7 +189,6 @@ export default function Board({
         customArrows={boardArrows as any}
         arePiecesDraggable={!disabled}
         promotionToSquare={(promotionSquare?.to as Square) || undefined}
-        promotionPieceOptions={["q", "r", "b", "n"]}
         onPromotionPieceSelect={onPromotionPieceSelect}
       />
       {promotionSquare && (
