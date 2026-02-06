@@ -98,7 +98,7 @@ export default function TrainingSession({
     ];
     
     // Deterministic selection based on tag hash
-    const tagHash = primaryTag.split("").reduce((acc, char) => acc + char.charCodeAt(0), 0);
+    const tagHash = primaryTag.split("").reduce((acc: number, char: string) => acc + char.charCodeAt(0), 0);
     const selectedPhrase = hintPhrases[tagHash % hintPhrases.length];
     
     return selectedPhrase;
@@ -386,8 +386,6 @@ export default function TrainingSession({
                   <h4>💡 Hint:</h4>
                   <p>{generateDeterministicHint(currentDrill) || currentDrill?.hint || "Look for the best move in this position."}</p>
                 </div>
-              )} (
-                <div className="drill-hint">{currentDrill?.hint || "No hint available for this position."}</div>
               )}
 
               <div className="drill-actions">
