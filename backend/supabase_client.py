@@ -1541,9 +1541,10 @@ class SupabaseClient:
         }
         """
         try:
-            # Get all active games
+            # OPTIMIZATION: Two-step query to avoid fetching huge game_review for all games
+            # Step 1: Fetch metadata only (fast, no game_review)
             result = self.client.table("games")\
-                .select("id, external_id, analyzed_at, game_review")\
+                .select("id, external_id, analyzed_at")\
                 .eq("user_id", user_id)\
                 .eq("review_type", "full")\
                 .is_("archived_at", "null")\
@@ -1562,26 +1563,46 @@ class SupabaseClient:
             analyzed_count = 0
             analyzed_with_tags = 0
             external_ids_analyzed = set()
+            analyzed_game_ids = []  # IDs of games with analyzed_at (need to check tags)
             
+            # First pass: count analyzed games and collect IDs for tag checking
             for game in result.data:
                 has_analyzed_at = game.get('analyzed_at') is not None
-                
-                # Check for tags
-                game_review = game.get('game_review') or {}
-                plys = game_review.get('ply_records', []) if isinstance(game_review, dict) else []
-                has_tags = any(
-                    len(p.get('analyse', {}).get('tags', [])) > 0
-                    for p in plys if isinstance(p, dict)
-                )
                 
                 if has_analyzed_at:
                     analyzed_count += 1
                     ext_id = game.get('external_id')
                     if ext_id:
                         external_ids_analyzed.add(str(ext_id))
-                
-                if has_analyzed_at and has_tags:
-                    analyzed_with_tags += 1
+                    # Collect ID to check for tags in second query
+                    analyzed_game_ids.append(game.get('id'))
+            
+            # Step 2: Only fetch game_review for games that have analyzed_at (to check tags)
+            # This avoids fetching huge game_review for games that definitely don't have tags
+            if analyzed_game_ids:
+                try:
+                    # Fetch game_review only for analyzed games
+                    tag_check_result = self.client.table("games")\
+                        .select("id, game_review")\
+                        .eq("user_id", user_id)\
+                        .in_("id", analyzed_game_ids)\
+                        .execute()
+                    
+                    # Check which analyzed games have tags
+                    for game in tag_check_result.data if tag_check_result.data else []:
+                        game_review = game.get('game_review') or {}
+                        plys = game_review.get('ply_records', []) if isinstance(game_review, dict) else []
+                        has_tags = any(
+                            len(p.get('analyse', {}).get('tags', [])) > 0
+                            for p in plys if isinstance(p, dict)
+                        )
+                        
+                        if has_tags:
+                            analyzed_with_tags += 1
+                except Exception as e:
+                    # If tag check fails, assume no tags (conservative)
+                    print(f"⚠️ [get_games_needing_analysis] Error checking tags: {e}")
+                    analyzed_with_tags = 0
             
             return {
                 'analyzed_count': analyzed_count,
