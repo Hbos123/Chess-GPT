@@ -2282,7 +2282,9 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
     };
 
     loadProfileOverview();
-    const interval = setInterval(loadProfileOverview, 15000);
+    // Only poll frequently if analysis is in progress, otherwise poll less frequently
+    const pollInterval = analysisInProgress ? 15000 : 60000; // 15s during analysis, 60s otherwise
+    const interval = setInterval(loadProfileOverview, pollInterval);
     return () => {
       cancelled = true;
       clearInterval(interval);

@@ -57,6 +57,53 @@ export default function TrainingSession({
     return stm === "black" ? "black" : "white";
   }, [currentDrill?.side_to_move]);
 
+  // Generate deterministic hint based on drill tags
+  const generateDeterministicHint = useCallback((drill: any): string => {
+    if (!drill) return "Look for the best move in this position.";
+    
+    // Get tags from various sources
+    const tags = drill.tags || [];
+    const tagTransitions = drill.tag_transitions || {};
+    const tagsAfterBest = tagTransitions.gained || [];
+    const tagsMissed = tagTransitions.missed || [];
+    
+    // Priority: tags that would be gained by the best move
+    const relevantTags = tagsAfterBest.length > 0 ? tagsAfterBest : (tagsMissed.length > 0 ? tagsMissed : tags);
+    
+    if (relevantTags.length === 0) {
+      return drill.hint || "Look for the best move in this position.";
+    }
+    
+    // Format tag names for display
+    const formatTagName = (tag: string): string => {
+      return tag
+        .replace(/tag\./g, "")
+        .replace(/\./g, " ")
+        .replace(/_/g, " ")
+        .split(" ")
+        .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+        .join(" ");
+    };
+    
+    // Generate hint phrase
+    const primaryTag = relevantTags[0];
+    const tagDisplay = formatTagName(primaryTag);
+    
+    // Generate deterministic hint phrase
+    const hintPhrases = [
+      `Look for a move that ${tagDisplay.toLowerCase()}.`,
+      `Try to find a move that achieves ${tagDisplay.toLowerCase()}.`,
+      `Consider moves that ${tagDisplay.toLowerCase()}.`,
+      `The best move involves ${tagDisplay.toLowerCase()}.`,
+    ];
+    
+    // Deterministic selection based on tag hash
+    const tagHash = primaryTag.split("").reduce((acc, char) => acc + char.charCodeAt(0), 0);
+    const selectedPhrase = hintPhrases[tagHash % hintPhrases.length];
+    
+    return selectedPhrase;
+  }, []);
+
   // Guard: Check if session has valid cards
   if (!session?.cards || session.cards.length === 0) {
     return (
@@ -92,7 +139,8 @@ export default function TrainingSession({
     
     // Update backend SRS
     try {
-      await fetch(`${BACKEND_BASE}/update_drill_result`, {
+      const backendUrl = BACKEND_BASE.replace(/\/$/, "");
+      await fetch(`${backendUrl}/update_drill_result`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -172,17 +220,20 @@ export default function TrainingSession({
 
         if (correct) {
           setFeedback({ type: "correct", message: "✅ Correct!" });
+          // Keep the move on the board - don't reset
           setTimeout(() => {
             handleDrillComplete(true, spentS, hintsUsed);
           }, 1200);
           return;
         }
 
-        setFeedback({ type: "incorrect", message: "❌ Not quite. Try again, or give up to reveal the solution." });
+        // Wrong move: show feedback, then push back after 2 seconds
+        setFeedback({ type: "incorrect", message: "❌ Not quite - retry" });
         setTimeout(() => {
           setFeedback({ type: "", message: "" });
+          // Reset board to original position (push back)
           onExternalSetPosition?.(drillFen, drillOrientation);
-        }, 1800);
+        }, 2000);
       } catch (e) {
         setFeedback({ type: "incorrect", message: "❌ Invalid move. Try again." });
         setTimeout(() => setFeedback({ type: "", message: "" }), 1200);
@@ -331,6 +382,11 @@ export default function TrainingSession({
               {feedback.message && <div className={`drill-feedback ${feedback.type}`}>{feedback.message}</div>}
 
               {showHint && !showSolution && (
+                <div className="drill-hint">
+                  <h4>💡 Hint:</h4>
+                  <p>{generateDeterministicHint(currentDrill) || currentDrill?.hint || "Look for the best move in this position."}</p>
+                </div>
+              )} (
                 <div className="drill-hint">{currentDrill?.hint || "No hint available for this position."}</div>
               )}
 
@@ -338,7 +394,7 @@ export default function TrainingSession({
                 {!showSolution && !feedback.message && (
                   <>
                     <button onClick={handleShowHint} className="hint-btn" disabled={showHint}>
-                      {showHint ? `💡 ${currentDrill?.hint || "No hint available"}` : "Show Hint"}
+                      {showHint ? "💡 Hint shown" : "Show Hint"}
                     </button>
                     <button onClick={handleGiveUp} className="solution-btn">
                       Give up (show solution)
