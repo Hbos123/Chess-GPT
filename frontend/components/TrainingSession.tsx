@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Chess } from "chess.js";
 import TrainingDrill from "./TrainingDrill";
 import { getBackendBase } from "@/lib/backendBase";
@@ -30,6 +31,7 @@ export default function TrainingSession({
   const BACKEND_BASE = getBackendBase();
   const FEEDBACK_TOAST_MS = 3000;
   const WRONG_RESET_MS = 2000;
+  const [mounted, setMounted] = useState(false);
   const [currentDrillIndex, setCurrentDrillIndex] = useState(0);
   const [results, setResults] = useState<any[]>([]);
   const [isComplete, setIsComplete] = useState(false);
@@ -43,6 +45,9 @@ export default function TrainingSession({
   useEffect(() => {
     resultsRef.current = results;
   }, [results]);
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   // External-board drill state (kept in TrainingSession so we can remove the mini board).
   const [hintLevel, setHintLevel] = useState(0);
@@ -429,11 +434,14 @@ export default function TrainingSession({
       </div>
 
       {/* Always-visible feedback (shows even if you're on the Chat sub-tab) */}
-      {feedback.message && (
-        <div className={`drill-feedback toast ${feedback.type}`} aria-live="polite">
-          {feedback.message}
-        </div>
-      )}
+      {mounted && feedback.message
+        ? createPortal(
+            <div className={`drill-feedback toast ${feedback.type}`} aria-live="polite">
+              {feedback.message}
+            </div>,
+            document.body
+          )
+        : null}
 
       {activeTab === 'training' && (
         <div className="training-content">
