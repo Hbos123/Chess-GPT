@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useMemo, useRef } from "react";
 import { Chessboard } from "react-chessboard";
+import type { PromotionPieceOption } from "react-chessboard/dist/chessboard/types";
 import { Chess } from "chess.js";
 import type { Square } from "chess.js";
 import type { AnnotationArrow, AnnotationHighlight } from "@/types";
@@ -105,11 +106,29 @@ export default function Board({
   }
 
   function onPromotionPieceSelect(
-    piece?: "q" | "r" | "b" | "n",
+    piece?: PromotionPieceOption,
     promoteFromSquare?: Square,
     promoteToSquare?: Square
   ): boolean {
     if (!promotionSquare || !piece) {
+      setPromotionSquare(null);
+      return false;
+    }
+
+    // Convert PromotionPieceOption (e.g., "wQ", "bR") to chess.js format (e.g., "q", "r")
+    const promotionMap: Record<PromotionPieceOption, "q" | "r" | "b" | "n"> = {
+      "wQ": "q",
+      "wR": "r",
+      "wN": "n",
+      "wB": "b",
+      "bQ": "q",
+      "bR": "r",
+      "bN": "n",
+      "bB": "b",
+    };
+    
+    const chessJsPromotion = promotionMap[piece];
+    if (!chessJsPromotion) {
       setPromotionSquare(null);
       return false;
     }
@@ -121,7 +140,7 @@ export default function Board({
       const move = game.move({
         from: fromSquare,
         to: toSquare,
-        promotion: piece,
+        promotion: chessJsPromotion,
       });
 
       if (move === null) {
@@ -133,7 +152,7 @@ export default function Board({
       game.undo();
 
       // Notify parent
-      onMove(promotionSquare.from, promotionSquare.to, piece);
+      onMove(promotionSquare.from, promotionSquare.to, chessJsPromotion);
       setPromotionSquare(null);
       return true;
     } catch (e) {
@@ -143,8 +162,17 @@ export default function Board({
   }
   
   // Internal handler for our custom promotion dialog buttons
+  // Converts lowercase chess.js format to PromotionPieceOption format
   function handleCustomPromotionSelect(piece: "q" | "r" | "b" | "n") {
-    onPromotionPieceSelect(piece);
+    if (!promotionSquare) return;
+    
+    // Determine the color based on the promotion square (rank 8 = white, rank 1 = black)
+    const isWhite = promotionSquare.to[1] === "8";
+    const promotionPiece: PromotionPieceOption = isWhite
+      ? (piece === "q" ? "wQ" : piece === "r" ? "wR" : piece === "b" ? "wB" : "wN")
+      : (piece === "q" ? "bQ" : piece === "r" ? "bR" : piece === "b" ? "bB" : "bN");
+    
+    onPromotionPieceSelect(promotionPiece);
   }
 
   // Convert arrows to compatible format
