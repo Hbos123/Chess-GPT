@@ -14752,6 +14752,13 @@ Provide 2-3 sentences of natural language commentary explaining why this deviati
                       const reviewCount = composition.review || 0;
                       
                       let description = `🎯 Your ${mode} session is ready!\n\n`;
+                      
+                      // Generic intro explaining what drills are
+                      description += `🧩 **What this is:**\n`;
+                      description += `• A series of short puzzles pulled from your own games\n`;
+                      description += `• Some come from *your* mistakes, others from *your opponent's* missed chances\n`;
+                      description += `• Play your moves on the main board — you'll get instant right/wrong feedback (wrong moves snap back)\n\n`;
+                      
                       description += `📊 **Session Overview:**\n`;
                       description += `• ${cardCount} position${cardCount !== 1 ? 's' : ''} to practice\n`;
                       if (newCount > 0) description += `• ${newCount} new position${newCount !== 1 ? 's' : ''}\n`;
@@ -14926,6 +14933,13 @@ Provide 2-3 sentences of natural language commentary explaining why this deviati
                       const reviewCount = composition.review || 0;
                       
                       let description = `🎯 Your ${mode} session is ready!\n\n`;
+                      
+                      // Generic intro explaining what drills are
+                      description += `🧩 **What this is:**\n`;
+                      description += `• A series of short puzzles pulled from your own games\n`;
+                      description += `• Some come from *your* mistakes, others from *your opponent's* missed chances\n`;
+                      description += `• Play your moves on the main board — you'll get instant right/wrong feedback (wrong moves snap back)\n\n`;
+                      
                       description += `📊 **Session Overview:**\n`;
                       description += `• ${cardCount} position${cardCount !== 1 ? 's' : ''} to practice\n`;
                       if (newCount > 0) description += `• ${newCount} new position${newCount !== 1 ? 's' : ''}\n`;

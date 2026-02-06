@@ -228,7 +228,7 @@ export default function TrainingSession({
           // Keep the move on the board - don't reset
           setTimeout(() => {
             handleDrillComplete(true, spentS, hintsUsed);
-          }, 1500);
+          }, 2000);
           return;
         }
 
@@ -358,6 +358,13 @@ export default function TrainingSession({
         </button>
       </div>
 
+      {/* Always-visible feedback (shows even if you're on the Chat sub-tab) */}
+      {feedback.message && (
+        <div className={`drill-feedback ${feedback.type}`} aria-live="polite" style={{ marginTop: '1rem', marginBottom: '1rem' }}>
+          {feedback.message}
+        </div>
+      )}
+
       {activeTab === 'training' && (
         <div className="training-content">
           {useExternalBoard ? (
@@ -383,8 +390,6 @@ export default function TrainingSession({
                   {String(currentDrill?.side_to_move || "white").toLowerCase() === "black" ? "Black" : "White"} to move
                 </div>
               </div>
-
-              {feedback.message && <div className={`drill-feedback ${feedback.type}`}>{feedback.message}</div>}
 
               {showHint && !showSolution && (
                 <div className="drill-hint">
