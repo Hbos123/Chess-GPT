@@ -39,7 +39,7 @@ export default function TrainingSession({
   }, [results]);
 
   // External-board drill state (kept in TrainingSession so we can remove the mini board).
-  const [showHint, setShowHint] = useState(false);
+  const [hintLevel, setHintLevel] = useState(0);
   const [hintsUsed, setHintsUsed] = useState(0);
   const [feedback, setFeedback] = useState<{ type: "correct" | "incorrect" | ""; message: string }>({
     type: "",
@@ -57,52 +57,71 @@ export default function TrainingSession({
     return stm === "black" ? "black" : "white";
   }, [currentDrill?.side_to_move]);
 
-  // Generate deterministic hint based on drill tags
-  const generateDeterministicHint = useCallback((drill: any): string => {
-    if (!drill) return "Look for the best move in this position.";
-    
-    // Get tags from various sources
-    const tags = drill.tags || [];
-    const tagTransitions = drill.tag_transitions || {};
-    const tagsAfterBest = tagTransitions.gained || [];
-    const tagsMissed = tagTransitions.missed || [];
-    
-    // Priority: tags that would be gained by the best move
-    const relevantTags = tagsAfterBest.length > 0 ? tagsAfterBest : (tagsMissed.length > 0 ? tagsMissed : tags);
-    
-    if (relevantTags.length === 0) {
-      return drill.hint || "Look for the best move in this position.";
-    }
-    
-    // Format tag names for display
-    const formatTagName = (tag: string): string => {
-      return tag
-        .replace(/tag\./g, "")
-        .replace(/\./g, " ")
-        .replace(/_/g, " ")
-        .split(" ")
-        .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-        .join(" ");
-    };
-    
-    // Generate hint phrase
-    const primaryTag = relevantTags[0];
-    const tagDisplay = formatTagName(primaryTag);
-    
-    // Generate deterministic hint phrase
-    const hintPhrases = [
-      `Look for a move that ${tagDisplay.toLowerCase()}.`,
-      `Try to find a move that achieves ${tagDisplay.toLowerCase()}.`,
-      `Consider moves that ${tagDisplay.toLowerCase()}.`,
-      `The best move involves ${tagDisplay.toLowerCase()}.`,
-    ];
-    
-    // Deterministic selection based on tag hash
-    const tagHash = primaryTag.split("").reduce((acc: number, char: string) => acc + char.charCodeAt(0), 0);
-    const selectedPhrase = hintPhrases[tagHash % hintPhrases.length];
-    
-    return selectedPhrase;
+  const formatTagName = useCallback((tag: string): string => {
+    return String(tag || "")
+      .replace(/tag\./g, "")
+      .replace(/\./g, " ")
+      .replace(/_/g, " ")
+      .split(" ")
+      .filter(Boolean)
+      .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(" ");
   }, []);
+
+  // Deterministic, multi-step hints (deeper than just "do tag X")
+  const buildHintSteps = useCallback(
+    (drill: any): string[] => {
+      if (!drill) return ["Look for the best move in this position."];
+
+      const transitions = drill.tag_transitions || {};
+      const gained: string[] = Array.isArray(transitions.gained) ? transitions.gained : [];
+      const missed: string[] = Array.isArray(transitions.missed) ? transitions.missed : [];
+      const lost: string[] = Array.isArray(transitions.lost) ? transitions.lost : [];
+      const tags: string[] = Array.isArray(drill.tags) ? drill.tags : [];
+
+      // Priority: what the best move gains, then what was missed, then anything present.
+      const primaryTag = gained[0] || missed[0] || lost[0] || tags[0] || "";
+      const primaryDisplay = primaryTag ? formatTagName(primaryTag) : "";
+
+      const steps: string[] = [];
+
+      // Step 1: theme-oriented hint
+      if (primaryDisplay) {
+        const kind = gained[0] ? "create" : missed[0] ? "restore" : lost[0] ? "avoid losing" : "improve";
+        const phrasing = [
+          `Theme: ${primaryDisplay}. Try to ${kind} it with your move.`,
+          `Focus: ${primaryDisplay}. Find the move that helps you ${kind} it.`,
+          `Key idea: ${primaryDisplay}. Look for a move that lets you ${kind} it.`,
+        ];
+        const tagHash = primaryTag.split("").reduce((acc: number, char: string) => acc + char.charCodeAt(0), 0);
+        steps.push(phrasing[tagHash % phrasing.length]);
+      } else if (drill.hint) {
+        steps.push(String(drill.hint));
+      } else {
+        steps.push("Look for the best move in this position.");
+      }
+
+      // Step 2: surface a couple more cues from transitions (deterministic ordering)
+      const secondaryTags = [...gained.slice(0, 2), ...missed.slice(0, 2), ...lost.slice(0, 2)]
+        .filter(Boolean)
+        .slice(0, 3)
+        .map(formatTagName)
+        .filter(Boolean);
+      if (secondaryTags.length > 0) {
+        steps.push(`Secondary cues: ${secondaryTags.join(", ")}.`);
+      } else {
+        steps.push("Shortlist candidate moves and calculate 1–2 plies: checks, captures, and direct threats first.");
+      }
+
+      // Step 3: generic but useful search heuristic
+      steps.push("If nothing is forcing, improve your worst piece or address king safety / hanging pieces.");
+
+      return steps;
+    },
+    [formatTagName]
+  );
+
+  const hintSteps = useMemo(() => buildHintSteps(currentDrill), [buildHintSteps, currentDrill]);
 
   // Guard: Check if session has valid cards
   if (!session?.cards || session.cards.length === 0) {
@@ -182,7 +201,7 @@ export default function TrainingSession({
   useEffect(() => {
     if (!useExternalBoard) return;
     // Reset per-drill UI state
-    setShowHint(false);
+    setHintLevel(0);
     setHintsUsed(0);
     setFeedback({ type: "", message: "" });
     setShowSolution(false);
@@ -265,7 +284,7 @@ export default function TrainingSession({
   ]);
 
   const handleShowHint = () => {
-    setShowHint(true);
+    setHintLevel((lvl) => Math.min(lvl + 1, hintSteps.length));
     setHintsUsed((v) => v + 1);
   };
 
@@ -360,7 +379,7 @@ export default function TrainingSession({
 
       {/* Always-visible feedback (shows even if you're on the Chat sub-tab) */}
       {feedback.message && (
-        <div className={`drill-feedback ${feedback.type}`} aria-live="polite" style={{ marginTop: '1rem', marginBottom: '1rem' }}>
+        <div className={`drill-feedback toast ${feedback.type}`} aria-live="polite">
           {feedback.message}
         </div>
       )}
@@ -391,18 +410,18 @@ export default function TrainingSession({
                 </div>
               </div>
 
-              {showHint && !showSolution && (
+              {hintLevel > 0 && !showSolution && (
                 <div className="drill-hint">
-                  <h4>💡 Hint:</h4>
-                  <p>{generateDeterministicHint(currentDrill) || currentDrill?.hint || "Look for the best move in this position."}</p>
+                  <h4>💡 Hint {hintLevel}:</h4>
+                  <p>{hintSteps[Math.max(0, hintLevel - 1)] || currentDrill?.hint || "Look for the best move in this position."}</p>
                 </div>
               )}
 
               <div className="drill-actions">
                 {!showSolution && !feedback.message && (
                   <>
-                    <button onClick={handleShowHint} className="hint-btn" disabled={showHint}>
-                      {showHint ? "💡 Hint shown" : "Show Hint"}
+                    <button onClick={handleShowHint} className="hint-btn" disabled={hintLevel >= hintSteps.length}>
+                      {hintLevel <= 0 ? "Show Hint" : "Show next hint"}
                     </button>
                     <button onClick={handleGiveUp} className="solution-btn">
                       Give up (show solution)

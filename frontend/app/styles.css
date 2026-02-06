@@ -2679,6 +2679,35 @@ select {
   color: var(--danger-color);
 }
 
+/* Training right/wrong toast popup (used in TrainingSession) */
+.drill-feedback.toast {
+  position: fixed;
+  top: 84px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 9999;
+
+  padding: 12px 16px;
+  border-radius: 12px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+
+  color: #fff;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  backdrop-filter: blur(10px);
+}
+
+.drill-feedback.toast.correct {
+  background: rgba(16, 185, 129, 0.92);
+  border-color: rgba(16, 185, 129, 0.55);
+}
+
+.drill-feedback.toast.incorrect {
+  background: rgba(239, 68, 68, 0.92);
+  border-color: rgba(239, 68, 68, 0.55);
+}
+
 .drill-actions {
   display: flex;
   gap: 0.75rem;

@@ -14768,21 +14768,12 @@ Provide 2-3 sentences of natural language commentary explaining why this deviati
                       description += `• Use the main board on the left to play your moves\n`;
                       description += `• Each position will show you what was lost or missed\n`;
                       description += `• Find the best move to improve your pattern recognition\n`;
-                      description += `\nPress **Begin Drills** when you're ready to start!`;
+                      description += `\nStarting drills now…`;
                       
                       return description;
                     })(),
                     fen: baseFen,
                     tabId: newTabId,
-                  },
-                  {
-                    role: "button",
-                    content: "",
-                    buttonAction: "BEGIN_TRAINING_SESSION",
-                    buttonLabel: "Begin Drills",
-                    fen: baseFen,
-                    tabId: newTabId,
-                    meta: { buttonId: `btn-begin-${newTabId}` },
                   },
                 ]
               : [];
@@ -14797,8 +14788,8 @@ Provide 2-3 sentences of natural language commentary explaining why this deviati
                   : params.type === "lesson"
                     ? "Lesson"
                     : "Review"),
-              // Training sessions start in discuss mode with a Begin button.
-              tabType: hasTrainingSession ? "discuss" : (params.type || "review"),
+              // Training sessions start immediately in training mode.
+              tabType: hasTrainingSession ? "training" : (params.type || "review"),
               fen: baseFen,
               pgn: basePgn,
               game: new Chess(baseFen),
@@ -14817,7 +14808,7 @@ Provide 2-3 sentences of natural language commentary explaining why this deviati
               },
               analysisCache: {},
               moveHistory: [],
-              // Store the session; we’ll flip tabType to 'training' when user clicks Begin.
+              // Store the session.
               trainingSession: params.trainingSession || undefined
             };
 
@@ -14949,21 +14940,12 @@ Provide 2-3 sentences of natural language commentary explaining why this deviati
                       description += `• Use the main board on the left to play your moves\n`;
                       description += `• Each position will show you what was lost or missed\n`;
                       description += `• Find the best move to improve your pattern recognition\n`;
-                      description += `\nPress **Begin Drills** when you're ready to start!`;
+                      description += `\nStarting drills now…`;
                       
                       return description;
                     })(),
                     fen: baseFen,
                     tabId: newTabId,
-                  },
-                  {
-                    role: "button",
-                    content: "",
-                    buttonAction: "BEGIN_TRAINING_SESSION",
-                    buttonLabel: "Begin Drills",
-                    fen: baseFen,
-                    tabId: newTabId,
-                    meta: { buttonId: `btn-begin-${newTabId}` },
                   },
                 ]
               : [];
@@ -14972,8 +14954,8 @@ Provide 2-3 sentences of natural language commentary explaining why this deviati
               ...createDefaultTab(tabs.length + 1),
               id: newTabId,
               name: params.title || (params.type === 'training' ? 'Training' : params.type === 'lesson' ? 'Lesson' : 'Review'),
-              // Training sessions start in discuss mode with a Begin button.
-              tabType: hasTrainingSession ? "discuss" : (params.type || "review"),
+              // Training sessions start immediately in training mode.
+              tabType: hasTrainingSession ? "training" : (params.type || "review"),
               fen: baseFen,
               pgn: basePgn,
               game: new Chess(baseFen),
@@ -14992,7 +14974,7 @@ Provide 2-3 sentences of natural language commentary explaining why this deviati
               },
               analysisCache: {},
               moveHistory: [],
-              // Store the session; we’ll flip tabType to 'training' when user clicks Begin.
+              // Store the session.
               trainingSession: params.trainingSession || undefined
             };
             
