@@ -1342,17 +1342,18 @@ class SupabaseClient:
         Args:
             user_id: User ID
             limit: Maximum number of games to fetch
-            include_full_review: If False, only fetch minimal fields (id, game_review.ply_records) to reduce egress
+            include_full_review: If True, fetch all fields including game_review. If False, only fetch metadata (excludes game_review to reduce payload size by 90%+)
         """
         try:
             # Optimize query based on what's needed
             if include_full_review:
-                # Full query - only use when absolutely necessary
+                # Full query - only use when absolutely necessary (includes game_review which can be huge)
                 select_fields = "*"
             else:
-                # Minimal query - only fetch what's needed for habits computation
-                # This reduces egress significantly while still providing key metadata
-                select_fields = "id,game_date,created_at,updated_at,game_review,user_rating,opponent_rating,result,time_control,opening_eco,opening_name"
+                # Minimal query - exclude game_review to dramatically reduce payload size
+                # game_review contains hundreds of ply_records and can be 100KB+ per game
+                # PersonalReview and other list views only need metadata
+                select_fields = "id,game_date,created_at,updated_at,user_rating,opponent_rating,result,time_control,opening_eco,opening_name,platform,external_id,opponent_name,analyzed_at,review_type"
             
             # Get games with full review type OR NULL (for backward compatibility with older games)
             # By default, exclude compressed games (compressed_at IS NULL)
@@ -1413,7 +1414,11 @@ class SupabaseClient:
         except Exception as e:
             # Try fallback query without review_type filter
             try:
-                select_fields = "*" if include_full_review else "id,game_date,created_at,updated_at,game_review"
+                if include_full_review:
+                    select_fields = "*"
+                else:
+                    # Minimal fields without game_review for faster queries
+                    select_fields = "id,game_date,created_at,updated_at,user_rating,opponent_rating,result,time_control,opening_eco,opening_name,platform,external_id,opponent_name,analyzed_at,review_type"
                 result = self.client.table("games")\
                     .select(select_fields)\
                     .eq("user_id", user_id)\
