@@ -2682,20 +2682,28 @@ select {
 /* Training right/wrong toast popup (used in TrainingSession) */
 .drill-feedback.toast {
   position: fixed;
-  top: 84px;
+  top: 16px;
   left: 50%;
   transform: translateX(-50%);
   z-index: 9999;
 
-  padding: 12px 16px;
-  border-radius: 12px;
+  width: min(820px, calc(100vw - 24px));
+  padding: 14px 18px;
+  border-radius: 14px;
   font-weight: 700;
   letter-spacing: 0.2px;
+  text-align: center;
+  display: flex;
+  justify-content: center;
+  align-items: center;
 
   color: #fff;
   box-shadow: 0 12px 30px rgba(0, 0, 0, 0.35);
   border: 1px solid rgba(255, 255, 255, 0.12);
   backdrop-filter: blur(10px);
+
+  /* Banner-like pop animation */
+  animation: drillToastIn 160ms ease-out;
 }
 
 .drill-feedback.toast.correct {
@@ -2706,6 +2714,17 @@ select {
 .drill-feedback.toast.incorrect {
   background: rgba(239, 68, 68, 0.92);
   border-color: rgba(239, 68, 68, 0.55);
+}
+
+@keyframes drillToastIn {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
 }
 
 .drill-actions {
