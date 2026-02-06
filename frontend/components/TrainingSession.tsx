@@ -140,7 +140,7 @@ export default function TrainingSession({
     // Update backend SRS
     try {
       const backendUrl = BACKEND_BASE.replace(/\/$/, "");
-      await fetch(`${backendUrl}/update_drill_result`, {
+      const response = await fetch(`${backendUrl}/update_drill_result`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -151,8 +151,13 @@ export default function TrainingSession({
           hints_used: hintsUsed
         })
       });
+      
+      if (!response.ok) {
+        console.warn(`[TrainingSession] update_drill_result returned ${response.status}:`, await response.text().catch(() => ""));
+      }
     } catch (err) {
-      console.error("Failed to update drill result:", err);
+      // Silently fail - SRS update is not critical for drill functionality
+      console.warn("[TrainingSession] Failed to update drill result (non-critical):", err);
     }
     
     // Move to next drill or finish
@@ -219,16 +224,16 @@ export default function TrainingSession({
           (bestUci && playedUci && playedUci === bestUci) || (bestSan && playedSan && playedSan === bestSan);
 
         if (correct) {
-          setFeedback({ type: "correct", message: "✅ Correct!" });
+          setFeedback({ type: "correct", message: "✅ That move was right!" });
           // Keep the move on the board - don't reset
           setTimeout(() => {
             handleDrillComplete(true, spentS, hintsUsed);
-          }, 1200);
+          }, 1500);
           return;
         }
 
         // Wrong move: show feedback, then push back after 2 seconds
-        setFeedback({ type: "incorrect", message: "❌ Not quite - retry" });
+        setFeedback({ type: "incorrect", message: "❌ That move wasn't it - try again" });
         setTimeout(() => {
           setFeedback({ type: "", message: "" });
           // Reset board to original position (push back)
