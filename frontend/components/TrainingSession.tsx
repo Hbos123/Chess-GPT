@@ -42,12 +42,26 @@ export default function TrainingSession({
   const resetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const completeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const correctLockRef = useRef(false);
+  const drillFenRef = useRef<string>("");
+  const drillOrientationRef = useRef<"white" | "black">("white");
+  const bestUciRef = useRef<string>("");
+  const bestSanRef = useRef<string>("");
+  const hintsUsedRef = useRef<number>(0);
+  const showSolutionRef = useRef<boolean>(false);
+  const feedbackRef = useRef<{ type: "correct" | "incorrect" | ""; message: string }>({ type: "", message: "" });
+  const onExternalSetPositionRef = useRef<typeof onExternalSetPosition>(onExternalSetPosition);
+  const handleDrillCompleteRef = useRef<
+    ((correct: boolean, timeS: number, hintsUsed: number) => Promise<void>) | null
+  >(null);
   useEffect(() => {
     resultsRef.current = results;
   }, [results]);
   useEffect(() => {
     setMounted(true);
   }, []);
+  useEffect(() => {
+    onExternalSetPositionRef.current = onExternalSetPosition;
+  }, [onExternalSetPosition]);
 
   // External-board drill state (kept in TrainingSession so we can remove the mini board).
   const [hintLevel, setHintLevel] = useState(0);
@@ -58,6 +72,15 @@ export default function TrainingSession({
   });
   const [showSolution, setShowSolution] = useState(false);
   const startTimeRef = useRef<number>(Date.now());
+  useEffect(() => {
+    showSolutionRef.current = showSolution;
+  }, [showSolution]);
+  useEffect(() => {
+    hintsUsedRef.current = hintsUsed;
+  }, [hintsUsed]);
+  useEffect(() => {
+    feedbackRef.current = feedback;
+  }, [feedback]);
 
   const currentDrill = session?.cards?.[currentDrillIndex];
   const drillFen = useMemo(() => {
@@ -67,6 +90,13 @@ export default function TrainingSession({
     const stm = String(currentDrill?.side_to_move || "").toLowerCase();
     return stm === "black" ? "black" : "white";
   }, [currentDrill?.side_to_move]);
+  useEffect(() => {
+    drillFenRef.current = drillFen;
+    drillOrientationRef.current = drillOrientation;
+    // Update best move refs too (card schema varies by source)
+    bestUciRef.current = String(currentDrill?.best_move_uci || "").trim().toLowerCase();
+    bestSanRef.current = String(currentDrill?.best_move_san || "").trim().toLowerCase();
+  }, [drillFen, drillOrientation, currentDrill?.best_move_uci, currentDrill?.best_move_san]);
 
   const formatTagName = useCallback((tag: string): string => {
     return String(tag || "")
@@ -134,6 +164,14 @@ export default function TrainingSession({
 
   const hintSteps = useMemo(() => buildHintSteps(currentDrill), [buildHintSteps, currentDrill]);
 
+  const setFeedbackState = useCallback(
+    (next: { type: "correct" | "incorrect" | ""; message: string }) => {
+      feedbackRef.current = next;
+      setFeedback(next);
+    },
+    []
+  );
+
   const clearTimers = useCallback(() => {
     if (feedbackTimerRef.current) {
       clearTimeout(feedbackTimerRef.current);
@@ -156,13 +194,13 @@ export default function TrainingSession({
         clearTimeout(feedbackTimerRef.current);
         feedbackTimerRef.current = null;
       }
-      setFeedback({ type, message });
+      setFeedbackState({ type, message });
       feedbackTimerRef.current = setTimeout(() => {
-        setFeedback({ type: "", message: "" });
+        setFeedbackState({ type: "", message: "" });
         feedbackTimerRef.current = null;
       }, ttlMs);
     },
-    [FEEDBACK_TOAST_MS]
+    [FEEDBACK_TOAST_MS, setFeedbackState]
   );
 
   // Guard: Check if session has valid cards
@@ -233,6 +271,9 @@ export default function TrainingSession({
       }, 500);
     }
   }, [BACKEND_BASE, currentDrillIndex, onComplete, session.cards, username]);
+  useEffect(() => {
+    handleDrillCompleteRef.current = handleDrillComplete;
+  }, [handleDrillComplete]);
 
   const handleSkip = useCallback(() => {
     // Mark as incorrect skip
@@ -247,97 +288,83 @@ export default function TrainingSession({
     correctLockRef.current = false;
     setHintLevel(0);
     setHintsUsed(0);
-    setFeedback({ type: "", message: "" });
+    setFeedbackState({ type: "", message: "" });
     setShowSolution(false);
     startTimeRef.current = Date.now();
-    onExternalSetPosition?.(drillFen, drillOrientation);
+    onExternalSetPositionRef.current?.(drillFenRef.current, drillOrientationRef.current);
   }, [useExternalBoard, drillFen, drillOrientation, onExternalSetPosition, currentDrillIndex, clearTimers]);
 
   // Register a move handler so the main board can drive training validation.
-  useEffect(() => {
-    if (!useExternalBoard) return;
-    const handler = (from: string, to: string, promotion?: string) => {
+  const externalMoveHandler = useCallback(
+    (from: string, to: string, promotion?: string) => {
       // Never accept moves when solution is revealed, or after a correct move (until we advance).
-      if (showSolution || correctLockRef.current) return;
+      if (showSolutionRef.current || correctLockRef.current) return;
 
       // If user plays again while an incorrect/illegal banner is showing, replace it with the new outcome.
-      if (feedback.message && feedback.type !== "correct") {
-        // Cancel pending reset/clear timers so the new move fully takes over.
+      const fb = feedbackRef.current;
+      if (fb.message && fb.type !== "correct") {
         clearTimers();
-        setFeedback({ type: "", message: "" });
+        setFeedbackState({ type: "", message: "" });
       }
 
+      const baseFen = drillFenRef.current;
+      const orientation = drillOrientationRef.current;
+      const bestUci = bestUciRef.current;
+      const bestSan = bestSanRef.current;
+
       try {
-        const tmp = new Chess(drillFen);
+        const tmp = new Chess(baseFen);
         const move = tmp.move({ from, to, promotion: promotion as any });
         if (!move) {
           showFeedback("incorrect", "❌ Illegal move. Try again.", FEEDBACK_TOAST_MS);
-          // Reset board
-          onExternalSetPosition?.(drillFen, drillOrientation);
+          onExternalSetPositionRef.current?.(baseFen, orientation);
           return;
         }
 
-        // Show the played move briefly on the main board.
-        onExternalSetPosition?.(tmp.fen(), drillOrientation);
+        // Show the played move on the main board.
+        onExternalSetPositionRef.current?.(tmp.fen(), orientation);
 
         const spentS = (Date.now() - startTimeRef.current) / 1000;
 
-        const bestUci = String(currentDrill?.best_move_uci || "").trim().toLowerCase();
-        const bestSan = String(currentDrill?.best_move_san || "").trim().toLowerCase();
         const playedUci = `${String(move.from || "").toLowerCase()}${String(move.to || "").toLowerCase()}${String(
           move.promotion || ""
         ).toLowerCase()}`.trim();
         const playedSan = String(move.san || "").trim().toLowerCase();
 
-        const correct =
+        const isCorrect =
           (bestUci && playedUci && playedUci === bestUci) || (bestSan && playedSan && playedSan === bestSan);
 
-        if (correct) {
+        if (isCorrect) {
           correctLockRef.current = true;
           showFeedback("correct", "✅ Correct!", FEEDBACK_TOAST_MS);
-          // Keep the move on the board - advance after the banner has been visible long enough.
           completeTimerRef.current = setTimeout(() => {
-            handleDrillComplete(true, spentS, hintsUsed);
+            handleDrillCompleteRef.current?.(true, spentS, hintsUsedRef.current);
             completeTimerRef.current = null;
           }, FEEDBACK_TOAST_MS);
           return;
         }
 
-        // Wrong move: show feedback, then push back after 2 seconds
+        // Wrong move: show feedback, then push back after 2 seconds (but banner stays 3 seconds)
         showFeedback("incorrect", "❌ Not quite — retry.", FEEDBACK_TOAST_MS);
         resetTimerRef.current = setTimeout(() => {
-          // Reset board to original position (push back) while keeping banner visible for full TTL.
-          onExternalSetPosition?.(drillFen, drillOrientation);
+          onExternalSetPositionRef.current?.(baseFen, orientation);
           resetTimerRef.current = null;
         }, WRONG_RESET_MS);
       } catch (e) {
         showFeedback("incorrect", "❌ Invalid move. Try again.", FEEDBACK_TOAST_MS);
-        onExternalSetPosition?.(drillFen, drillOrientation);
+        onExternalSetPositionRef.current?.(baseFen, orientation);
       }
-    };
+    },
+    [clearTimers, setFeedbackState, showFeedback, FEEDBACK_TOAST_MS, WRONG_RESET_MS]
+  );
 
-    onRegisterExternalMoveHandler?.(handler);
+  useEffect(() => {
+    if (!useExternalBoard) return;
+    onRegisterExternalMoveHandler?.(externalMoveHandler);
     return () => {
       onRegisterExternalMoveHandler?.(null);
     };
-  }, [
-    useExternalBoard,
-    onRegisterExternalMoveHandler,
-    onExternalSetPosition,
-    drillFen,
-    drillOrientation,
-    currentDrill?.best_move_uci,
-    currentDrill?.best_move_san,
-    showSolution,
-    feedback.message,
-    feedback.type,
-    hintsUsed,
-    handleDrillComplete,
-    clearTimers,
-    showFeedback,
-    FEEDBACK_TOAST_MS,
-    WRONG_RESET_MS,
-  ]);
+  }, [useExternalBoard, onRegisterExternalMoveHandler, externalMoveHandler]);
 
   const handleShowHint = () => {
     setHintLevel((lvl) => Math.min(lvl + 1, hintSteps.length));
@@ -347,7 +374,7 @@ export default function TrainingSession({
   const handleGiveUp = () => {
     setShowSolution(true);
     const spentS = (Date.now() - startTimeRef.current) / 1000;
-    setFeedback({
+    setFeedbackState({
       type: "correct",
       message: `💡 Solution: ${currentDrill?.best_move_san || currentDrill?.best_move_uci || "—"}. ${currentDrill?.hint || ""}`,
     });

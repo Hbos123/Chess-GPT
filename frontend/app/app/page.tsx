@@ -1459,6 +1459,14 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
   const [showGameSetup, setShowGameSetup] = useState(false);
   const [isLegacyReviewing, setIsLegacyReviewing] = useState(false);
   const [showAuthModal, setShowAuthModal] = useState(false);
+
+  // Training sessions require the main board. If the user hides the dock mid-session, force it back open.
+  useEffect(() => {
+    if (activeTab?.tabType === "training" && activeTab?.trainingSession) {
+      if (!boardDockOpen) setBoardDockOpen(true);
+    }
+  }, [activeTab?.tabType, activeTab?.trainingSession, boardDockOpen]);
+
   const pendingOpeningLessonQueryRef = useRef<string | undefined>(undefined);
   const [pendingImage, setPendingImage] = useState<{ data: string; filename: string; mimeType: string } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -1570,11 +1578,16 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
     }
   }, [lessonMode]);
 
+  // Guard against stale async opening-lesson updates when users play quickly.
+  const openingVisualSeqRef = useRef(0);
+  const openingAutoSeqRef = useRef(0);
+
   const restoreOpeningLessonVisuals = useCallback(async (targetFen?: string) => {
     if (currentLesson?.type !== "opening" || !lessonMode) return;
     
     // Use provided FEN or fall back to state FEN
     const fenToUse = targetFen || fen;
+    const seq = ++openingVisualSeqRef.current;
     
     try {
       // Query the current position for candidate moves
@@ -1586,6 +1599,8 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
         return;
       }
       const analysis = await response.json();
+      // If a newer request started, ignore this result.
+      if (seq !== openingVisualSeqRef.current) return;
       const candidates = Array.isArray(analysis?.candidate_moves) ? analysis.candidate_moves : [];
       
       if (candidates.length === 0) {
@@ -1667,6 +1682,8 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
         .join("\n");
       
       const newSnapshot = { arrows, description };
+      // If a newer request started, ignore this result.
+      if (seq !== openingVisualSeqRef.current) return;
       setLessonCueSnapshot(newSnapshot);
       setLessonArrows(arrows);
       setLessonCueButtonActive(false);
@@ -1679,6 +1696,7 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
   const autoPlayOpeningResponse = useCallback(
     async (fenBeforeMove: string, playerMoveSan: string) => {
       if (!lessonMode || currentLesson?.type !== "opening") return;
+      const seq = ++openingAutoSeqRef.current;
       try {
         const boardAfterPlayer = new Chess(fenBeforeMove);
         const appliedMove = boardAfterPlayer.move(playerMoveSan);
@@ -1700,6 +1718,7 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
           throw new Error(`Server error: ${engineResponse.status}`);
         }
         const analysis = await engineResponse.json();
+        if (seq !== openingAutoSeqRef.current) return;
         const candidates = Array.isArray(analysis?.candidate_moves) ? analysis.candidate_moves : [];
         console.log(`[OPENING] Received ${candidates.length} candidate moves`);
         
@@ -1718,6 +1737,7 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
               );
               if (firstMoveResponse.ok) {
                 const firstMoveData = await firstMoveResponse.json();
+                if (seq !== openingAutoSeqRef.current) return;
                 // Add the queried move's popularity
                 if (firstMoveData.popularity != null) {
                   allExplorerMoves.set(firstMoveSan, firstMoveData.popularity);
@@ -1763,6 +1783,7 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
           console.warn("[OPENING] Failed to apply auto-response move:", bestMoveSan);
           return;
         }
+        if (seq !== openingAutoSeqRef.current) return;
 
         setFen(replyBoard.fen());
         setGame(replyBoard);
@@ -1954,7 +1975,9 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
         }
 
         addAssistantMessage(replyMessage);
-        await restoreOpeningLessonVisuals(replyBoard.fen());
+        if (seq === openingAutoSeqRef.current) {
+          await restoreOpeningLessonVisuals(replyBoard.fen());
+        }
       } catch (err: any) {
         console.error("[OPENING] Failed to auto-play response:", err);
         const errorMsg = err?.message || String(err);
@@ -1964,6 +1987,7 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
           addSystemMessage(`⚠️ Could not generate AI response: ${errorMsg}`);
         }
       } finally {
+        // Always clear "thinking" indicator, but keep our sequence guard for UI updates.
         setWaitingForEngine(false);
       }
     },
@@ -4603,61 +4627,7 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
     };
     if (typeof window !== 'undefined') {
       window.addEventListener('inlineBoardChanged', onInlineChanged as any);
-      
-      // Listen for confidence lesson events
-      const handleConfidenceLesson = (event: CustomEvent) => {
-        const lesson = event.detail;
-        console.log('📚 Confidence lesson received:', lesson);
-        
-        if (!lesson || !lesson.sections || lesson.sections.length === 0) {
-          addSystemMessage('No problematic lines found to create a lesson from.');
-          return;
-        }
-        
-        addSystemMessage(`🎓 Generated confidence lesson: ${lesson.title}`);
-        addAssistantMessage(`**${lesson.title}**\n\n${lesson.description}\n\nThis lesson contains ${lesson.total_steps} step(s) analyzing low-confidence lines from the confidence tree.`);
-        
-        // Convert confidence lesson format to match existing lesson system
-        const allPositions: any[] = [];
-        for (const section of lesson.sections) {
-          if (section.positions && Array.isArray(section.positions)) {
-            for (const pos of section.positions) {
-              allPositions.push({
-                fen: pos.position_fen,
-                objective: pos.objective || pos.explanation,
-                hints: pos.hints || [],
-                candidates: pos.candidates || [],
-                side: 'white', // Default, could be determined from FEN
-                difficulty: 'intermediate',
-                themes: ['confidence_analysis', 'line_evaluation']
-              });
-            }
-          }
-        }
-        
-        if (allPositions.length === 0) {
-          addSystemMessage('No positions found in the lesson.');
-          return;
-        }
-        
-        // Set up lesson state
-        setCurrentLesson({
-          plan: {
-            title: lesson.title,
-            description: lesson.description,
-            lesson_id: lesson.lesson_id || 'confidence-lesson'
-          },
-          positions: allPositions,
-          currentIndex: 0
-        });
-        
-        setLessonProgress({ current: 0, total: allPositions.length });
-        enterLessonMode();
-        
-        // Load first position
-        loadLessonPosition(allPositions[0], 0, allPositions.length);
-      };
-      
+
       return () => window.removeEventListener('inlineBoardChanged', onInlineChanged as any);
     }
   }, [enterLessonMode]);
