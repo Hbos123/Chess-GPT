@@ -1,10 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 
-// Minimal bot gating:
-// - Redirect real users from "/" -> "/app"
-// - Serve lightweight "/" to bots by letting them hit the landing page
-// - Block the most expensive backend proxy routes for obvious crawler UAs
-
 function isObviousBot(ua: string): boolean {
   const s = (ua || "").toLowerCase();
   return (
@@ -13,7 +8,11 @@ function isObviousBot(ua: string): boolean {
     s.includes("lighthouse") ||
     s.includes("pagespeed") ||
     s.includes("crawler") ||
-    s.includes("spider")
+    s.includes("spider") ||
+    // Common bot tokens that may not include "crawler"/"spider"
+    s.includes("bot") ||
+    s.includes("googlebot") ||
+    s.includes("bingbot")
   );
 }
 
@@ -23,22 +22,15 @@ export function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
   // Block obvious bots from triggering expensive backend work through the proxy.
-  // (They can still hit "/", but the landing is cheap.)
+  // (They can still hit public pages like "/", but the landing is cheap.)
   if (bot && pathname.startsWith("/api/backend/board")) {
     return new NextResponse("Blocked", { status: 403 });
-  }
-
-  // Send real users into the app route. Bots stay on landing page.
-  if (pathname === "/" && !bot) {
-    const url = req.nextUrl.clone();
-    url.pathname = "/app";
-    return NextResponse.redirect(url);
   }
 
   return NextResponse.next();
 }
 
 export const config = {
-  matcher: ["/", "/api/backend/board/:path*"],
+  matcher: ["/api/backend/board/:path*"],
 };
 

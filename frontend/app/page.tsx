@@ -1,18 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect } from "react";
 
 export default function LandingPage() {
-  // For real users, immediately send them into the app.
-  // Bot/crawler traffic is handled in middleware (rewritten here or blocked).
-  useEffect(() => {
-    try {
-      if (typeof window !== "undefined") window.location.replace("/app");
-    } catch {
-      // ignore
-    }
-  }, []);
+  // IMPORTANT: do not auto-redirect to /app.
+  // Crawlers may execute client-side redirects, which can prevent indexing of "/".
 
   return (
     <main style={{ maxWidth: 880, margin: "0 auto", padding: "48px 20px", fontFamily: "system-ui" }}>

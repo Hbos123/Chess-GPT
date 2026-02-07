@@ -18,7 +18,6 @@ export default function robots(): MetadataRoute.Robots {
           '/chess-board/',
           '/live-board/',
           '/settings/',
-          '/_next/',
         ],
       },
     ],
