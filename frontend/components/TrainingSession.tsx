@@ -526,6 +526,7 @@ export default function TrainingSession({
             onSkip={handleSkip}
             currentIndex={currentDrillIndex}
             totalDrills={session.cards.length}
+            onFeedback={(type, message) => showFeedback(type, message, FEEDBACK_TOAST_MS)}
           />
           )}
         </div>

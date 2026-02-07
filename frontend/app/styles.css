@@ -2682,7 +2682,7 @@ select {
 /* Training right/wrong toast popup (used in TrainingSession) */
 .drill-feedback.toast {
   position: fixed;
-  top: 16px;
+  top: calc(env(safe-area-inset-top, 0px) + 12px);
   left: 50%;
   transform: translateX(-50%);
   z-index: 2147483647;

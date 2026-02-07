@@ -11,6 +11,8 @@ interface TrainingDrillProps {
   onSkip: () => void;
   currentIndex: number;
   totalDrills: number;
+  // Optional: allow parent (TrainingSession) to display a global banner/toast.
+  onFeedback?: (type: "correct" | "incorrect", message: string) => void;
 }
 
 export default function TrainingDrill({
@@ -18,7 +20,8 @@ export default function TrainingDrill({
   onComplete,
   onSkip,
   currentIndex,
-  totalDrills
+  totalDrills,
+  onFeedback,
 }: TrainingDrillProps) {
   const [showHint, setShowHint] = useState(false);
   const [hintsUsed, setHintsUsed] = useState(0);
@@ -118,6 +121,7 @@ export default function TrainingDrill({
       const move = tempGame.move({ from, to, promotion });
       
       if (!move) {
+        onFeedback?.("incorrect", "❌ Illegal move. Try again.");
         setFeedback({
           type: "incorrect",
           message: "❌ Invalid move. Try again."
@@ -136,12 +140,14 @@ export default function TrainingDrill({
       setDrillGame(tempGame);
       
       if (isCorrect) {
+        onFeedback?.("correct", "✅ Correct!");
         setFeedback({
           type: "correct",
           message: `✅ Correct!`,
         });
         setTimeout(() => onComplete(true, timeSpent, hintsUsed), 1500);
       } else {
+        onFeedback?.("incorrect", "❌ Not quite — retry.");
         setFeedback({
           type: "incorrect",
           message: `❌ Not quite. Try again, or give up to reveal the solution.`,
@@ -154,6 +160,7 @@ export default function TrainingDrill({
         }, 2000);
       }
     } catch (e) {
+      onFeedback?.("incorrect", "❌ Invalid move. Try again.");
       setFeedback({
         type: "incorrect",
         message: "❌ Invalid move. Try again."
@@ -174,6 +181,7 @@ export default function TrainingDrill({
         const moveObj = tempGame.move(move);
         
         if (!moveObj) {
+          onFeedback?.("incorrect", "❌ Invalid move notation. Try again.");
           setFeedback({
             type: "incorrect",
             message: "❌ Invalid move notation. Try again."
@@ -191,12 +199,14 @@ export default function TrainingDrill({
         setDrillGame(tempGame);
         
         if (isCorrect) {
+          onFeedback?.("correct", "✅ Correct!");
           setFeedback({
             type: "correct",
             message: `✅ Correct!`,
           });
           setTimeout(() => onComplete(true, timeSpent, hintsUsed), 1500);
         } else {
+          onFeedback?.("incorrect", "❌ Not quite — retry.");
           setFeedback({
             type: "incorrect",
             message: `❌ Not quite. Try again, or give up to reveal the solution.`,
@@ -208,6 +218,7 @@ export default function TrainingDrill({
           }, 2000);
         }
       } catch (e) {
+        onFeedback?.("incorrect", "❌ Invalid move notation. Try again.");
         setFeedback({
           type: "incorrect",
           message: "❌ Invalid move notation. Try again."
@@ -226,6 +237,7 @@ export default function TrainingDrill({
 
   const handleShowSolution = () => {
     setShowSolution(true);
+    onFeedback?.("correct", `💡 Solution: ${drill.best_move_san || drill.best_move_uci || "—"}.`);
     setFeedback({
       type: "correct",
       message: `💡 Solution: ${drill.best_move_san}. ${drill.hint || ""}`

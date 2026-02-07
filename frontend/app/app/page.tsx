@@ -7234,10 +7234,8 @@ Examples:
 
   async function handleMove(from: string, to: string, promotion?: string) {
     console.log("🎯 handleMove called:", { from, to, promotion, mode, llmEnabled });
-    if (waitingForEngine) return;
-
     // Training sessions: the main left board becomes the drill input UI.
-    // If a training handler is registered, delegate and do NOT update move tree/PGN.
+    // IMPORTANT: Drills must NOT be blocked by waitingForEngine (that flag is used by lessons/play loops).
     try {
       if (activeTab?.tabType === "training" && activeTab?.trainingSession && trainingMoveHandlerRef.current) {
         trainingMoveHandlerRef.current(from, to, promotion);
@@ -7246,6 +7244,8 @@ Examples:
     } catch {
       // ignore
     }
+
+    if (waitingForEngine) return;
 
     try {
       // Create a new game from current FEN to ensure state sync
