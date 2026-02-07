@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import "./styles.css";
 import Providers from "./providers";
+import { Analytics } from "@vercel/analytics/next";
 
 // Get canonical URL (the one that doesn't redirect)
 const getCanonicalUrl = (): string => {
@@ -67,6 +68,7 @@ export default function RootLayout({
         <div className="app-root">
           <Providers>{children}</Providers>
         </div>
+        <Analytics />
       </body>
     </html>
   );
