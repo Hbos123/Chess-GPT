@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import TrainingSession from "@/components/TrainingSession";
 import { getBackendBase } from "@/lib/backendBase";
 
 const INITIAL_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
@@ -17,7 +16,6 @@ export default function RecentGamesTab({ userId, onStartTraining, onCreateNewTab
   const [displayedGames, setDisplayedGames] = useState<any[]>([]); // Start with empty array
   const [loading, setLoading] = useState(true); // Start with loading true
   const [loadingGameId, setLoadingGameId] = useState<string | null>(null);
-  const [trainingLesson, setTrainingLesson] = useState<any>(null);
   const [gamesToShow, setGamesToShow] = useState(5);
   const [hasMore, setHasMore] = useState(false); // Start with false, will be set based on actual data
   const backendBase = getBackendBase();
@@ -196,34 +194,6 @@ export default function RecentGamesTab({ userId, onStartTraining, onCreateNewTab
       <div className="dashboard-loading">
         <div className="spinner"></div>
         <p>Loading recent games...</p>
-      </div>
-    );
-  }
-
-  // If training lesson is active, show it
-  if (trainingLesson) {
-    return (
-      <div className="recent-games-tab">
-        {trainingLesson.intro && (
-          <div className="training-intro" style={{
-            padding: '20px',
-            marginBottom: '20px',
-            backgroundColor: '#f5f5f5',
-            borderRadius: '8px',
-            border: '1px solid #ddd'
-          }}>
-            <p style={{ margin: 0, lineHeight: '1.6' }}>{trainingLesson.intro}</p>
-          </div>
-        )}
-        <TrainingSession
-          session={trainingLesson}
-          username={userId}
-          onComplete={(results) => {
-            console.log("Training session complete:", results);
-            setTrainingLesson(null);
-          }}
-          onClose={() => setTrainingLesson(null)}
-        />
       </div>
     );
   }

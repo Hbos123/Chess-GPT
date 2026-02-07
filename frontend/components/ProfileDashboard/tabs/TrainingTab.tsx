@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import TrainingSession from "@/components/TrainingSession";
 import { getBackendBase } from "@/lib/backendBase";
 
 interface TrainingTabProps {
@@ -45,7 +44,6 @@ export default function TrainingTab({ userId, backendBase, onCreateNewTab, onClo
   
   const [loading, setLoading] = useState(true); // Start with loading true
   const [suggestions, setSuggestions] = useState<DrillSuggestion[]>([]); // Start with empty array
-  const [activeSession, setActiveSession] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
   
   // Collapsible section states
@@ -457,24 +455,27 @@ export default function TrainingTab({ userId, backendBase, onCreateNewTab, onClo
 
       // Prefer launching into the main app tab system so the dashboard modal closes
       // and the user gets the full board/chat UX (insert/tools, etc).
-      if (onCreateNewTab) {
-        const firstFen =
-          session.cards?.[0]?.fen ||
-          "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
-
-        onCreateNewTab({
-          action: "new_tab",
-          title: `Training: ${suggestion.description}`,
-          type: "training",
-          fen: firstFen,
-          pgn: "",
-          trainingSession: session,
-        });
-        onCloseDashboard?.();
+      if (!onCreateNewTab) {
+        // Legacy embedded drills inside the dashboard cause confusion (board not wired, banners may not show).
+        // Force integrated tab flow only.
+        setError("Unable to start drills here (missing tab manager). Please refresh and start drills from the main app (/app).");
         return;
       }
 
-      setActiveSession(session);
+      const firstFen =
+        session.cards?.[0]?.fen ||
+        "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+
+      onCreateNewTab({
+        action: "new_tab",
+        title: `Training: ${suggestion.description}`,
+        type: "training",
+        fen: firstFen,
+        pgn: "",
+        trainingSession: session,
+      });
+      onCloseDashboard?.();
+      return;
     } catch (err: any) {
       console.error("[TrainingTab] Failed to start drill:", err);
       setError(err.message || "Failed to start drill");
@@ -482,28 +483,6 @@ export default function TrainingTab({ userId, backendBase, onCreateNewTab, onClo
       setLoading(false);
     }
   };
-
-  const handleSessionComplete = (results: any) => {
-    console.log("[TrainingTab] Session complete:", results);
-    setActiveSession(null);
-    // TEMPORARY: Commented out - reload suggestions to update stats
-    // loadDrillSuggestions();
-  };
-
-  const handleSessionClose = () => {
-    setActiveSession(null);
-  };
-
-  if (activeSession) {
-    return (
-      <TrainingSession
-        session={activeSession}
-        username={userId}
-        onComplete={handleSessionComplete}
-        onClose={handleSessionClose}
-      />
-    );
-  }
 
   // Group suggestions by category
   const suggestionsByCategory = {

@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import TrainingSession from "./TrainingSession";
 import { getBackendBase } from "@/lib/backendBase";
 
 interface TrainingManagerProps {
@@ -26,7 +25,6 @@ export default function TrainingManager({
   );
   const [trainingQuery, setTrainingQuery] = useState("");
   const [analyzedGames, setAnalyzedGames] = useState(initialAnalyzedGames || []);
-  const [session, setSession] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
   const [searchCriteria, setSearchCriteria] = useState<string[]>([]);
@@ -87,29 +85,30 @@ export default function TrainingManager({
       
       setProgressMessage("");
 
-      // Prefer launching into the main app tab system so this modal closes and the user gets the full UX.
-      if (onCreateNewTab) {
-        const firstFen =
-          sessionData?.cards?.[0]?.fen ||
-          sessionData?.cards?.[0]?.position?.fen ||
-          "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
-
-        onCreateNewTab({
-          action: "new_tab",
-          title: `Training: ${trainingQuery.trim().slice(0, 40)}`,
-          type: "training",
-          fen: firstFen,
-          pgn: "",
-          trainingSession: sessionData,
-        });
-
-        // Close both this modal and its parent (Personal Review) if provided.
-        if (onCloseAll) onCloseAll();
-        else onClose();
+      // Force integrated tab flow only (embedded TrainingSession causes confusion / board not wired).
+      if (!onCreateNewTab) {
+        setError("Unable to start drills here (missing tab manager). Please refresh and start drills from the main app (/app).");
         return;
       }
 
-      setSession(sessionData);
+      const firstFen =
+        sessionData?.cards?.[0]?.fen ||
+        sessionData?.cards?.[0]?.position?.fen ||
+        "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+
+      onCreateNewTab({
+        action: "new_tab",
+        title: `Training: ${trainingQuery.trim().slice(0, 40)}`,
+        type: "training",
+        fen: firstFen,
+        pgn: "",
+        trainingSession: sessionData,
+      });
+
+      // Close both this modal and its parent (Personal Review) if provided.
+      if (onCloseAll) onCloseAll();
+      else onClose();
+      return;
     } catch (err) {
       console.error("Training generation error:", err);
       setError("Failed to generate training. Check backend logs.");
@@ -117,27 +116,6 @@ export default function TrainingManager({
       setIsLoading(false);
     }
   };
-
-  const handleSessionComplete = (results: any) => {
-    console.log("Session complete:", results);
-    setSession(null);
-    setTrainingQuery("");
-  };
-
-  if (session) {
-    return (
-      <div className="training-manager-modal-overlay" onClick={onClose}>
-        <div className="training-manager-modal" onClick={(e) => e.stopPropagation()}>
-          <TrainingSession
-            session={session}
-            username={username}
-            onComplete={handleSessionComplete}
-            onClose={() => setSession(null)}
-          />
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div className="training-manager-modal-overlay" onClick={onClose}>
@@ -224,7 +202,7 @@ export default function TrainingManager({
             </div>
           )}
           
-          {searchCriteria.length > 0 && !isLoading && !session && (
+          {searchCriteria.length > 0 && !isLoading && (
             <div className="criteria-info">
               <h4>🔍 Search Criteria Used:</h4>
               <ul>
