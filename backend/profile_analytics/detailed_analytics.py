@@ -9,10 +9,42 @@ from collections import defaultdict, Counter
 import statistics
 import math
 from datetime import datetime as dt
+import re
 
 
 class DetailedAnalyticsAggregator:
     """Aggregates detailed analytics from game reviews."""
+
+    _SQUARE_RE = re.compile(r"\b([a-h][1-8])\b", re.IGNORECASE)
+    _LINE_RE = re.compile(r"\b([a-h][1-8])\s*[-–]\s*([a-h][1-8])\b", re.IGNORECASE)
+
+    def _canonicalize_tag_label(self, tag: str) -> str:
+        """
+        Canonicalize tag labels for aggregation so drill sets aren't hyper-specific.
+
+        Examples:
+        - "Piece Overworked D4" -> "Piece Overworked"
+        - "Pawn Passed H2" -> "Pawn Passed"
+        - "Diagonal Open C2-A4" -> "Diagonal Open"
+        - "Color Hole E6" -> "Color Hole"
+        """
+        if not isinstance(tag, str):
+            return ""
+        t = tag.strip()
+        if not t:
+            return ""
+
+        # Normalize dash variants
+        t = t.replace("–", "-")
+
+        # If there's a trailing line like "C2-A4", drop it.
+        # We only drop if it appears at the end to avoid mangling tags where squares matter in the middle.
+        t = re.sub(r"\s+\b[a-h][1-8]\s*-\s*[a-h][1-8]\b\s*$", "", t, flags=re.IGNORECASE).strip()
+
+        # If there's a single trailing square like "D4", drop it.
+        t = re.sub(r"\s+\b[a-h][1-8]\b\s*$", "", t, flags=re.IGNORECASE).strip()
+
+        return t
     
     def _player_color(self, game: Dict, game_review: Dict) -> str:
         """
@@ -941,14 +973,18 @@ class DetailedAnalyticsAggregator:
                     tag_name_lower = tag.strip().lower()
                     # Skip quality indicator tags - they're not positional features
                     if tag_name_lower not in QUALITY_TAGS:
-                        tag_names.add(tag)
+                        canon = self._canonicalize_tag_label(tag)
+                        if canon:
+                            tag_names.add(canon)
                 elif isinstance(tag, dict):
                     tag_name = tag.get("tag_name") or tag.get("name") or tag.get("tag", "")
                     if tag_name:
                         tag_name_lower = tag_name.strip().lower()
                         # Skip quality indicator tags
                         if tag_name_lower not in QUALITY_TAGS:
-                            tag_names.add(tag_name)
+                            canon = self._canonicalize_tag_label(tag_name)
+                            if canon:
+                                tag_names.add(canon)
             return tag_names
 
         # Resolve a stable player_color for summary/trend formatting.
@@ -1075,13 +1111,17 @@ class DetailedAnalyticsAggregator:
                     if isinstance(tag, str):
                         tag_name_lower = tag.strip().lower()
                         if tag_name_lower not in QUALITY_TAGS:
-                            tag_names.add(tag)
+                            canon = self._canonicalize_tag_label(tag)
+                            if canon:
+                                tag_names.add(canon)
                     elif isinstance(tag, dict):
                         tag_name = tag.get("tag_name") or tag.get("name") or tag.get("tag", "")
                         if tag_name:
                             tag_name_lower = tag_name.strip().lower()
                             if tag_name_lower not in QUALITY_TAGS:
-                                tag_names.add(tag_name)
+                                canon = self._canonicalize_tag_label(tag_name)
+                                if canon:
+                                    tag_names.add(canon)
                 return tag_names
             
             # Track last 3 games for trend calculation

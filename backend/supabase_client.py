@@ -2214,6 +2214,200 @@ class SupabaseClient:
         except Exception as e:
             print(f"Error searching positions: {e}")
             return []
+
+    def _any_tag_startswith(self, tags: Any, prefix: str) -> bool:
+        if not prefix:
+            return False
+        p = str(prefix).strip().lower()
+        if not p:
+            return False
+        if not isinstance(tags, list):
+            return False
+        for t in tags:
+            if isinstance(t, str) and t.strip().lower().startswith(p):
+                return True
+        return False
+
+    def search_user_positions_by_tag_prefix(
+        self,
+        user_id: str,
+        transition_type: str,
+        tag_prefix: str,
+        error_side_filter: Optional[str] = None,
+        min_cp_loss: Optional[float] = None,
+        error_categories: Optional[List[str]] = None,
+        prioritize_fresh: bool = False,
+        limit: int = 20,
+        scan_page_size: int = 400,
+        scan_max_pages: int = 25,
+    ) -> List[Dict]:
+        """
+        Prefix-match tag transitions against tag arrays to support aggregation like:
+        "Piece Overworked" matching "Piece Overworked D4", "Piece Overworked F8", etc.
+
+        Tries an RPC if available; falls back to a paginated scan + Python filtering
+        (so existing accounts still work even if migrations haven't been applied).
+        """
+        transition_type = str(transition_type or "").strip().lower()
+        if transition_type not in ("gained", "lost", "missed"):
+            return []
+        prefix = str(tag_prefix or "").strip()
+        if not prefix:
+            return []
+
+        # 1) Fast path: RPC (if present in the DB)
+        try:
+            payload = {
+                "p_user_id": user_id,
+                "p_transition": transition_type,
+                "p_prefix": prefix,
+                "p_error_side": None if not error_side_filter else error_side_filter,
+                "p_min_cp_loss": min_cp_loss,
+                "p_limit": int(limit),
+                "p_prioritize_fresh": bool(prioritize_fresh),
+            }
+            res = self.client.rpc("search_positions_by_tag_prefix_v1", payload).execute()
+            if res and getattr(res, "data", None):
+                return list(res.data)
+        except Exception as e:
+            # Safe fallback below
+            print(f"[search_user_positions_by_tag_prefix] RPC unavailable/failed, falling back to scan: {e}")
+
+        # 2) Fallback: scan pages ordered by cp_loss desc, filter in Python.
+        #    We keep this reasonably bounded to avoid huge scans.
+        base = self.client.table("positions").select("*").eq("user_id", user_id)
+        if error_categories:
+            base = base.in_("error_category", error_categories)
+        if error_side_filter:
+            if error_side_filter == "__null__":
+                base = base.is_("error_side", "null")
+            else:
+                base = base.eq("error_side", error_side_filter)
+        if min_cp_loss is not None:
+            base = base.gte("cp_loss", min_cp_loss)
+
+        # We need last_used_in_drill for freshness ordering; fetch enough then sort.
+        matched: List[Dict] = []
+        offset = 0
+        for _ in range(int(scan_max_pages)):
+            q = base.order("cp_loss", desc=True).range(offset, offset + int(scan_page_size) - 1)
+            r = q.execute()
+            rows = r.data if r and r.data else []
+            if not rows:
+                break
+
+            for pos in rows:
+                if transition_type == "gained":
+                    if self._any_tag_startswith(pos.get("tags_gained", []), prefix):
+                        matched.append(pos)
+                elif transition_type == "lost":
+                    if self._any_tag_startswith(pos.get("tags_lost", []), prefix):
+                        matched.append(pos)
+                else:
+                    # missed: present in tags_after_best, but NOT present in tags_after_played
+                    in_best = self._any_tag_startswith(pos.get("tags_after_best", []), prefix)
+                    in_played = self._any_tag_startswith(pos.get("tags_after_played", []), prefix)
+                    if in_best and not in_played:
+                        matched.append(pos)
+
+            # Stop early if we have plenty to sort and slice.
+            if len(matched) >= int(limit) * 5:
+                break
+            offset += int(scan_page_size)
+
+        if not matched:
+            return []
+
+        if prioritize_fresh:
+            from datetime import datetime
+            matched.sort(key=lambda p: (
+                p.get("last_used_in_drill") is not None,
+                p.get("last_used_in_drill") or datetime.min.replace(tzinfo=None),
+                -(p.get("cp_loss") or 0),
+            ))
+        else:
+            matched.sort(key=lambda p: -(p.get("cp_loss") or 0))
+
+        return matched[: int(limit)]
+
+    def count_user_positions_by_tag_prefix(
+        self,
+        user_id: str,
+        transition_type: str,
+        tag_prefix: str,
+        error_side_filter: Optional[str] = None,
+        min_cp_loss: Optional[float] = None,
+        error_categories: Optional[List[str]] = None,
+        scan_page_size: int = 800,
+        scan_max_pages: int = 200,
+    ) -> Dict[str, int]:
+        """
+        Count positions matching a tag prefix transition. Uses RPC if present, otherwise
+        bounded scan fallback (may be slower on very large accounts, but works without schema changes).
+        """
+        transition_type = str(transition_type or "").strip().lower()
+        if transition_type not in ("gained", "lost", "missed"):
+            return {"count": 0}
+        prefix = str(tag_prefix or "").strip()
+        if not prefix:
+            return {"count": 0}
+
+        # 1) Fast path: RPC
+        try:
+            payload = {
+                "p_user_id": user_id,
+                "p_transition": transition_type,
+                "p_prefix": prefix,
+                "p_error_side": None if not error_side_filter else error_side_filter,
+                "p_min_cp_loss": min_cp_loss,
+            }
+            res = self.client.rpc("count_positions_by_tag_prefix_v1", payload).execute()
+            if res and getattr(res, "data", None) is not None:
+                # Supabase returns scalar as [{"count": N}] in some configs; handle both.
+                if isinstance(res.data, list) and res.data and isinstance(res.data[0], dict) and "count" in res.data[0]:
+                    return {"count": int(res.data[0]["count"] or 0)}
+                if isinstance(res.data, dict) and "count" in res.data:
+                    return {"count": int(res.data["count"] or 0)}
+        except Exception as e:
+            print(f"[count_user_positions_by_tag_prefix] RPC unavailable/failed, falling back to scan: {e}")
+
+        # 2) Fallback: scan ids + tag arrays and count.
+        base = self.client.table("positions").select(
+            "id,tags_gained,tags_lost,tags_after_best,tags_after_played"
+        ).eq("user_id", user_id)
+        if error_categories:
+            base = base.in_("error_category", error_categories)
+        if error_side_filter:
+            if error_side_filter == "__null__":
+                base = base.is_("error_side", "null")
+            else:
+                base = base.eq("error_side", error_side_filter)
+        if min_cp_loss is not None:
+            base = base.gte("cp_loss", min_cp_loss)
+
+        total = 0
+        offset = 0
+        for _ in range(int(scan_max_pages)):
+            q = base.order("cp_loss", desc=True).range(offset, offset + int(scan_page_size) - 1)
+            r = q.execute()
+            rows = r.data if r and r.data else []
+            if not rows:
+                break
+            for pos in rows:
+                if transition_type == "gained":
+                    if self._any_tag_startswith(pos.get("tags_gained", []), prefix):
+                        total += 1
+                elif transition_type == "lost":
+                    if self._any_tag_startswith(pos.get("tags_lost", []), prefix):
+                        total += 1
+                else:
+                    in_best = self._any_tag_startswith(pos.get("tags_after_best", []), prefix)
+                    in_played = self._any_tag_startswith(pos.get("tags_after_played", []), prefix)
+                    if in_best and not in_played:
+                        total += 1
+            offset += int(scan_page_size)
+
+        return {"count": int(total)}
     
     def count_user_positions(
         self,

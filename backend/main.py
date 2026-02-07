@@ -9547,60 +9547,75 @@ async def get_positions_by_filter(
             elif transition_type == "missed":
                 tags_missed_filter = filter_value
         
-        # Get total count of available positions
-        total_count_player = await asyncio.to_thread(
-            supabase_client.count_user_positions,
-            user_id=user_id,
-            error_side_filter="player",
-            tags_gained_filter=tags_gained_filter,
-            tags_lost_filter=tags_lost_filter,
-            tags_missed_filter=tags_missed_filter,
-            min_cp_loss=min_cp_loss,
-            error_categories=["blunder", "mistake"],
-            phase_filter=phase_filter,
-            opening_name_filter=opening_name_filter,
-            piece_type_filter=piece_type_filter,
-            time_bucket_filter=time_bucket_filter
-        )
-        total_count_null = await asyncio.to_thread(
-            supabase_client.count_user_positions,
-            user_id=user_id,
-            error_side_filter="__null__",
-            tags_gained_filter=tags_gained_filter,
-            tags_lost_filter=tags_lost_filter,
-            tags_missed_filter=tags_missed_filter,
-            min_cp_loss=min_cp_loss,
-            error_categories=["blunder", "mistake"],
-            phase_filter=phase_filter,
-            opening_name_filter=opening_name_filter,
-            piece_type_filter=piece_type_filter,
-            time_bucket_filter=time_bucket_filter
-        )
-        total_count = int(total_count_player.get("count", 0) or 0) + int(total_count_null.get("count", 0) or 0)
-        
-        # Query positions using enhanced search method (prioritizes unseen/oldest)
-        positions_player = await asyncio.to_thread(
-            supabase_client.search_user_positions,
-            user_id=user_id,
-            error_side_filter="player",
-            tags_gained_filter=tags_gained_filter,
-            tags_lost_filter=tags_lost_filter,
-            tags_missed_filter=tags_missed_filter,
-            min_cp_loss=min_cp_loss,
-            error_categories=["blunder", "mistake"],
-            limit=limit,
-            prioritize_fresh=True,  # Prioritize unseen/oldest positions
-            phase_filter=phase_filter,
-            opening_name_filter=opening_name_filter,
-            piece_type_filter=piece_type_filter,
-            time_bucket_filter=time_bucket_filter
-        )
-        positions = positions_player or []
-        # Backwards compatibility: include legacy rows with NULL error_side to fill the page.
-        if len(positions) < int(limit) and int(total_count_null.get("count", 0) or 0) > 0:
-            remaining = int(limit) - len(positions)
-            positions_null = await asyncio.to_thread(
-                supabase_client.search_user_positions,
+        # Tag transition filters: support prefix matching so aggregated tags work
+        # (e.g., "Piece Overworked" matches "Piece Overworked D4", "Piece Overworked F8", etc.)
+        if filter_type == "tag_transition" and transition_type:
+            tag_prefix = filter_value
+            total_count_player = await asyncio.to_thread(
+                supabase_client.count_user_positions_by_tag_prefix,
+                user_id=user_id,
+                transition_type=transition_type,
+                tag_prefix=tag_prefix,
+                error_side_filter="player",
+                min_cp_loss=min_cp_loss,
+                error_categories=["blunder", "mistake"],
+            )
+            total_count_null = await asyncio.to_thread(
+                supabase_client.count_user_positions_by_tag_prefix,
+                user_id=user_id,
+                transition_type=transition_type,
+                tag_prefix=tag_prefix,
+                error_side_filter="__null__",
+                min_cp_loss=min_cp_loss,
+                error_categories=["blunder", "mistake"],
+            )
+            total_count = int(total_count_player.get("count", 0) or 0) + int(total_count_null.get("count", 0) or 0)
+
+            positions_player = await asyncio.to_thread(
+                supabase_client.search_user_positions_by_tag_prefix,
+                user_id=user_id,
+                transition_type=transition_type,
+                tag_prefix=tag_prefix,
+                error_side_filter="player",
+                min_cp_loss=min_cp_loss,
+                error_categories=["blunder", "mistake"],
+                limit=limit,
+                prioritize_fresh=True,
+            )
+            positions = positions_player or []
+            if len(positions) < int(limit) and int(total_count_null.get("count", 0) or 0) > 0:
+                remaining = int(limit) - len(positions)
+                positions_null = await asyncio.to_thread(
+                    supabase_client.search_user_positions_by_tag_prefix,
+                    user_id=user_id,
+                    transition_type=transition_type,
+                    tag_prefix=tag_prefix,
+                    error_side_filter="__null__",
+                    min_cp_loss=min_cp_loss,
+                    error_categories=["blunder", "mistake"],
+                    limit=remaining,
+                    prioritize_fresh=True,
+                )
+                if positions_null:
+                    positions.extend(list(positions_null))
+        else:
+            # Non-tag filters use standard indexed queries
+            total_count_player = await asyncio.to_thread(
+                supabase_client.count_user_positions,
+                user_id=user_id,
+                error_side_filter="player",
+                tags_gained_filter=tags_gained_filter,
+                tags_lost_filter=tags_lost_filter,
+                tags_missed_filter=tags_missed_filter,
+                min_cp_loss=min_cp_loss,
+                error_categories=["blunder", "mistake"],
+                phase_filter=phase_filter,
+                opening_name_filter=opening_name_filter,
+                piece_type_filter=piece_type_filter,
+                time_bucket_filter=time_bucket_filter
+            )
+            total_count_null = await asyncio.to_thread(
+                supabase_client.count_user_positions,
                 user_id=user_id,
                 error_side_filter="__null__",
                 tags_gained_filter=tags_gained_filter,
@@ -9608,15 +9623,50 @@ async def get_positions_by_filter(
                 tags_missed_filter=tags_missed_filter,
                 min_cp_loss=min_cp_loss,
                 error_categories=["blunder", "mistake"],
-                limit=remaining,
-                prioritize_fresh=True,
                 phase_filter=phase_filter,
                 opening_name_filter=opening_name_filter,
                 piece_type_filter=piece_type_filter,
                 time_bucket_filter=time_bucket_filter
             )
-            if positions_null:
-                positions.extend(list(positions_null))
+            total_count = int(total_count_player.get("count", 0) or 0) + int(total_count_null.get("count", 0) or 0)
+            
+            positions_player = await asyncio.to_thread(
+                supabase_client.search_user_positions,
+                user_id=user_id,
+                error_side_filter="player",
+                tags_gained_filter=tags_gained_filter,
+                tags_lost_filter=tags_lost_filter,
+                tags_missed_filter=tags_missed_filter,
+                min_cp_loss=min_cp_loss,
+                error_categories=["blunder", "mistake"],
+                limit=limit,
+                prioritize_fresh=True,  # Prioritize unseen/oldest positions
+                phase_filter=phase_filter,
+                opening_name_filter=opening_name_filter,
+                piece_type_filter=piece_type_filter,
+                time_bucket_filter=time_bucket_filter
+            )
+            positions = positions_player or []
+            if len(positions) < int(limit) and int(total_count_null.get("count", 0) or 0) > 0:
+                remaining = int(limit) - len(positions)
+                positions_null = await asyncio.to_thread(
+                    supabase_client.search_user_positions,
+                    user_id=user_id,
+                    error_side_filter="__null__",
+                    tags_gained_filter=tags_gained_filter,
+                    tags_lost_filter=tags_lost_filter,
+                    tags_missed_filter=tags_missed_filter,
+                    min_cp_loss=min_cp_loss,
+                    error_categories=["blunder", "mistake"],
+                    limit=remaining,
+                    prioritize_fresh=True,
+                    phase_filter=phase_filter,
+                    opening_name_filter=opening_name_filter,
+                    piece_type_filter=piece_type_filter,
+                    time_bucket_filter=time_bucket_filter
+                )
+                if positions_null:
+                    positions.extend(list(positions_null))
         
         # Calculate average accuracy from positions (if available)
         avg_accuracy = None
