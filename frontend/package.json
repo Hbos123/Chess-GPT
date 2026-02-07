@@ -4,8 +4,8 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
-    "build:capacitor": "CAPACITOR_EXPORT=1 next build",
+    "build": "env -u NODE_ENV ./node_modules/.bin/next build --turbo --experimental-app-only",
+    "build:capacitor": "CAPACITOR_EXPORT=1 env -u NODE_ENV ./node_modules/.bin/next build --turbo --experimental-app-only",
     "start": "next start",
     "lint": "next lint",
     "test:e2e": "playwright test",

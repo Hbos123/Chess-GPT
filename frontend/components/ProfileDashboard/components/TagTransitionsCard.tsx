@@ -47,40 +47,39 @@ export default function TagTransitionsCard({ tagTransitions }: TagTransitionsCar
   const gained = tagTransitions?.gained || {};
   const lost = tagTransitions?.lost || {};
   
-  // Sort by significance_score first, then accuracy - highest and lowest
+  // Highest/lowest should be based on accuracy.
+  // Also: ensure we never show the same tag in both columns (common when data is sparse).
   const gainedEntries = Object.entries(gained).map(([tag, data]) => ({ tag, ...data }));
-  const highestGained = [...gainedEntries]
-    .sort((a, b) => {
-      const sigA = a.significance_score || 0;
-      const sigB = b.significance_score || 0;
-      if (sigA !== sigB) return sigB - sigA;
-      return b.accuracy - a.accuracy;
-    })
-    .slice(0, 5);
+  const gainedHighPool = [...gainedEntries].sort((a, b) => {
+    const acc = (b.accuracy || 0) - (a.accuracy || 0);
+    if (acc !== 0) return acc;
+    return (b.significance_score || 0) - (a.significance_score || 0);
+  });
+  const highestGained = gainedHighPool.slice(0, 5);
+  const highestGainedSet = new Set(highestGained.map((e) => e.tag));
   const lowestGained = [...gainedEntries]
+    .filter((e) => !highestGainedSet.has(e.tag))
     .sort((a, b) => {
-      const sigA = a.significance_score || 0;
-      const sigB = b.significance_score || 0;
-      if (sigA !== sigB) return sigB - sigA;
-      return a.accuracy - b.accuracy;
+      const acc = (a.accuracy || 0) - (b.accuracy || 0);
+      if (acc !== 0) return acc;
+      return (b.significance_score || 0) - (a.significance_score || 0);
     })
     .slice(0, 5);
   
   const lostEntries = Object.entries(lost).map(([tag, data]) => ({ tag, ...data }));
-  const highestLost = [...lostEntries]
-    .sort((a, b) => {
-      const sigA = a.significance_score || 0;
-      const sigB = b.significance_score || 0;
-      if (sigA !== sigB) return sigB - sigA;
-      return b.accuracy - a.accuracy;
-    })
-    .slice(0, 5);
+  const lostHighPool = [...lostEntries].sort((a, b) => {
+    const acc = (b.accuracy || 0) - (a.accuracy || 0);
+    if (acc !== 0) return acc;
+    return (b.significance_score || 0) - (a.significance_score || 0);
+  });
+  const highestLost = lostHighPool.slice(0, 5);
+  const highestLostSet = new Set(highestLost.map((e) => e.tag));
   const lowestLost = [...lostEntries]
+    .filter((e) => !highestLostSet.has(e.tag))
     .sort((a, b) => {
-      const sigA = a.significance_score || 0;
-      const sigB = b.significance_score || 0;
-      if (sigA !== sigB) return sigB - sigA;
-      return a.accuracy - b.accuracy;
+      const acc = (a.accuracy || 0) - (b.accuracy || 0);
+      if (acc !== 0) return acc;
+      return (b.significance_score || 0) - (a.significance_score || 0);
     })
     .slice(0, 5);
   

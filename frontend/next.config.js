@@ -1,5 +1,6 @@
 /** @type {import('next').NextConfig} */
 const webpack = require('webpack');
+const path = require('path');
 
 const nextConfig = {
   reactStrictMode: true,
@@ -78,8 +79,11 @@ const nextConfig = {
     ];
   },
   // Use webpack explicitly since we have custom webpack config
-  // Add empty turbopack config to silence Next.js 16 warning
-  turbopack: {},
+  // Pin Turbopack root so Next doesn't infer the monorepo root (multiple lockfiles),
+  // which can break builds with missing manifests under `frontend/.next`.
+  turbopack: {
+    root: path.resolve(__dirname),
+  },
   webpack: (config, { isServer }) => {
     if (!isServer) {
       // Prevent node built-ins from breaking browser bundles

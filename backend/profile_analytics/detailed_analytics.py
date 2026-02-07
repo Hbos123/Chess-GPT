@@ -27,6 +27,8 @@ class DetailedAnalyticsAggregator:
         - "Pawn Passed H2" -> "Pawn Passed"
         - "Diagonal Open C2-A4" -> "Diagonal Open"
         - "Color Hole E6" -> "Color Hole"
+        - "tag.diagonal.open.f7-h5" -> "tag.diagonal.open"
+        - "tag.color.hole.dark.f1" -> "tag.color.hole.dark"
         """
         if not isinstance(tag, str):
             return ""
@@ -36,6 +38,12 @@ class DetailedAnalyticsAggregator:
 
         # Normalize dash variants
         t = t.replace("–", "-")
+
+        # Dot-style tags (most of our system tags): strip final ".<square>" or ".<square>-<square>"
+        # so the UI buckets on the concept, not the specific square/line.
+        if t.lower().startswith("tag."):
+            t = re.sub(r"\.[a-h][1-8]\s*-\s*[a-h][1-8]\s*$", "", t, flags=re.IGNORECASE).strip()
+            t = re.sub(r"\.[a-h][1-8]\s*$", "", t, flags=re.IGNORECASE).strip()
 
         # If there's a trailing line like "C2-A4", drop it.
         # We only drop if it appears at the end to avoid mangling tags where squares matter in the middle.
@@ -840,14 +848,20 @@ class DetailedAnalyticsAggregator:
             }
         """
         def extract_tag_names(tags):
+            # Must use the same canonicalization as the main transition aggregator,
+            # otherwise the per-day trend series won't match the aggregated keys.
             tag_names = set()
             for tag in tags:
                 if isinstance(tag, str):
-                    tag_names.add(tag)
+                    canon = self._canonicalize_tag_label(tag)
+                    if canon:
+                        tag_names.add(canon)
                 elif isinstance(tag, dict):
                     tag_name = tag.get("tag_name") or tag.get("name") or tag.get("tag", "")
                     if tag_name:
-                        tag_names.add(tag_name)
+                        canon = self._canonicalize_tag_label(tag_name)
+                        if canon:
+                            tag_names.add(canon)
             return tag_names
         
         # Group transitions by game date
