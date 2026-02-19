@@ -174,27 +174,38 @@ export default function ProfileDashboard({ onClose, initialTab = 'overview', onC
     return () => clearInterval(interval);
   }, [user?.id, backendBase, profileStatus?.state, isUnpaid]);
 
-  // Background prefetch analytics when component mounts
+  // Background warm-up for detailed analytics.
+  // IMPORTANT: defer this work so opening the Profile modal isn't slowed down by
+  // competing requests/compute. This does not change functionality (tabs still
+  // fetch their own data); it only reduces redundant load.
   useEffect(() => {
     if (!user?.id || !backendBase || isUnpaid) return;
-    
-    // Background prefetch - don't wait for it, just start it
-    const prefetchInBackground = async () => {
+    let cancelled = false;
+    let timeoutId: any = null;
+
+    const warm = async () => {
+      if (cancelled) return;
       try {
         const baseUrl = backendBase.replace(/\/$/, "");
-        // Prefetch both endpoints in parallel
-        await Promise.allSettled([
-          fetch(`${baseUrl}/profile/analytics/${user.id}`, { cache: 'no-store' }),
-          fetch(`${baseUrl}/profile/analytics/${user.id}/detailed`, { cache: 'no-store' })
-        ]);
-      } catch (e) {
-        // Silently fail - this is just prefetching
-        console.debug("[ProfileDashboard] Background prefetch failed:", e);
+        await fetch(`${baseUrl}/profile/analytics/${user.id}/detailed`, { cache: "no-store" });
+      } catch {
+        // non-fatal; this is best-effort warmup
       }
     };
-    
-    // Start prefetch immediately
-    prefetchInBackground();
+
+    // Prefer idle time; fallback to a short delay.
+    // @ts-ignore - requestIdleCallback not in TS lib by default.
+    if (typeof window !== "undefined" && typeof (window as any).requestIdleCallback === "function") {
+      // @ts-ignore
+      (window as any).requestIdleCallback(() => warm(), { timeout: 2500 });
+    } else {
+      timeoutId = setTimeout(() => warm(), 1500);
+    }
+
+    return () => {
+      cancelled = true;
+      if (timeoutId) clearTimeout(timeoutId);
+    };
   }, [user?.id, backendBase, isUnpaid]);
 
   useEffect(() => {

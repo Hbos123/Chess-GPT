@@ -8118,16 +8118,35 @@ async def get_detailed_analytics(user_id: str):
                 print(f"⚠️ [DETAILED_ANALYTICS_ENDPOINT] No games found for user_id: {user_id}")
                 from profile_analytics.detailed_analytics import DetailedAnalyticsAggregator
                 aggregator = DetailedAnalyticsAggregator()
-                return aggregator._empty_analytics()
+                return aggregator._empty_analytics(), 0
             
             print(f"📚 [DETAILED_ANALYTICS_ENDPOINT] Found {len(games)} games for user_id: {user_id}")
             
             from profile_analytics.detailed_analytics import DetailedAnalyticsAggregator
             aggregator = DetailedAnalyticsAggregator()
-            return aggregator.aggregate(games)
+            return aggregator.aggregate(games), len(games)
         
         # Run in thread pool to avoid blocking
-        detailed_analytics = await asyncio.to_thread(fetch_and_aggregate)
+        detailed_analytics, games_count = await asyncio.to_thread(fetch_and_aggregate)
+
+        # Write-through cache so subsequent fetches are fast (do not block response).
+        # Safe even if the table/migration isn't present yet; _save_* handles missing table.
+        try:
+            if games_count and hasattr(supabase_client, "_save_detailed_analytics_cache"):
+                async def _persist_cache():
+                    try:
+                        await asyncio.to_thread(
+                            supabase_client._save_detailed_analytics_cache,
+                            user_id,
+                            detailed_analytics,
+                            int(games_count),
+                        )
+                    except Exception:
+                        pass
+
+                asyncio.create_task(_persist_cache())
+        except Exception:
+            pass
         
         print(f"✅ [DETAILED_ANALYTICS_ENDPOINT] Returning computed detailed analytics for user_id: {user_id}")
         return detailed_analytics
