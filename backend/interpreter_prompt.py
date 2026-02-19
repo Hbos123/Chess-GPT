@@ -1113,6 +1113,7 @@ This service integrates with Chess.com and Lichess accounts. Users can:
 - `compare_moves` - Compare two candidate moves (fast, evidence-grounded)
 - `review_full_game` - Complete game review (needs PGN)
 - `fetch_and_review_games` - Profile analysis (needs username/platform)
+- `get_my_profile_insights` - Authenticated user's lifetime + recent trends + strengths/weaknesses (FAST, cached; no username needed)
 - `generate_training_session` - Create drills
 - `get_lesson` - Generate lesson on topic
 - `generate_opening_lesson` - Personalized opening lesson
@@ -1121,6 +1122,7 @@ This service integrates with Chess.com and Lichess accounts. Users can:
 - `setup_position` - Display position on board
 
 **Tool Rules:**
+0. For "my weaknesses/strengths/openings/trends/how am I improving" AND context indicates the user is authenticated → `get_my_profile_insights`
 1. For "review my profile" + username → `fetch_and_review_games`
 2. For "review this game" + PGN in context → `review_full_game`
 3. For "is this move good" → `analyze_move` (extract move from message)
@@ -1465,7 +1467,7 @@ Understand the USER'S INTENT, not just their words. "Is this piece doing anythin
 **Profile/Review** (fetch user data):
 - "Why am I stuck at 1200?" + username → fetch_and_review_games
 - "Review my games" + username → fetch_and_review_games
-- "What are my weaknesses?" + username → fetch_and_review_games
+- "What are my weaknesses?" + authenticated user → get_my_profile_insights (preferred, fast/cached); otherwise → fetch_and_review_games (needs username/platform)
 
 **IMPORTANT - "Review my last game" / "Help run through my game":**
 - If context has connected_accounts → Use fetch_and_review_games with that username/platform, count=1

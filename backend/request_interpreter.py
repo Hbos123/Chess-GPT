@@ -214,6 +214,60 @@ class RequestInterpreter:
         
         return moves, cleaned_message
 
+    def _is_profile_insights_query(self, message: str, context: Dict[str, Any]) -> bool:
+        """
+        Heuristic: user is asking for personal strengths/weaknesses/trends.
+        We use this to avoid 'needs clarification' dead-ends when the interpreter output is
+        malformed or low-confidence, but we *do* have an authenticated user.
+        """
+        try:
+            if not context.get("authenticated") or not context.get("user_id"):
+                return False
+        except Exception:
+            return False
+
+        msg = (message or "").strip().lower()
+        if not msg:
+            return False
+
+        keywords = (
+            "weakness", "weaknesses",
+            "strength", "strengths",
+            "trend", "trends",
+            "improv",  # improve / improving / improvement
+            "mistake", "mistakes",
+            "blunder", "blunders",
+            "recent",
+            "opening", "openings",
+            "profile", "analytics", "stats",
+        )
+        return any(k in msg for k in keywords)
+
+    def _build_profile_insights_fallback_plan(self, message: str) -> OrchestrationPlan:
+        """
+        Build a deterministic plan that uses get_my_profile_insights.
+        This is intentionally small and reliable (no need for username/platform).
+        """
+        plan = build_chat_plan(simple=False, topic="Personal profile insights")
+        plan.mode = Mode.REVIEW
+        plan.mode_confidence = max(plan.mode_confidence or 0.0, 0.85)
+        plan.skip_tools = False
+        plan.needs_clarification = False
+        plan.clarification_question = ""
+        plan.tool_sequence = [
+            ToolCall(name="get_my_profile_insights", arguments={"include_trends": True, "top_n": 5})
+        ]
+        plan.response_guidelines.style = ResponseStyle.STRUCTURED
+        plan.response_guidelines.include_sections = ["strengths", "weaknesses", "trends", "next_steps"]
+        plan.user_intent_summary = "User wants personal weaknesses/strengths and trends"
+        plan.system_prompt_additions = (
+            "User is asking about their personal strengths/weaknesses/trends. "
+            "Use the get_my_profile_insights tool output as the primary evidence. "
+            "Be concise and actionable."
+        )
+        plan.understanding_confidence = max(getattr(plan, "understanding_confidence", 0.0) or 0.0, 0.8)
+        return plan
+
     def _normalize_fen_for_cache(self, fen: Optional[str]) -> str:
         """Normalize FEN for cache keys (strip move counters)."""
         if not fen or not isinstance(fen, str):
@@ -1954,6 +2008,8 @@ Output ONLY valid JSON:"""
                     plan = OrchestrationPlan.from_dict(plan_json)
                 except Exception as parse_error:
                     print(f"   ⚠️ Failed to parse plan structure: {parse_error}")
+                    if self._is_profile_insights_query(message, context):
+                        return self._build_profile_insights_fallback_plan(message)
                     return self._build_clarification_plan(message, "Had trouble understanding that request")
                 
                 # Validate understanding confidence - force clarification if low but not set
@@ -2270,6 +2326,11 @@ Output ONLY valid JSON:"""
         
         # If interpreter said low confidence but didn't ask for clarification, fix that
         if plan.understanding_confidence < CONFIDENCE_THRESHOLD and not plan.needs_clarification:
+            # Special-case: authenticated personal analytics queries should NOT get stuck
+            # in a clarification loop. We can answer deterministically via get_my_profile_insights.
+            if self._is_profile_insights_query(message, context):
+                return self._build_profile_insights_fallback_plan(message)
+
             print(f"   ⚠️ Low confidence ({plan.understanding_confidence:.1%}) but no clarification - forcing clarification")
             
             # Build a clarification question based on the intent summary
