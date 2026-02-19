@@ -587,6 +587,44 @@ TOOL_GET_TRAINING_STATS = {
     }
 }
 
+# ============================================================================
+# PERSONAL ANALYTICS (AUTHENTICATED)
+# ============================================================================
+
+TOOL_GET_MY_PROFILE_INSIGHTS = {
+    "type": "function",
+    "function": {
+        "name": "get_my_profile_insights",
+        "description": (
+            "Fetch the authenticated user's PERSONAL analytics (strengths/weaknesses, openings, trends) "
+            "from cached backend data. Use when the user asks about 'my weaknesses', 'my strengths', "
+            "'my openings', 'my analytics', 'how am I improving', or 'what should I train'. "
+            "Does NOT accept a user_id argument; it always uses the authenticated user in context."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "top_n": {
+                    "type": "integer",
+                    "description": "How many top items to return per category (default 5).",
+                    "default": 5
+                },
+                "include_trends": {
+                    "type": "boolean",
+                    "description": "Include recent-vs-lifetime trend summary when available (default true).",
+                    "default": True
+                },
+                "min_opening_games": {
+                    "type": "integer",
+                    "description": "Minimum sample size for opening strengths/weaknesses (default 5).",
+                    "default": 5
+                }
+            },
+            "required": []
+        }
+    }
+}
+
 TOOL_SAVE_POSITION = {
     "type": "function",
     "function": {
@@ -954,6 +992,7 @@ ALL_TOOLS = [
     TOOL_GET_GAME_DETAILS,
     TOOL_QUERY_POSITIONS,
     TOOL_GET_TRAINING_STATS,
+    TOOL_GET_MY_PROFILE_INSIGHTS,
     TOOL_SAVE_POSITION,
     TOOL_CREATE_COLLECTION,
     TOOL_SETUP_POSITION,
@@ -968,7 +1007,7 @@ ALL_TOOLS = [
 # Tool categories for selective availability
 ANALYSIS_TOOLS = [TOOL_ANALYZE_POSITION, TOOL_ANALYZE_MOVE, TOOL_COMPARE_MOVES, TOOL_REVIEW_FULL_GAME, TOOL_EXTEND_BASELINE_INTUITION, TOOL_TREE_SEARCH]
 WORKFLOW_TOOLS = [TOOL_FETCH_AND_REVIEW_GAMES, TOOL_SELECT_GAMES, TOOL_GENERATE_TRAINING, TOOL_GET_LESSON, TOOL_GENERATE_OPENING_LESSON, TOOL_SET_AI_GAME, TOOL_ADD_PERSONAL_REVIEW_GRAPH]
-DATA_TOOLS = [TOOL_QUERY_GAMES, TOOL_GET_GAME_DETAILS, TOOL_QUERY_POSITIONS, TOOL_GET_TRAINING_STATS]
+DATA_TOOLS = [TOOL_QUERY_GAMES, TOOL_GET_GAME_DETAILS, TOOL_QUERY_POSITIONS, TOOL_GET_TRAINING_STATS, TOOL_GET_MY_PROFILE_INSIGHTS]
 WRITE_TOOLS = [TOOL_SAVE_POSITION, TOOL_CREATE_COLLECTION]
 INVESTIGATION_TOOLS = [
     TOOL_INVESTIGATE, 

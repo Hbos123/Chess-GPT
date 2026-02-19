@@ -158,6 +158,7 @@ class ToolExecutor:
         openai_client,
         llm_router=None,
         game_window_manager=None,
+        profile_analytics_engine=None,
         # Optional injected callbacks (preferred). If omitted, we fall back to importing,
         # but note: when backend is launched via `python main.py`, importing `main`
         # creates a *second module copy* (module name `main` vs `__main__`) and will
@@ -176,6 +177,7 @@ class ToolExecutor:
         self.openai_client = openai_client
         self.llm_router = llm_router
         self.game_window_manager = game_window_manager
+        self.profile_analytics_engine = profile_analytics_engine
         
         # Initialize Personal Review System managers
         if supabase_client:
@@ -258,6 +260,8 @@ class ToolExecutor:
                 return self._query_positions(arguments, context)
             elif tool_name == "get_training_stats":
                 return self._get_training_stats(arguments)
+            elif tool_name == "get_my_profile_insights":
+                return await self._get_my_profile_insights(arguments, context)
             elif tool_name == "save_position":
                 return self._save_position(arguments, context)
             elif tool_name == "create_collection":
@@ -2299,6 +2303,224 @@ Return ONLY valid JSON in this exact format:
             "message": "Training stats available after Supabase integration",
             "note": "Currently tracking in memory only"
         }
+
+    async def _get_my_profile_insights(self, args: Dict, context: Optional[Dict] = None) -> Dict:
+        """
+        Fetch a compact, LLM-friendly summary of the authenticated user's profile analytics.
+        Cache-first:
+        - Uses ProfileAnalyticsEngine.get_full_analytics (1h in-memory cache + in-flight dedupe)
+        - Uses detailed_analytics_cache when available for fast opening/tag/time-bucket detail
+        """
+        try:
+            context = context or {}
+            user_id = context.get("user_id")
+            authenticated = bool(context.get("authenticated")) and bool(user_id)
+            if not authenticated:
+                return {"error": "Authentication required to access personal analytics."}
+
+            top_n = args.get("top_n", 5)
+            try:
+                top_n = int(top_n)
+            except Exception:
+                top_n = 5
+            top_n = max(3, min(10, top_n))
+
+            include_trends = args.get("include_trends", True)
+            include_trends = bool(include_trends)
+
+            min_opening_games = args.get("min_opening_games", 5)
+            try:
+                min_opening_games = int(min_opening_games)
+            except Exception:
+                min_opening_games = 5
+            min_opening_games = max(2, min(20, min_opening_games))
+
+            analytics = None
+            if self.profile_analytics_engine is not None:
+                analytics = await self.profile_analytics_engine.get_full_analytics(user_id)
+            else:
+                analytics = {}
+
+            # Try to fetch detailed analytics cache (fast); do not compute here.
+            detailed = None
+            detailed_meta = {}
+            if self.supabase_client is not None and getattr(self.supabase_client, "client", None) is not None:
+                def _fetch_detailed_cache():
+                    try:
+                        res = (
+                            self.supabase_client.client.table("detailed_analytics_cache")
+                            .select("analytics_data,games_count,computed_at")
+                            .eq("user_id", user_id)
+                            .maybe_single()
+                            .execute()
+                        )
+                        return res.data if res and getattr(res, "data", None) else None
+                    except Exception:
+                        return None
+
+                cached = await asyncio.to_thread(_fetch_detailed_cache)
+                if isinstance(cached, dict):
+                    detailed = cached.get("analytics_data") if isinstance(cached.get("analytics_data"), dict) else None
+                    detailed_meta = {
+                        "games_count": cached.get("games_count"),
+                        "computed_at": cached.get("computed_at"),
+                    }
+
+            lifetime = analytics.get("lifetime_stats") if isinstance(analytics, dict) else {}
+            strength = analytics.get("strength_profile") if isinstance(analytics, dict) else {}
+            patterns = analytics.get("patterns") if isinstance(analytics, dict) else {}
+            rolling = analytics.get("rolling_window") if isinstance(analytics, dict) else {}
+            deltas = analytics.get("deltas") if isinstance(analytics, dict) else {}
+
+            def _num(x):
+                try:
+                    return float(x)
+                except Exception:
+                    return None
+
+            # Opening highlights from detailed cache (preferred) if present.
+            opening_entries = []
+            try:
+                opening_detailed = (detailed or {}).get("opening_detailed") if isinstance(detailed, dict) else {}
+                if isinstance(opening_detailed, dict):
+                    for name, d in opening_detailed.items():
+                        if not isinstance(d, dict):
+                            continue
+                        freq = int(d.get("frequency") or 0)
+                        if freq < min_opening_games:
+                            continue
+                        opening_entries.append({
+                            "opening": str(name),
+                            "games": freq,
+                            "avg_accuracy": _num(d.get("avg_accuracy")),
+                            "win_rate": _num(d.get("win_rate")),
+                            "wins": int(d.get("wins") or 0),
+                            "losses": int(d.get("losses") or 0),
+                        })
+            except Exception:
+                opening_entries = []
+
+            opening_best = None
+            opening_worst = None
+            if opening_entries:
+                # Prefer accuracy as the primary axis.
+                opening_best = max(opening_entries, key=lambda o: (o.get("avg_accuracy") or -1, o.get("games") or 0))
+                opening_worst = min(opening_entries, key=lambda o: (o.get("avg_accuracy") if o.get("avg_accuracy") is not None else 9999, -(o.get("games") or 0)))
+
+            # Phase highlights (recent-60 from detailed cache if present)
+            phase_highlights = []
+            try:
+                phase = (detailed or {}).get("phase_analytics") if isinstance(detailed, dict) else {}
+                if isinstance(phase, dict):
+                    for k in ("opening", "middlegame", "endgame"):
+                        d = phase.get(k)
+                        if isinstance(d, dict):
+                            acc = _num(d.get("accuracy"))
+                            if acc is None:
+                                continue
+                            games = int((d.get("games_won") or 0) + (d.get("games_lost") or 0) + (d.get("games_drawn") or 0))
+                            phase_highlights.append({"phase": k, "accuracy": acc, "games": games})
+            except Exception:
+                phase_highlights = []
+
+            # Simple strength/weakness picks (do not change meaning; just pick top/bottom evidence)
+            strengths_out = []
+            weaknesses_out = []
+            if phase_highlights:
+                ph_sorted = sorted([p for p in phase_highlights if p.get("games", 0) > 0], key=lambda p: p.get("accuracy", 0.0))
+                if ph_sorted:
+                    weakest = ph_sorted[0]
+                    strongest = ph_sorted[-1]
+                    weaknesses_out.append({
+                        "kind": "phase",
+                        "label": weakest["phase"],
+                        "evidence": f"{weakest['accuracy']:.1f}% accuracy over {weakest.get('games', 0)} games (recent)",
+                    })
+                    strengths_out.append({
+                        "kind": "phase",
+                        "label": strongest["phase"],
+                        "evidence": f"{strongest['accuracy']:.1f}% accuracy over {strongest.get('games', 0)} games (recent)",
+                    })
+
+            if opening_best:
+                strengths_out.append({
+                    "kind": "opening",
+                    "label": opening_best.get("opening"),
+                    "evidence": f"{(opening_best.get('avg_accuracy') or 0.0):.1f}% avg accuracy over {opening_best.get('games')} games",
+                })
+            if opening_worst and opening_best and opening_worst.get("opening") != opening_best.get("opening"):
+                weaknesses_out.append({
+                    "kind": "opening",
+                    "label": opening_worst.get("opening"),
+                    "evidence": f"{(opening_worst.get('avg_accuracy') or 0.0):.1f}% avg accuracy over {opening_worst.get('games')} games",
+                })
+
+            # Trend summary (rolling window vs lifetime)
+            trends = None
+            if include_trends and isinstance(rolling, dict) and rolling.get("status") == "ok":
+                trends = {
+                    "recent_window_games": rolling.get("window"),
+                    "recent_avg_accuracy": rolling.get("avg_accuracy"),
+                    "recent_win_rate": rolling.get("win_rate"),
+                    "accuracy_delta": (deltas or {}).get("accuracy_delta"),
+                    "win_rate_delta": (deltas or {}).get("win_rate_delta"),
+                }
+
+            # Training suggestions (filters map to your existing UI drill filters)
+            suggestions = []
+            try:
+                # Prefer weakness phase as the top suggestion
+                if phase_highlights:
+                    weakest = sorted([p for p in phase_highlights if p.get("games", 0) > 0], key=lambda p: p.get("accuracy", 0.0))[0]
+                    suggestions.append({
+                        "category": "phase",
+                        "filter_type": "phase",
+                        "filter_value": weakest.get("phase"),
+                        "why": f"Lowest recent phase accuracy ({weakest.get('accuracy'):.1f}%).",
+                    })
+            except Exception:
+                pass
+
+            try:
+                if opening_worst:
+                    suggestions.append({
+                        "category": "opening",
+                        "filter_type": "opening",
+                        "filter_value": opening_worst.get("opening"),
+                        "why": "Underperforming opening vs your baseline.",
+                    })
+            except Exception:
+                pass
+
+            # Cap suggestions to 3
+            suggestions = suggestions[:3]
+
+            return {
+                "success": True,
+                "scope": "lifetime",
+                "user_id": user_id,
+                "lifetime_summary": {
+                    "total_games": lifetime.get("total_games") if isinstance(lifetime, dict) else None,
+                    "win_rate": lifetime.get("win_rate") if isinstance(lifetime, dict) else None,
+                    "average_accuracy": lifetime.get("average_accuracy") if isinstance(lifetime, dict) else None,
+                },
+                "strengths": strengths_out[:top_n],
+                "weaknesses": weaknesses_out[:top_n],
+                "openings": {
+                    "best": opening_best,
+                    "worst": opening_worst,
+                    "min_games": min_opening_games,
+                },
+                "trends": trends,
+                "training_suggestions": suggestions,
+                "sources": {
+                    "profile_analytics_cached": bool(self.profile_analytics_engine is not None),
+                    "detailed_cache": bool(detailed is not None),
+                    "detailed_cache_meta": detailed_meta,
+                },
+            }
+        except Exception as e:
+            return {"error": f"Failed to fetch profile insights: {str(e)}"}
     
     def _save_position(self, args: Dict, context: Dict) -> Dict:
         """Save a position to database"""
@@ -3915,6 +4137,74 @@ Write your response now based on the game data provided."""
             if annotations:
                 msg += f". {len(annotations)} moves have annotations"
             return msg
+
+        elif tool_name == "get_my_profile_insights":
+            lifetime = result.get("lifetime_summary") or {}
+            strengths = result.get("strengths") or []
+            weaknesses = result.get("weaknesses") or []
+            openings = result.get("openings") or {}
+            trends = result.get("trends")
+
+            parts = []
+            tg = lifetime.get("total_games")
+            wr = lifetime.get("win_rate")
+            acc = lifetime.get("average_accuracy")
+            header = "Profile insights"
+            if tg is not None:
+                header += f" (lifetime: {tg} games)"
+            parts.append(header + ".")
+
+            if acc is not None or wr is not None:
+                bits = []
+                if acc is not None:
+                    bits.append(f"avg accuracy {float(acc):.1f}%")
+                if wr is not None:
+                    bits.append(f"win rate {float(wr):.1f}%")
+                parts.append("Lifetime: " + ", ".join(bits) + ".")
+
+            if trends and isinstance(trends, dict) and trends.get("recent_window_games"):
+                bits = []
+                if trends.get("recent_avg_accuracy") is not None:
+                    bits.append(f"recent avg acc {float(trends['recent_avg_accuracy']):.1f}%")
+                if trends.get("accuracy_delta") is not None:
+                    bits.append(f"Δacc {float(trends['accuracy_delta']):+.1f}")
+                if trends.get("recent_win_rate") is not None:
+                    bits.append(f"recent win {float(trends['recent_win_rate']):.1f}%")
+                if trends.get("win_rate_delta") is not None:
+                    bits.append(f"Δwin {float(trends['win_rate_delta']):+.1f}")
+                parts.append(f"Trends (last {trends.get('recent_window_games')}): " + ", ".join(bits) + ".")
+
+            best = openings.get("best") if isinstance(openings, dict) else None
+            worst = openings.get("worst") if isinstance(openings, dict) else None
+            if best and isinstance(best, dict):
+                parts.append(f"Best opening (recent): {best.get('opening')} ({(best.get('avg_accuracy') or 0):.1f}% over {best.get('games')} games).")
+            if worst and isinstance(worst, dict):
+                parts.append(f"Weakest opening (recent): {worst.get('opening')} ({(worst.get('avg_accuracy') or 0):.1f}% over {worst.get('games')} games).")
+
+            def _fmt_list(title: str, items: list):
+                if not items:
+                    return
+                lines = [f"{title}:"]
+                for it in items[:5]:
+                    label = it.get("label")
+                    ev = it.get("evidence")
+                    if label and ev:
+                        lines.append(f"- {label}: {ev}")
+                    elif label:
+                        lines.append(f"- {label}")
+                parts.append("\n".join(lines))
+
+            _fmt_list("Strengths", strengths)
+            _fmt_list("Weaknesses", weaknesses)
+
+            sugg = result.get("training_suggestions") or []
+            if sugg:
+                lines = ["Training suggestions (filters):"]
+                for s in sugg[:3]:
+                    lines.append(f"- {s.get('filter_type')}={s.get('filter_value')}: {s.get('why')}")
+                parts.append("\n".join(lines))
+
+            return "\n\n".join(parts)
         
         # Investigation tools
         elif tool_name == "investigate":

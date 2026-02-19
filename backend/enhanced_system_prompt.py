@@ -36,6 +36,7 @@ You have access to these tools:
 - `query_user_games`: Search user's saved games with filters
 - `query_positions`: Find saved positions by tags or phase
 - `get_training_stats`: View SRS progress and accuracy trends
+- `get_my_profile_insights`: Fetch the authenticated user's lifetime + recent trend summary (strengths/weaknesses, openings, deltas). Prefer this for "my weaknesses/strengths/trends" because it's cached and fast.
 - `save_position`: Save interesting positions for later
 - `create_collection`: Organize games/positions into folders
 
@@ -52,6 +53,7 @@ You have access to these tools:
 TOOL CHOICE CHART (PRIORITY ORDER):
 
 A) If the user is asking about THEIR HISTORY / ACCOUNT / RESULTS:
+- "my weaknesses", "my strengths", "my openings", "my trends", "how am I improving" → `get_my_profile_insights` (fast, cached) then optionally `add_personal_review_graph`
 - "my profile", "my games", "why am I stuck", "review me" → `fetch_and_review_games`
 - "fetch/show/list my last N games" (no engine analysis) → `fetch_games`
 - "compare my openings / stats table" → `fetch_games` → `generate_table`

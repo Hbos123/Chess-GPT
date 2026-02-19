@@ -764,7 +764,8 @@ async def lifespan(app: FastAPI):
         srs_scheduler=srs_scheduler,
         supabase_client=supabase_client,
         openai_client=openai_client,
-        llm_router=llm_router
+        llm_router=llm_router,
+        profile_analytics_engine=profile_analytics_engine
     )
     print("✅ Tool executor initialized for chat")
     
@@ -3825,6 +3826,10 @@ async def llm_chat(request: LLMRequest, req: Request):
         # Build context for tool selection
         context = request.context or {}
         context["authenticated"] = bool(user_id)
+        if user_id:
+            context["user_id"] = user_id
+        if ip_address:
+            context["ip_address"] = ip_address
 
         # ----------------------------------------------------------------
         # Tier gating (free vs null vs canceled/unpaid)
@@ -4459,6 +4464,8 @@ async def llm_chat_stream(request: LLMRequest, http_request: Request):
         try:
             context = request.context or {}
             context["authenticated"] = bool(request.user_id)
+            if request.user_id:
+                context["user_id"] = request.user_id
             
             user_messages = [m for m in request.messages if m.get('role') == 'user']
             last_user_message = user_messages[-1].get('content', '') if user_messages else ""
@@ -4466,6 +4473,8 @@ async def llm_chat_stream(request: LLMRequest, http_request: Request):
             # Get user info for rate limiting
             user_id = request.user_id
             ip_address = request.ip_address or (extract_client_ip(http_request) if http_request else None)
+            if ip_address:
+                context["ip_address"] = ip_address
 
             # Tier gating (free/unpaid/anon -> tools locked)
             tier_info = None
