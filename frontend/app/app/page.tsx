@@ -338,6 +338,9 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
   const [showDevTools, setShowDevTools] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [abortController, setAbortController] = useState<AbortController | null>(null);
+  // IMPORTANT: AbortController in React state can be stale within the same tick.
+  // Use a ref as the source of truth so "Stop" reliably cancels the active request.
+  const abortControllerRef = useRef<AbortController | null>(null);
   
   // Token limit modal state
   const [showTokenLimitModal, setShowTokenLimitModal] = useState(false);
@@ -364,8 +367,14 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
 
   // Cancel processing function
   function cancelProcessing() {
-    if (abortController) {
-      abortController.abort();
+    try {
+      // Prefer ref (always current); fall back to state.
+      const ctrl = abortControllerRef.current || abortController;
+      if (ctrl) ctrl.abort();
+    } catch {
+      // ignore
+    } finally {
+      abortControllerRef.current = null;
       setAbortController(null);
     }
     setIsAnalyzing(false);
@@ -6519,7 +6528,7 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
     }
   }
 
-  async function handleGeneralChat(message: string) {
+  async function handleGeneralChat(message: string, abortSignal?: AbortSignal) {
     const boardContext = getBoardContext();
     const isStartPosition = fen === INITIAL_FEN;
     const hasMoves = pgn.length > 0 && game.history().length > 0;
@@ -6642,7 +6651,7 @@ If they ask about the game, refer to this data.
             return [...prev, enrichedStatus];
           });
         },
-        abortController?.signal
+        abortSignal
       );
       
       // ===== HANDLE PERSONAL REVIEW (fetch_and_review_games) =====
@@ -8428,7 +8437,7 @@ Answer style:
     }
   }
 
-  async function generateLLMResponse(userMessage: string, toolOutput?: any, structuredAnalysis?: string) {
+  async function generateLLMResponse(userMessage: string, toolOutput?: any, structuredAnalysis?: string, abortSignal?: AbortSignal) {
     if (!llmEnabled) return;
 
     // Show loading indicator
@@ -8543,7 +8552,7 @@ Instructions: Respond naturally and conversationally. Use themes to justify any 
             return [...prev, enrichedStatus];
           });
         },
-        abortController?.signal
+        abortSignal
       );
       
       const meta = { 
@@ -9218,6 +9227,7 @@ ${formatAnalysisCard(analysis.bestMoveReport.analysisAfter)}
 
     // Create abort controller for this request BEFORE processing
     const controller = new AbortController();
+    abortControllerRef.current = controller;
     setAbortController(controller);
     setIsAnalyzing(true);
 
@@ -9239,7 +9249,7 @@ ${formatAnalysisCard(analysis.bestMoveReport.analysisAfter)}
     // ============================================================
     try {
       console.log('🤖 Routing to LLM interpreter');
-      await handleGeneralChat(message);
+      await handleGeneralChat(message, controller.signal);
     } catch (err: any) {
       // Handle abort errors gracefully
       if (err.message === 'Request cancelled' || err.name === 'AbortError') {
@@ -9251,6 +9261,7 @@ ${formatAnalysisCard(analysis.bestMoveReport.analysisAfter)}
       }
     } finally {
       setIsAnalyzing(false);
+      abortControllerRef.current = null;
       setAbortController(null);
     }
     return;
@@ -9260,7 +9271,7 @@ ${formatAnalysisCard(analysis.bestMoveReport.analysisAfter)}
     
     // Fallback: if no mode detected, try LLM conversation
     if (llmEnabled) {
-      await generateLLMResponse(message);
+      await generateLLMResponse(message, undefined, undefined, controller.signal);
     } else {
       addSystemMessage("I'm not sure what you want. Try asking for analysis, making a move, or requesting a tactic puzzle.");
     }
