@@ -2,7 +2,7 @@ import { MetadataRoute } from 'next'
 
 export default function sitemap(): MetadataRoute.Sitemap {
   // Base URL without trailing slash for constructing URLs
-  const baseUrl = (process.env.NEXT_PUBLIC_BASE_URL || 'https://chesster.app').replace(/\/$/, '')
+  const baseUrl = (process.env.NEXT_PUBLIC_BASE_URL || 'https://www.chessterai.com').replace(/\/$/, '')
   
   // Keep sitemap minimal - only include public, indexable pages
   // Exclude app routes like /chess-board, /live-board, /app, /auth, etc.

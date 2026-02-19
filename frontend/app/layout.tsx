@@ -5,7 +5,9 @@ import { Analytics } from "@vercel/analytics/next";
 
 // Get canonical URL (the one that doesn't redirect)
 const getCanonicalUrl = (): string => {
-  const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'https://chesster.app';
+  // Prefer configuring via NEXT_PUBLIC_BASE_URL. Fallback should match the
+  // production canonical host to avoid cross-domain canonical/sitemap issues.
+  const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'https://www.chessterai.com';
   return baseUrl.replace(/\/$/, '');
 };
 

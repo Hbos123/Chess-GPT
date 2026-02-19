@@ -2,7 +2,7 @@ import { MetadataRoute } from 'next'
 
 export default function robots(): MetadataRoute.Robots {
   // Remove trailing slash from base URL
-  const baseUrl = (process.env.NEXT_PUBLIC_BASE_URL || 'https://chesster.app').replace(/\/$/, '')
+  const baseUrl = (process.env.NEXT_PUBLIC_BASE_URL || 'https://www.chessterai.com').replace(/\/$/, '')
   
   return {
     rules: [
