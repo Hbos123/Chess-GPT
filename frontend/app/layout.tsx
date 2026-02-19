@@ -7,8 +7,10 @@ import { Analytics } from "@vercel/analytics/next";
 const getCanonicalUrl = (): string => {
   // Prefer configuring via NEXT_PUBLIC_BASE_URL. Fallback should match the
   // production canonical host to avoid cross-domain canonical/sitemap issues.
-  const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'https://www.chessterai.com';
-  return baseUrl.replace(/\/$/, '');
+  const raw = (process.env.NEXT_PUBLIC_BASE_URL || 'https://www.chessterai.com').replace(/\/$/, '');
+  // If the apex redirects to www (current production behavior), ensure canonicals
+  // don't point at a different host.
+  return raw === 'https://chessterai.com' ? 'https://www.chessterai.com' : raw;
 };
 
 export const metadata: Metadata = {
