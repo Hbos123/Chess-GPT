@@ -3828,35 +3828,47 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
         ? localStorage.getItem('CHESSTER_INTERPRETER_MODEL') 
         : null;
       
-      const requestBody = JSON.stringify({
-        messages: messagesWithCleaned,
-        temperature,
-        model: lightningMode ? "gpt-4o-mini" : model,
-        use_tools: useTools,
-        session_id: sessionId,
-        task_id: activeTab?.id || null,
-        context,
-        user_id: user?.id || null,
-        ip_address: null, // backend derives from request headers
-        lightning_mode: lightningMode,
-        forced_tool_calls: parsedToolCalls.length > 0 ? parsedToolCalls : undefined
-      });
-      
       // Add system message when lightning mode is enabled (only once per request)
       if (lightningMode) {
         addSystemMessage("Lightning Mode enabled. Fast responses with gpt-4o-mini.");
       }
-      
-      vLog("POST /llm_chat_stream bytes", requestBody.length);
-      
+
       // Use fetch with ReadableStream for SSE (learning-first logging headers + passive next-action flush)
       Promise.resolve()
         .then(async () => {
           const { buildLearningHeaders, flushNextActionForLastInteraction } = await import("@/lib/learningClient");
           await flushNextActionForLastInteraction("asked_followup");
-          return buildLearningHeaders();
+          const { getSession } = await import("@/lib/supabase");
+
+          // Auth can be slow to hydrate; fall back to session user id so backend sees authenticated requests.
+          let effectiveUserId: string | null = user?.id || null;
+          try {
+            if (!effectiveUserId) {
+              const session = await getSession();
+              effectiveUserId = (session as any)?.user?.id || null;
+            }
+          } catch {}
+
+          const requestBody = JSON.stringify({
+            messages: messagesWithCleaned,
+            temperature,
+            model: lightningMode ? "gpt-4o-mini" : model,
+            use_tools: useTools,
+            session_id: sessionId,
+            task_id: activeTab?.id || null,
+            context,
+            user_id: effectiveUserId,
+            ip_address: null, // backend derives from request headers
+            lightning_mode: lightningMode,
+            forced_tool_calls: parsedToolCalls.length > 0 ? parsedToolCalls : undefined
+          });
+
+          vLog("POST /llm_chat_stream bytes", requestBody.length);
+
+          const learning = await buildLearningHeaders();
+          return { ...learning, requestBody };
         })
-        .then(({ interactionId, headers }) => {
+        .then(({ interactionId, headers, requestBody }) => {
           return fetch(`${getBackendBase()}/llm_chat_stream`, {
         method: "POST",
             headers: { "Content-Type": "application/json", ...headers },
