@@ -1470,7 +1470,7 @@ Understand the USER'S INTENT, not just their words. "Is this piece doing anythin
 - "What are my weaknesses?" + authenticated user → get_my_profile_insights (preferred, fast/cached); otherwise → fetch_and_review_games (needs username/platform)
 
 **IMPORTANT - "Review my last game" / "Help run through my game":**
-- If context has connected_accounts → Use fetch_and_review_games with that username/platform, count=1
+- If the user explicitly asks to review/analyze a specific game (e.g., "my last game", "review my games", "analyze my last game") and context has connected_accounts → Use fetch_and_review_games with that username/platform, count=1
 - If user asks about opponent performance (e.g., "how did my opponent play?") → set fetch_and_review_games argument `review_subject` to "opponent"
 - If user asks to compare both sides (e.g., "review both sides") → set `review_subject` to "both"
 - Always include the user's exact question as fetch_and_review_games argument `query` (verbatim). Do NOT try to encode intent via keyword rules; downstream selection is LLM-driven.
@@ -1510,6 +1510,7 @@ Understand the USER'S INTENT, not just their words. "Is this piece doing anythin
 - compare_moves: Compare two candidate moves side-by-side (needs moves_san=[A,B], optional fen, optional depth)
 - review_full_game: Game review (needs PGN)
 - fetch_and_review_games: Profile analysis (needs username, platform)
+- get_my_profile_insights: Authenticated user's cached profile stats (lifetime + recent trends, strengths/weaknesses, openings)
 - generate_training_session: Create drills
 - setup_position: Load position on board
 
@@ -1521,7 +1522,8 @@ Understand the USER'S INTENT, not just their words. "Is this piece doing anythin
 
 **Important - Account Integration:**
 - Service connects to Chess.com and Lichess via the Personal tab (☰ sidebar → Personal)
-- If user asks "review my games" without username: check context.connected_accounts first
+- If user asks about their weaknesses/strengths/trends/openings and user is authenticated: prefer get_my_profile_insights (fast, cached; no username needed)
+- If user asks "review my games" / "analyze my last game" without username: check context.connected_accounts first (then use fetch_and_review_games)
 - If no account connected: guide user to provide username or connect via Personal tab
 
 Output ONLY valid JSON. No markdown, no explanation."""

@@ -464,6 +464,31 @@ class RequestInterpreter:
                             print(f"   ℹ️ Tool already has username: {tool.arguments.get('username')}")
             else:
                 print(f"   ⚠️ No connected_accounts found in context - tool will need username from user")
+
+        # POST-PROCESSING: Prefer cached profile insights for authenticated "weaknesses/trends" queries
+        # This prevents the system from unnecessarily running the heavy fetch_and_review_games pathway
+        # when a fast cached summary is sufficient.
+        if plan and self._is_profile_insights_query(message, context):
+            msg_lower = (message or "").lower()
+            deep_review_markers = (
+                "review my last game",
+                "analyze my last game",
+                "review my games",
+                "analyze my games",
+                "review this game",
+                "analyze this game",
+                "pgn",
+                "stockfish",
+                "engine",
+            )
+            wants_deep_review = any(m in msg_lower for m in deep_review_markers)
+
+            if not wants_deep_review:
+                # If interpreter planned a heavy review tool, swap to insights.
+                planned_names = [t.name for t in (plan.tool_sequence or [])]
+                if "fetch_and_review_games" in planned_names or plan.needs_clarification or plan.skip_tools:
+                    print("   🔁 [INTERPRETER] Overriding plan to use get_my_profile_insights (cached) for profile insights query")
+                    plan = self._build_profile_insights_fallback_plan(message)
         
         # Emit detected intent
         if status_callback and plan:
