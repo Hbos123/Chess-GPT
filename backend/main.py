@@ -4261,8 +4261,20 @@ async def llm_chat(request: LLMRequest, req: Request):
                 
                 print(f"      Executing: {tool_name} with args: {final_tool_args}")
                 
-                # Execute tool with merged arguments (pass user_id and ip_address for limit checking)
-                result = await tool_executor.execute_tool(tool_name, final_tool_args, context, user_id=user_id, ip_address=ip_address)
+                # Ensure tool context always includes auth fields (defensive)
+                try:
+                    if context is None or not isinstance(context, dict):
+                        context = {}
+                    if user_id:
+                        context["user_id"] = context.get("user_id") or user_id
+                        context["authenticated"] = True
+                    if ip_address:
+                        context["ip_address"] = context.get("ip_address") or ip_address
+                except Exception:
+                    pass
+
+                # Execute tool with merged arguments
+                result = await tool_executor.execute_tool(tool_name, final_tool_args, context)
                 
                 # Format for LLM
                 result_text = tool_executor.format_result_for_llm(result, tool_name)
@@ -5240,7 +5252,21 @@ async def llm_chat_stream(request: LLMRequest, http_request: Request):
                     # Run tool execution and status streaming concurrently
                     async def run_tool():
                         try:
-                            res = await tool_executor.execute_tool(tool_name, final_tool_args, context, tool_status_callback)
+                            # Defensive: ensure tool context carries auth info at execution time
+                            try:
+                                if context is None or not isinstance(context, dict):
+                                    tool_context = {}
+                                else:
+                                    tool_context = context
+                                if user_id:
+                                    tool_context["user_id"] = tool_context.get("user_id") or user_id
+                                    tool_context["authenticated"] = True
+                                if ip_address:
+                                    tool_context["ip_address"] = tool_context.get("ip_address") or ip_address
+                            except Exception:
+                                tool_context = context
+
+                            res = await tool_executor.execute_tool(tool_name, final_tool_args, tool_context, tool_status_callback)
                             # Check if result contains an error (tools return {"error": "..."} on failure)
                             if isinstance(res, dict) and "error" in res:
                                 return {"success": False, "error": res["error"], "result": res}

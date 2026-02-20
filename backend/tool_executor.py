@@ -2313,8 +2313,16 @@ Return ONLY valid JSON in this exact format:
         """
         try:
             context = context or {}
-            user_id = context.get("user_id")
-            authenticated = bool(context.get("authenticated")) and bool(user_id)
+            # Be tolerant: different layers may name the user id differently.
+            user_id = (
+                context.get("user_id")
+                or context.get("userId")
+                or context.get("uid")
+                or (context.get("profile", {}) or {}).get("user_id")
+                or (context.get("profile", {}) or {}).get("id")
+            )
+            authenticated_flag = bool(context.get("authenticated"))
+            authenticated = (authenticated_flag and bool(user_id)) or bool(user_id)
             if not authenticated:
                 return {"error": "Authentication required to access personal analytics."}
 
