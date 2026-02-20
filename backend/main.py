@@ -4224,6 +4224,17 @@ async def llm_chat(request: LLMRequest, req: Request):
             print(f"      Content preview: {response_message.content[:150]}...")
         
         # Handle tool calls (with iteration limit)
+        # If the user is asking for profile weaknesses/trends and we already used cached insights,
+        # skip the heavy fetch_and_review_games tool to avoid unnecessary work.
+        def _is_profile_insights_query_text(txt: str) -> bool:
+            s = (txt or "").lower()
+            return any(k in s for k in ("weakness", "weaknesses", "strength", "strengths", "trend", "trends", "openings", "mistake", "mistakes", "improv", "profile", "analytics", "stats"))
+
+        def _wants_deep_review_text(txt: str) -> bool:
+            s = (txt or "").lower()
+            return any(k in s for k in ("review my last game", "analyze my last game", "review my games", "analyze my games", "review this game", "analyze this game", "pgn", "stockfish", "engine"))
+
+        profile_insights_ran = False
         while response_message.tool_calls and iterations < request.max_tool_iterations:
             iterations += 1
             print(f"\n   🔧 Tool iteration {iterations}/{request.max_tool_iterations}")
@@ -4260,24 +4271,33 @@ async def llm_chat(request: LLMRequest, req: Request):
                             final_tool_args["query"] = last_user_msg
                 
                 print(f"      Executing: {tool_name} with args: {final_tool_args}")
-                
-                # Ensure tool context always includes auth fields (defensive)
-                try:
-                    if context is None or not isinstance(context, dict):
-                        context = {}
-                    if user_id:
-                        context["user_id"] = context.get("user_id") or user_id
-                        context["authenticated"] = True
-                    if ip_address:
-                        context["ip_address"] = context.get("ip_address") or ip_address
-                except Exception:
-                    pass
 
-                # Execute tool with merged arguments
-                result = await tool_executor.execute_tool(tool_name, final_tool_args, context)
+                # Skip heavy review if cached insights already ran for a weaknesses/trends query.
+                if tool_name == "fetch_and_review_games" and profile_insights_ran and _is_profile_insights_query_text(last_user_message) and not _wants_deep_review_text(last_user_message):
+                    result = {"error": "Skipped fetch_and_review_games (cached profile insights already provided for this query)."}
+                    result_text = tool_executor.format_result_for_llm(result, tool_name)
+                    print(f"      ⏭️ Skipping fetch_and_review_games: {result_text}")
+                else:
+                    # Ensure tool context always includes auth fields (defensive)
+                    try:
+                        if context is None or not isinstance(context, dict):
+                            context = {}
+                        if user_id:
+                            context["user_id"] = context.get("user_id") or user_id
+                            context["authenticated"] = True
+                        if ip_address:
+                            context["ip_address"] = context.get("ip_address") or ip_address
+                    except Exception:
+                        pass
+
+                    # Execute tool with merged arguments
+                    result = await tool_executor.execute_tool(tool_name, final_tool_args, context)
+                    result_text = tool_executor.format_result_for_llm(result, tool_name)
+
+                if tool_name == "get_my_profile_insights" and isinstance(result, dict) and not result.get("error"):
+                    profile_insights_ran = True
                 
-                # Format for LLM
-                result_text = tool_executor.format_result_for_llm(result, tool_name)
+                # result_text is set above (either skipped or executed)
                 
                 print(f"      Tool result preview: {result_text[:200]}...")
                 
@@ -4548,6 +4568,17 @@ async def llm_chat_stream(request: LLMRequest, http_request: Request):
             
             # Collect all status messages for final response
             all_status_messages = []
+
+            # Track whether cached profile insights already ran in this request
+            profile_insights_ran = False
+
+            def _is_profile_insights_query_text(txt: str) -> bool:
+                s = (txt or "").lower()
+                return any(k in s for k in ("weakness", "weaknesses", "strength", "strengths", "trend", "trends", "openings", "mistake", "mistakes", "improv", "profile", "analytics", "stats"))
+
+            def _wants_deep_review_text(txt: str) -> bool:
+                s = (txt or "").lower()
+                return any(k in s for k in ("review my last game", "analyze my last game", "review my games", "analyze my games", "review this game", "analyze this game", "pgn", "stockfish", "engine"))
             
             # Check token limits only (message limits are display-only)
             limit_exceeded = False
@@ -5266,6 +5297,10 @@ async def llm_chat_stream(request: LLMRequest, http_request: Request):
                             except Exception:
                                 tool_context = context
 
+                            # Skip heavy review if cached insights already ran for a weaknesses/trends query.
+                            if tool_name == "fetch_and_review_games" and profile_insights_ran and _is_profile_insights_query_text(last_user_message) and not _wants_deep_review_text(last_user_message):
+                                return {"success": False, "error": "Skipped fetch_and_review_games (cached profile insights already provided for this query)."}
+
                             res = await tool_executor.execute_tool(tool_name, final_tool_args, tool_context, tool_status_callback)
                             # Check if result contains an error (tools return {"error": "..."} on failure)
                             if isinstance(res, dict) and "error" in res:
@@ -5306,6 +5341,8 @@ async def llm_chat_stream(request: LLMRequest, http_request: Request):
                     
                     if tool_result["success"]:
                         result = tool_result["result"]
+                        if tool_name == "get_my_profile_insights" and isinstance(result, dict) and not result.get("error"):
+                            profile_insights_ran = True
                         result_full = json.dumps(result, default=str)
                         result_text = json.dumps(result, indent=2, default=str)[:4000]
                         if len(result_full) > 5000:

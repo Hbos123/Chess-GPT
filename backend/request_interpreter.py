@@ -484,11 +484,11 @@ class RequestInterpreter:
             wants_deep_review = any(m in msg_lower for m in deep_review_markers)
 
             if not wants_deep_review:
-                # If interpreter planned a heavy review tool, swap to insights.
+                # Always prefer insights-only for these queries (deterministic, fast).
                 planned_names = [t.name for t in (plan.tool_sequence or [])]
-                if "fetch_and_review_games" in planned_names or plan.needs_clarification or plan.skip_tools:
+                if planned_names != ["get_my_profile_insights"]:
                     print("   🔁 [INTERPRETER] Overriding plan to use get_my_profile_insights (cached) for profile insights query")
-                    plan = self._build_profile_insights_fallback_plan(message)
+                plan = self._build_profile_insights_fallback_plan(message)
         
         # Emit detected intent
         if status_callback and plan:
