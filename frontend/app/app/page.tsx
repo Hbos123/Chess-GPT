@@ -3836,6 +3836,8 @@ function Home({ isMobileMode = true }: { isMobileMode?: boolean }) {
         session_id: sessionId,
         task_id: activeTab?.id || null,
         context,
+        user_id: user?.id || null,
+        ip_address: null, // backend derives from request headers
         lightning_mode: lightningMode,
         forced_tool_calls: parsedToolCalls.length > 0 ? parsedToolCalls : undefined
       });
