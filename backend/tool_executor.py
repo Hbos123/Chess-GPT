@@ -2374,6 +2374,25 @@ Return ONLY valid JSON in this exact format:
                         "computed_at": cached.get("computed_at"),
                     }
 
+            # Habits: computed_habits table (cache) OR compute-on-demand via PersonalStatsManager if needed.
+            habits_payload = None
+            habits_meta = {}
+            if self.supabase_client is not None:
+                try:
+                    from personal_stats_manager import PersonalStatsManager
+                    stats_mgr = PersonalStatsManager(self.supabase_client)
+                    # This is cache-first (computed_habits table); compute is only if missing/stale.
+                    habits_payload = await asyncio.to_thread(stats_mgr.get_habits_for_frontend, user_id)
+                    if isinstance(habits_payload, dict):
+                        habits_meta = {
+                            "total_games_with_tags": habits_payload.get("total_games"),
+                            "baseline_accuracy": habits_payload.get("baseline_accuracy"),
+                            "habits_count": len(habits_payload.get("habits") or []),
+                        }
+                except Exception:
+                    habits_payload = None
+                    habits_meta = {}
+
             lifetime = analytics.get("lifetime_stats") if isinstance(analytics, dict) else {}
             strength = analytics.get("strength_profile") if isinstance(analytics, dict) else {}
             patterns = analytics.get("patterns") if isinstance(analytics, dict) else {}
@@ -2414,6 +2433,151 @@ Return ONLY valid JSON in this exact format:
                 # Prefer accuracy as the primary axis.
                 opening_best = max(opening_entries, key=lambda o: (o.get("avg_accuracy") or -1, o.get("games") or 0))
                 opening_worst = min(opening_entries, key=lambda o: (o.get("avg_accuracy") if o.get("avg_accuracy") is not None else 9999, -(o.get("games") or 0)))
+
+            # Helper: get top-N items from an "analytics" dict where each entry mirrors {count, accuracy, ...}
+            def _top_items(d: Any, *, top: int, sort_key: str = "count") -> List[Dict[str, Any]]:
+                items: List[Dict[str, Any]] = []
+                if not isinstance(d, dict):
+                    return items
+                for name, data in d.items():
+                    if not isinstance(data, dict):
+                        continue
+                    count = int(data.get("count") or data.get("frequency") or 0)
+                    acc = data.get("accuracy")
+                    try:
+                        acc = float(acc) if acc is not None else None
+                    except Exception:
+                        acc = None
+                    items.append({
+                        "name": str(name),
+                        "count": count,
+                        "accuracy": acc,
+                        "wins": data.get("wins"),
+                        "losses": data.get("losses"),
+                        "win_rate": data.get("win_rate"),
+                        "blunders": data.get("blunders"),
+                        "mistakes": data.get("mistakes"),
+                        "inaccuracies": data.get("inaccuracies"),
+                    })
+                if sort_key == "accuracy":
+                    items.sort(key=lambda x: (x.get("accuracy") if x.get("accuracy") is not None else -1e9, x.get("count") or 0), reverse=True)
+                else:
+                    items.sort(key=lambda x: (x.get("count") or 0, x.get("accuracy") or 0.0), reverse=True)
+                return items[:top]
+
+            # Tag deltas & time buckets from detailed cache
+            tag_transitions_summary = None
+            static_tags_summary = None
+            time_buckets_summary = None
+            piece_accuracy_summary = None
+            try:
+                if isinstance(detailed, dict):
+                    tt = detailed.get("tag_transitions") or {}
+                    gained = (tt.get("gained") or {}) if isinstance(tt, dict) else {}
+                    lost = (tt.get("lost") or {}) if isinstance(tt, dict) else {}
+                    tag_transitions_summary = {
+                        "gained_top": _top_items(gained, top=top_n, sort_key="count"),
+                        "lost_top": _top_items(lost, top=top_n, sort_key="count"),
+                        "gained_best_accuracy": _top_items(gained, top=top_n, sort_key="accuracy"),
+                        "lost_best_accuracy": _top_items(lost, top=top_n, sort_key="accuracy"),
+                    }
+
+                    st = detailed.get("static_tags") or {}
+                    static_tags_summary = {
+                        "top": _top_items(st, top=top_n, sort_key="count"),
+                        "best_accuracy": _top_items(st, top=top_n, sort_key="accuracy"),
+                    }
+
+                    tb = detailed.get("time_buckets") or {}
+                    time_buckets_summary = {
+                        "top": _top_items(tb, top=top_n, sort_key="count"),
+                        "best_accuracy": _top_items(tb, top=top_n, sort_key="accuracy"),
+                    }
+
+                    pa = detailed.get("piece_accuracy_detailed") or {}
+                    agg = pa.get("aggregate") if isinstance(pa, dict) else None
+                    if isinstance(agg, dict):
+                        # Expect keys like Pawn/Knight/... with {accuracy, count}
+                        piece_accuracy_summary = _top_items(agg, top=6, sort_key="accuracy")
+            except Exception:
+                tag_transitions_summary = None
+                static_tags_summary = None
+                time_buckets_summary = None
+                piece_accuracy_summary = None
+
+            # Habits summary: top strengths/weaknesses + biggest recent changes
+            habits_summary = None
+            if isinstance(habits_payload, dict):
+                strengths_h = habits_payload.get("strengths") or []
+                weaknesses_h = habits_payload.get("weaknesses") or []
+
+                def _habit_pick(hs: Any, n: int) -> List[Dict[str, Any]]:
+                    out: List[Dict[str, Any]] = []
+                    if not isinstance(hs, list):
+                        return out
+                    for h in hs[:n]:
+                        if not isinstance(h, dict):
+                            continue
+                        out.append({
+                            "habit_key": h.get("name"),
+                            "display_name": h.get("display_name") or h.get("name"),
+                            "habit_type": h.get("habit_type"),
+                            "deviation": h.get("deviation"),
+                            "extremeness": h.get("extremeness"),
+                            "significance": h.get("significance"),
+                            "accuracy": h.get("accuracy"),
+                            "baseline_accuracy": h.get("baseline_accuracy") or habits_payload.get("baseline_accuracy"),
+                            "count": h.get("count"),
+                            "win_rate": h.get("win_rate"),
+                            "avg_cp_loss": h.get("avg_cp_loss"),
+                            "error_rate": h.get("error_rate"),
+                        })
+                    return out
+
+                # Biggest recent change: compare last vs first in history for each extreme habit
+                biggest_improving = None
+                biggest_declining = None
+                try:
+                    for h in (habits_payload.get("habits") or [])[:30]:
+                        if not isinstance(h, dict):
+                            continue
+                        hist = h.get("history") or []
+                        if not isinstance(hist, list) or len(hist) < 2:
+                            continue
+                        # find first and last entries with accuracy
+                        first = next((e for e in hist if isinstance(e, dict) and e.get("accuracy") is not None), None)
+                        last = next((e for e in reversed(hist) if isinstance(e, dict) and e.get("accuracy") is not None), None)
+                        if not first or not last:
+                            continue
+                        try:
+                            delta_acc = float(last.get("accuracy")) - float(first.get("accuracy"))
+                        except Exception:
+                            continue
+                        cand = {
+                            "habit_key": h.get("name"),
+                            "display_name": h.get("display_name") or h.get("name"),
+                            "habit_type": h.get("habit_type"),
+                            "delta_accuracy": round(delta_acc, 1),
+                            "from_accuracy": first.get("accuracy"),
+                            "to_accuracy": last.get("accuracy"),
+                            "from_date": first.get("game_date"),
+                            "to_date": last.get("game_date"),
+                        }
+                        if biggest_improving is None or cand["delta_accuracy"] > biggest_improving["delta_accuracy"]:
+                            biggest_improving = cand
+                        if biggest_declining is None or cand["delta_accuracy"] < biggest_declining["delta_accuracy"]:
+                            biggest_declining = cand
+                except Exception:
+                    biggest_improving = None
+                    biggest_declining = None
+
+                habits_summary = {
+                    "top_strengths": _habit_pick(strengths_h, top_n),
+                    "top_weaknesses": _habit_pick(weaknesses_h, top_n),
+                    "biggest_improving": biggest_improving,
+                    "biggest_declining": biggest_declining,
+                    "meta": habits_meta,
+                }
 
             # Phase highlights (recent-60 from detailed cache if present)
             phase_highlights = []
@@ -2474,6 +2638,22 @@ Return ONLY valid JSON in this exact format:
                     "win_rate_delta": (deltas or {}).get("win_rate_delta"),
                 }
 
+            # Big change callouts (simple): label the current biggest weakness/strength based on the summaries we have
+            biggest_strength = None
+            biggest_weakness = None
+            try:
+                if habits_summary and habits_summary.get("top_strengths"):
+                    biggest_strength = {"kind": "habit", **(habits_summary["top_strengths"][0] or {})}
+                elif strengths_out:
+                    biggest_strength = {"kind": strengths_out[0].get("kind"), "label": strengths_out[0].get("label"), "evidence": strengths_out[0].get("evidence")}
+                if habits_summary and habits_summary.get("top_weaknesses"):
+                    biggest_weakness = {"kind": "habit", **(habits_summary["top_weaknesses"][0] or {})}
+                elif weaknesses_out:
+                    biggest_weakness = {"kind": weaknesses_out[0].get("kind"), "label": weaknesses_out[0].get("label"), "evidence": weaknesses_out[0].get("evidence")}
+            except Exception:
+                biggest_strength = None
+                biggest_weakness = None
+
             # Training suggestions (filters map to your existing UI drill filters)
             suggestions = []
             try:
@@ -2512,19 +2692,35 @@ Return ONLY valid JSON in this exact format:
                     "win_rate": lifetime.get("win_rate") if isinstance(lifetime, dict) else None,
                     "average_accuracy": lifetime.get("average_accuracy") if isinstance(lifetime, dict) else None,
                 },
+                "rolling_window": rolling if isinstance(rolling, dict) else {},
+                "patterns": patterns if isinstance(patterns, dict) else {},
                 "strengths": strengths_out[:top_n],
                 "weaknesses": weaknesses_out[:top_n],
                 "openings": {
                     "best": opening_best,
                     "worst": opening_worst,
                     "min_games": min_opening_games,
+                    "top_by_frequency": sorted(opening_entries, key=lambda o: (o.get("games") or 0), reverse=True)[:top_n] if opening_entries else [],
+                    "top_by_accuracy": sorted(opening_entries, key=lambda o: (o.get("avg_accuracy") if o.get("avg_accuracy") is not None else -1e9, o.get("games") or 0), reverse=True)[:top_n] if opening_entries else [],
                 },
                 "trends": trends,
+                "habits": habits_summary,
+                "tag_deltas": tag_transitions_summary,
+                "static_tags": static_tags_summary,
+                "time_buckets": time_buckets_summary,
+                "piece_accuracy": piece_accuracy_summary,
+                "biggest_changes": {
+                    "biggest_strength_now": biggest_strength,
+                    "biggest_weakness_now": biggest_weakness,
+                    "biggest_improving_habit": (habits_summary or {}).get("biggest_improving") if isinstance(habits_summary, dict) else None,
+                    "biggest_declining_habit": (habits_summary or {}).get("biggest_declining") if isinstance(habits_summary, dict) else None,
+                },
                 "training_suggestions": suggestions,
                 "sources": {
                     "profile_analytics_cached": bool(self.profile_analytics_engine is not None),
                     "detailed_cache": bool(detailed is not None),
                     "detailed_cache_meta": detailed_meta,
+                    "computed_habits": bool(habits_payload is not None),
                 },
             }
         except Exception as e:
@@ -4152,6 +4348,9 @@ Write your response now based on the game data provided."""
             weaknesses = result.get("weaknesses") or []
             openings = result.get("openings") or {}
             trends = result.get("trends")
+            habits = result.get("habits") or {}
+            tag_deltas = result.get("tag_deltas") or {}
+            time_buckets = result.get("time_buckets") or {}
 
             parts = []
             tg = lifetime.get("total_games")
@@ -4188,6 +4387,44 @@ Write your response now based on the game data provided."""
                 parts.append(f"Best opening (recent): {best.get('opening')} ({(best.get('avg_accuracy') or 0):.1f}% over {best.get('games')} games).")
             if worst and isinstance(worst, dict):
                 parts.append(f"Weakest opening (recent): {worst.get('opening')} ({(worst.get('avg_accuracy') or 0):.1f}% over {worst.get('games')} games).")
+
+            # Habits (top 3 each)
+            try:
+                hs = habits.get("top_strengths") or []
+                hw = habits.get("top_weaknesses") or []
+                if hs or hw:
+                    lines = ["Habits (most impactful):"]
+                    for h in (hs[:3] if isinstance(hs, list) else []):
+                        lines.append(f"- Strength: {h.get('display_name')} (Δ {h.get('deviation')}, acc {h.get('accuracy')})")
+                    for h in (hw[:3] if isinstance(hw, list) else []):
+                        lines.append(f"- Weakness: {h.get('display_name')} (Δ {h.get('deviation')}, acc {h.get('accuracy')})")
+                    parts.append("\n".join(lines))
+            except Exception:
+                pass
+
+            # Tags/time buckets quick highlights (top 3 by count)
+            try:
+                gained = (tag_deltas.get("gained_top") or []) if isinstance(tag_deltas, dict) else []
+                lost = (tag_deltas.get("lost_top") or []) if isinstance(tag_deltas, dict) else []
+                if gained or lost:
+                    lines = ["Tag deltas (recent):"]
+                    for it in (gained[:3] if isinstance(gained, list) else []):
+                        lines.append(f"- Gained: {it.get('name')} (n={it.get('count')}, acc={it.get('accuracy')})")
+                    for it in (lost[:3] if isinstance(lost, list) else []):
+                        lines.append(f"- Lost: {it.get('name')} (n={it.get('count')}, acc={it.get('accuracy')})")
+                    parts.append("\n".join(lines))
+            except Exception:
+                pass
+
+            try:
+                tb_top = (time_buckets.get("top") or []) if isinstance(time_buckets, dict) else []
+                if tb_top:
+                    lines = ["Time spent buckets (recent moves):"]
+                    for it in (tb_top[:3] if isinstance(tb_top, list) else []):
+                        lines.append(f"- {it.get('name')}: acc={it.get('accuracy')}, n={it.get('count')}")
+                    parts.append("\n".join(lines))
+            except Exception:
+                pass
 
             def _fmt_list(title: str, items: list):
                 if not items:
