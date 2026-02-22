@@ -180,6 +180,9 @@ export default function ProfileDashboard({ onClose, initialTab = 'overview', onC
   // fetch their own data); it only reduces redundant load.
   useEffect(() => {
     if (!user?.id || !backendBase || isUnpaid) return;
+    // Only warm detailed analytics when the user is likely to need it.
+    // (Graphs/Training tabs use it for suggestions and deeper breakdowns.)
+    if (activeTab !== "graphs" && activeTab !== "training") return;
     let cancelled = false;
     let timeoutId: any = null;
 
@@ -193,20 +196,21 @@ export default function ProfileDashboard({ onClose, initialTab = 'overview', onC
       }
     };
 
-    // Prefer idle time; fallback to a short delay.
+    // Prefer idle time; fallback to a longer delay to avoid competing with the initial
+    // /profile/overview + /profile/analytics calls.
     // @ts-ignore - requestIdleCallback not in TS lib by default.
     if (typeof window !== "undefined" && typeof (window as any).requestIdleCallback === "function") {
       // @ts-ignore
-      (window as any).requestIdleCallback(() => warm(), { timeout: 2500 });
+      (window as any).requestIdleCallback(() => warm(), { timeout: 15000 });
     } else {
-      timeoutId = setTimeout(() => warm(), 1500);
+      timeoutId = setTimeout(() => warm(), 12000);
     }
 
     return () => {
       cancelled = true;
       if (timeoutId) clearTimeout(timeoutId);
     };
-  }, [user?.id, backendBase, isUnpaid]);
+  }, [user?.id, backendBase, isUnpaid, activeTab]);
 
   useEffect(() => {
     if (!user?.id || isUnpaid) return;

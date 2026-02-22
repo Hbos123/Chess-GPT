@@ -7953,24 +7953,11 @@ async def profile_overview(user_id: str):
     except Exception:
         pass
     
-    # Trigger account initialization check (non-blocking)
-    # Also ensure background indexing is active
-    global account_init_manager
-    if account_init_manager:
-        try:
-            # Check this specific account (non-blocking)
-            print(f"🔍 Triggering account check for user {user_id}")
-            asyncio.create_task(account_init_manager.check_all_accounts())
-        except Exception as e:
-            print(f"⚠️ Error triggering account check: {e}")
-    
-    # Also ensure profile indexer is active (this will start indexing if accounts are linked)
-    if profile_indexer:
-        try:
-            # This will check for accounts and start indexing if needed
-            asyncio.create_task(profile_indexer.ensure_background_index(user_id))
-        except Exception as e:
-            print(f"⚠️ Error ensuring background index: {e}")
+    # IMPORTANT:
+    # Do NOT trigger global maintenance from this hot polling endpoint.
+    # `/profile/overview` is hit frequently by the frontend, so spawning
+    # `check_all_accounts()` here can overload the backend and slow down all profile requests.
+    # Global checks should be driven by the existing periodic background task and/or admin endpoints.
 
     result = {
         "preferences": prefs,
@@ -8387,7 +8374,8 @@ async def profile_analytics(user_id: str):
         # Save daily pattern snapshot after computing analytics (non-blocking)
         try:
             pattern_recognizer = profile_analytics_engine.pattern_recognizer
-            await pattern_recognizer.save_daily_pattern_snapshot(user_id, "current")
+            # Fire-and-forget: do not block the analytics endpoint on a second pass over games.
+            asyncio.create_task(pattern_recognizer.save_daily_pattern_snapshot(user_id, "current"))
         except Exception as snapshot_err:
             print(f"⚠️ [PROFILE_ANALYTICS_ENDPOINT] Error saving pattern snapshot: {snapshot_err}")
         
