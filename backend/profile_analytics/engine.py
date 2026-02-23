@@ -34,6 +34,49 @@ class ProfileAnalyticsEngine:
             del self._cache[user_id]
             print(f"🗑️ [PROFILE_ANALYTICS_ENGINE] Cache invalidated for user_id: {user_id}")
 
+    def get_cached_only(self, user_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Return cached analytics if present and within TTL. Never starts computation.
+        Safe for hot endpoints that want to respond immediately.
+        """
+        now = datetime.now()
+        if user_id not in self._cache:
+            return None
+        try:
+            timestamp, cached_data = self._cache[user_id]
+            cache_age = now - timestamp
+            if cache_age < timedelta(hours=self.db_limits["cache_ttl_hours"]):
+                return cached_data
+        except Exception:
+            return None
+        return None
+
+    def start_compute_if_needed(self, user_id: str) -> bool:
+        """
+        Ensure a computation task is in-flight for this user_id, without awaiting it.
+        Returns True if a new task was started, False if one was already in-flight.
+        """
+        if user_id in self._in_flight:
+            return False
+
+        task = asyncio.create_task(self._compute_analytics(user_id))
+        self._in_flight[user_id] = task
+
+        def _cleanup(t: asyncio.Task) -> None:
+            try:
+                if self._in_flight.get(user_id) is t:
+                    del self._in_flight[user_id]
+                    print(f"🧹 [PROFILE_ANALYTICS_ENGINE] Cleaned up in-flight task for user_id: {user_id}")
+            except Exception:
+                pass
+
+        try:
+            task.add_done_callback(_cleanup)
+        except Exception:
+            pass
+
+        return True
+
     async def get_full_analytics(self, user_id: str) -> Dict[str, Any]:
         """
         Get comprehensive analytics for a user.
@@ -221,7 +264,16 @@ class ProfileAnalyticsEngine:
             print(f"📊 [PROFILE_ANALYTICS_ENGINE] Computing metrics for rolling window, user_id: {user_id}")
             avg_accuracy = self._avg_game_accuracy(games)
             win_rate = self._win_rate(games)
-            critical = self._extract_critical_positions(games, limit=10, save_to_db=True)
+            # Extract critical positions for UI immediately, but do NOT block the
+            # analytics endpoint on persisting 100s of rows to the positions table.
+            # Persist best-effort in the background to preserve training features.
+            critical, positions_by_game = self._extract_critical_positions(games, limit=10)
+            if positions_by_game and self.supabase:
+                try:
+                    asyncio.create_task(asyncio.to_thread(self._persist_positions_by_game, user_id, positions_by_game))
+                except Exception:
+                    # best-effort; never fail analytics due to persistence issues
+                    pass
             print(f"📈 [PROFILE_ANALYTICS_ENGINE] Metrics computed - accuracy: {avg_accuracy}, win_rate: {win_rate}, critical_positions: {len(critical)}, user_id: {user_id}")
 
             result = {
@@ -349,15 +401,16 @@ class ProfileAnalyticsEngine:
         self, 
         games: List[Dict[str, Any]], 
         limit: int = 10,
-        save_to_db: bool = True
-    ) -> List[Dict[str, Any]]:
+    ) -> Tuple[List[Dict[str, Any]], Dict[str, List[Dict[str, Any]]]]:
         """
         Extract critical positions (mistake/blunder) from ply_records where available.
-        Optionally saves positions to database with tag transition metadata.
-        Returns a compact list for UI/training entry points.
+        Returns:
+        - top_positions: compact list for UI/training entry points (top N by cp_loss)
+        - positions_by_game: full set of extracted error positions grouped by game_id,
+          suitable for best-effort persistence in the background.
         """
         positions: List[Tuple[float, Dict[str, Any]]] = []
-        positions_to_save = []
+        positions_to_save: List[Dict[str, Any]] = []
         
         for g in games:
             review = g.get("game_review") or {}
@@ -394,114 +447,105 @@ class ProfileAnalyticsEngine:
                 
                 positions.append((cp_loss, position_data))
                 
-                # Prepare for database save with tag transition metadata
-                if save_to_db:
-                    # Determine side_to_move from FEN
-                    fen_parts = fen.split()
-                    side_to_move = "white" if len(fen_parts) > 1 and fen_parts[1] == "w" else "black"
-                    
-                    # Extract tag transition data
-                    raw_before = ply.get("raw_before", {})
-                    raw_after = ply.get("raw_after", {})
-                    analyse = ply.get("analyse", {})
-                    best_move_tags = ply.get("best_move_tags", [])
-                    
-                    # Extract tags
-                    tags_start = self._extract_tag_names(
-                        raw_before.get("tags", []) if isinstance(raw_before, dict) else []
-                    )
-                    tags_after_played = self._extract_tag_names(
-                        raw_after.get("tags", []) if isinstance(raw_after, dict) else analyse.get("tags", [])
-                    )
-                    tags_after_best = self._extract_tag_names(best_move_tags)
-                    
-                    # Compute tag transitions
-                    tags_start_set = set(tags_start)
-                    tags_after_played_set = set(tags_after_played)
-                    tags_after_best_set = set(tags_after_best)
-                    
-                    tags_gained = list(tags_after_played_set - tags_start_set)
-                    tags_lost = list(tags_start_set - tags_after_played_set)
-                    
-                    # Extract piece information
-                    move_uci = ply.get("uci") or ply.get("move_uci")
-                    engine_info = ply.get("engine") if isinstance(ply.get("engine"), dict) else {}
-                    best_move_san = engine_info.get("best_move_san")
-                    
-                    piece_blundered = self._piece_name_from_move(fen, move_uci)
-                    piece_best_move = self._piece_name_from_san(fen, best_move_san) if best_move_san else None
-                    
-                    # Extract time data
-                    time_spent_s = ply.get("time_spent_s")
-                    
-                    # Determine error category
-                    error_category = category  # "mistake" or "blunder"
-                    
-                    position_dict = {
-                        "fen": fen,
-                        "side_to_move": side_to_move,
-                        "from_game_id": g.get("id"),
-                        "source_ply": ply.get("ply"),
-                        "move_san": san,
-                        "move_uci": move_uci,
-                        "best_move_san": best_move_san,
-                        "best_move_uci": engine_info.get("best_move_uci"),
-                        "eval_cp": engine_info.get("eval_before_cp"),
-                        "cp_loss": cp_loss,
-                        "phase": ply.get("phase"),
-                        "opening_name": g.get("opening_name") or ply.get("opening_name") or None,
-                        "is_critical": cp_loss >= 200,
-                        "is_error": True,
-                        "error_category": error_category,
-                        "error_side": error_side,
-                        "error_note": f"{category.capitalize()}: {san} (cp_loss: {round(cp_loss, 1)})",
-                        # Tag transition metadata
-                        "tags_start": tags_start,
-                        "tags_after_played": tags_after_played,
-                        "tags_after_best": tags_after_best,
-                        "tags_gained": tags_gained,
-                        "tags_lost": tags_lost,
-                        # Piece information
-                        "piece_blundered": piece_blundered,
-                        "piece_best_move": piece_best_move,
-                        # Time data
-                        "time_spent_s": time_spent_s,
-                    }
-                    
-                    positions_to_save.append(position_dict)
+                # Prepare for (optional) persistence with tag transition metadata
+                # (we persist in the background to avoid blocking analytics requests)
+                fen_parts = fen.split()
+                side_to_move = "white" if len(fen_parts) > 1 and fen_parts[1] == "w" else "black"
+                
+                raw_before = ply.get("raw_before", {})
+                raw_after = ply.get("raw_after", {})
+                analyse = ply.get("analyse", {})
+                best_move_tags = ply.get("best_move_tags", [])
+                
+                tags_start = self._extract_tag_names(
+                    raw_before.get("tags", []) if isinstance(raw_before, dict) else []
+                )
+                tags_after_played = self._extract_tag_names(
+                    raw_after.get("tags", []) if isinstance(raw_after, dict) else analyse.get("tags", [])
+                )
+                tags_after_best = self._extract_tag_names(best_move_tags)
+                
+                tags_start_set = set(tags_start)
+                tags_after_played_set = set(tags_after_played)
+                tags_after_best_set = set(tags_after_best)
+                
+                tags_gained = list(tags_after_played_set - tags_start_set)
+                tags_lost = list(tags_start_set - tags_after_played_set)
+                
+                move_uci = ply.get("uci") or ply.get("move_uci")
+                engine_info = ply.get("engine") if isinstance(ply.get("engine"), dict) else {}
+                best_move_san = engine_info.get("best_move_san")
+                
+                piece_blundered = self._piece_name_from_move(fen, move_uci)
+                piece_best_move = self._piece_name_from_san(fen, best_move_san) if best_move_san else None
+                
+                time_spent_s = ply.get("time_spent_s")
+                error_category = category  # "mistake" or "blunder"
+                
+                position_dict = {
+                    "fen": fen,
+                    "side_to_move": side_to_move,
+                    "from_game_id": g.get("id"),
+                    "source_ply": ply.get("ply"),
+                    "move_san": san,
+                    "move_uci": move_uci,
+                    "best_move_san": best_move_san,
+                    "best_move_uci": engine_info.get("best_move_uci"),
+                    "eval_cp": engine_info.get("eval_before_cp"),
+                    "cp_loss": cp_loss,
+                    "phase": ply.get("phase"),
+                    "opening_name": g.get("opening_name") or ply.get("opening_name") or None,
+                    "is_critical": cp_loss >= 200,
+                    "is_error": True,
+                    "error_category": error_category,
+                    "error_side": error_side,
+                    "error_note": f"{category.capitalize()}: {san} (cp_loss: {round(cp_loss, 1)})",
+                    # Tag transition metadata
+                    "tags_start": tags_start,
+                    "tags_after_played": tags_after_played,
+                    "tags_after_best": tags_after_best,
+                    "tags_gained": tags_gained,
+                    "tags_lost": tags_lost,
+                    # Piece information
+                    "piece_blundered": piece_blundered,
+                    "piece_best_move": piece_best_move,
+                    # Time data
+                    "time_spent_s": time_spent_s,
+                }
+                
+                positions_to_save.append(position_dict)
         
         # Sort by CP loss
         positions.sort(key=lambda x: x[0], reverse=True)
         top_positions = [p for _score, p in positions[:limit]]
         
-        # Save to database if requested
-        if save_to_db and positions_to_save and self.supabase:
-            user_id = games[0].get("user_id") if games else None
-            if user_id:
-                # Group positions by game_id for batch saving
-                positions_by_game = {}
-                for pos in positions_to_save:
-                    game_id = pos.get("from_game_id")
-                    if game_id:
-                        if game_id not in positions_by_game:
-                            positions_by_game[game_id] = []
-                        positions_by_game[game_id].append(pos)
-                
-                # Save all positions (not just top N) grouped by game
-                total_saved = 0
-                for game_id, game_positions in positions_by_game.items():
-                    try:
-                        saved_count = self.supabase.batch_upsert_positions(
-                            user_id, game_positions, game_id
-                        )
-                        total_saved += saved_count
-                    except Exception as e:
-                        print(f"⚠️ Error saving {len(game_positions)} positions for game {game_id}: {e}")
-                
-                if total_saved > 0:
-                    print(f"   💾 [CRITICAL_POSITIONS] Saved {total_saved} critical positions from {len(positions_by_game)} games")
-        
-        return top_positions
+        # Group all positions by game for background persistence.
+        positions_by_game: Dict[str, List[Dict[str, Any]]] = {}
+        for pos in positions_to_save:
+            game_id = pos.get("from_game_id")
+            if game_id:
+                positions_by_game.setdefault(game_id, []).append(pos)
+
+        return top_positions, positions_by_game
+
+    def _persist_positions_by_game(self, user_id: str, positions_by_game: Dict[str, List[Dict[str, Any]]]) -> None:
+        """
+        Persist extracted positions to the DB (sync) — intended to run in a thread.
+        """
+        if not self.supabase or not user_id or not positions_by_game:
+            return
+        total_saved = 0
+        try:
+            for game_id, game_positions in positions_by_game.items():
+                try:
+                    saved_count = self.supabase.batch_upsert_positions(user_id, game_positions, game_id)
+                    total_saved += int(saved_count or 0)
+                except Exception as e:
+                    print(f"⚠️ [CRITICAL_POSITIONS_BG] Error saving {len(game_positions)} positions for game {game_id}: {e}")
+            if total_saved > 0:
+                print(f"   💾 [CRITICAL_POSITIONS_BG] Saved {total_saved} positions from {len(positions_by_game)} games (user_id={user_id})")
+        except Exception as e:
+            print(f"⚠️ [CRITICAL_POSITIONS_BG] Unexpected persistence error: {e}")
 
     @staticmethod
     def _compute_deltas(lifetime_stats: Dict[str, Any], rolling_window: Dict[str, Any]) -> Dict[str, Any]:

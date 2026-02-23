@@ -8345,7 +8345,32 @@ async def profile_analytics(user_id: str):
     print(f"✅ [PROFILE_ANALYTICS_ENDPOINT] Engine initialized, calling get_full_analytics for user_id: {user_id}")
     
     try:
-        analytics_data = await profile_analytics_engine.get_full_analytics(user_id)
+        # Fast path: return cached analytics immediately if available.
+        cached = None
+        try:
+            cached = profile_analytics_engine.get_cached_only(user_id)
+        except Exception:
+            cached = None
+
+        if cached is not None:
+            analytics_data = cached
+        else:
+            # Cold start: do not block the UI on a potentially heavy first computation.
+            # Kick computation in the background and return a lightweight placeholder.
+            try:
+                profile_analytics_engine.start_compute_if_needed(user_id)
+            except Exception:
+                pass
+            return {
+                "user_id": user_id,
+                "generated_at": datetime.now().isoformat(),
+                "status": "computing",
+                "lifetime_stats": {},
+                "patterns": {},
+                "strength_profile": {},
+                "rolling_window": {"status": "computing"},
+                "deltas": {},
+            }
         
         print(f"📦 [PROFILE_ANALYTICS_ENDPOINT] Analytics data received for user_id: {user_id}, keys: {list(analytics_data.keys())}")
         
