@@ -31,6 +31,7 @@ export default function ProfileDashboard({ onClose, initialTab = 'overview', onC
   const [error, setError] = useState<string | null>(null);
   const [analyticsData, setAnalyticsData] = useState<any>(null); // Start with null instead of dummy data
   const [profileStatus, setProfileStatus] = useState<any>(null); // Start with null instead of dummy data
+  const [profilePreferences, setProfilePreferences] = useState<any>(null); // from /profile/overview
   const [showPersonalReview, setShowPersonalReview] = useState(false);
   const [patternHistory, setPatternHistory] = useState<{current: any[], historical: any[]}>({ current: [], historical: [] }); // Start with empty arrays
   const backendBase = getBackendBase();
@@ -91,6 +92,7 @@ export default function ProfileDashboard({ onClose, initialTab = 'overview', onC
         if (response.ok) {
           const data = await response.json();
           const newStatus = data.status || null;
+          if (data?.preferences) setProfilePreferences(data.preferences);
           
           // Reduced logging - only log when state changes significantly
           if (newStatus?.state !== profileStatus?.state || 
@@ -549,6 +551,7 @@ export default function ProfileDashboard({ onClose, initialTab = 'overview', onC
                   }}
                   userId={user?.id}
                   backendBase={backendBase}
+                  preferences={profilePreferences}
                 />
               )}
               {!isUnpaid && activeTab === 'recent' && <RecentGamesTab userId={user?.id || ''} onCreateNewTab={onCreateNewTab} />}

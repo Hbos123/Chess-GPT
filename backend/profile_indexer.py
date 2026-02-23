@@ -295,7 +295,9 @@ class ProfileIndexingManager:
                 stats = self._compute_stats(games)
                 self._stats_cache[user_id] = stats
                 if self.supabase_client:
-                    self.supabase_client.save_profile_stats(user_id, stats)
+                    # Never block the request thread / event loop on Supabase writes.
+                    # Persist best-effort in the background.
+                    self._save_profile_stats_background(user_id, stats)
             elif self.supabase_client:
                 stored = self.supabase_client.get_profile_stats(user_id)
                 if stored and stored.get("stats"):
@@ -589,7 +591,43 @@ class ProfileIndexingManager:
         stats = self._compute_stats(games)
         self._stats_cache[user_id] = stats
         if self.supabase_client:
-            self.supabase_client.save_profile_stats(user_id, stats)
+            # Best-effort background persistence (do not block).
+            self._save_profile_stats_background(user_id, stats)
+
+    def _save_profile_stats_background(self, user_id: str, stats: Dict[str, Any]) -> None:
+        """
+        Persist profile stats without blocking hot paths.
+        NOTE: `supabase_client.save_profile_stats` includes `time.sleep` retries on connection issues,
+        so calling it inline can easily add 10s+ latency to endpoints like /profile/stats.
+        """
+        if not self.supabase_client:
+            return
+        try:
+            loop = asyncio.get_running_loop()
+        except Exception:
+            loop = None
+
+        if loop and loop.is_running():
+            try:
+                loop.create_task(asyncio.to_thread(self.supabase_client.save_profile_stats, user_id, stats))
+                return
+            except Exception:
+                # Fall back to a daemon thread below.
+                pass
+
+        # Safe fallback when called from a worker thread or outside an event loop.
+        try:
+            import threading
+
+            t = threading.Thread(
+                target=self.supabase_client.save_profile_stats,
+                args=(user_id, stats),
+                daemon=True,
+            )
+            t.start()
+        except Exception:
+            # Best-effort; never crash callers.
+            return
 
     def _compute_stats(self, games: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
         total_games = len(games)

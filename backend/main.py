@@ -7980,13 +7980,22 @@ async def profile_overview(user_id: str):
         if profile_indexer:
             in_memory_prefs = profile_indexer.load_preferences(user_id)
             print(f"   - In-memory prefs: {in_memory_prefs}")
+        # IMPORTANT: do not block the hot polling endpoint on Supabase/network calls.
+        # If we need this diagnostic, schedule it in the background.
         if supabase_client:
+            async def _debug_supabase_linked_accounts():
+                try:
+                    def _fetch_profile_row():
+                        return supabase_client.get_or_create_profile(user_id)
+                    profile_row = await asyncio.to_thread(_fetch_profile_row)
+                    supabase_linked = profile_row.get("linked_accounts") if profile_row else None
+                    print(f"   - (bg) Supabase linked_accounts: {supabase_linked}")
+                except Exception as e:
+                    print(f"   - (bg) Error fetching from Supabase: {e}")
             try:
-                profile_row = supabase_client.get_or_create_profile(user_id)
-                supabase_linked = profile_row.get("linked_accounts") if profile_row else None
-                print(f"   - Supabase linked_accounts: {supabase_linked}")
-            except Exception as e:
-                print(f"   - Error fetching from Supabase: {e}")
+                asyncio.create_task(_debug_supabase_linked_accounts())
+            except Exception:
+                pass
     
     # Log game counts
     games_count = len(games) if games else 0
@@ -8028,7 +8037,8 @@ async def profile_overview_snapshot(user_id: str, limit: int = 60):
 async def profile_stats(user_id: str):
     if not profile_indexer:
         raise HTTPException(status_code=503, detail="Profile indexer not initialized")
-    stats = profile_indexer.get_stats(user_id)
+    # get_stats may compute stats and/or touch Supabase. Keep the event loop responsive.
+    stats = await asyncio.to_thread(profile_indexer.get_stats, user_id)
     return {"stats": stats}
 
 

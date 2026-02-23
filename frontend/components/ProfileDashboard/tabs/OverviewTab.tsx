@@ -9,9 +9,13 @@ interface OverviewTabProps {
   onOpenPersonalReview?: () => void;
   userId?: string;
   backendBase?: string;
+  preferences?: {
+    accounts?: Array<{ platform: string; username: string }>;
+    time_controls?: string[];
+  } | null;
 }
 
-export default function OverviewTab({ data, profileStatus, onOpenPersonalReview, userId, backendBase }: OverviewTabProps) {
+export default function OverviewTab({ data, profileStatus, onOpenPersonalReview, userId, backendBase, preferences }: OverviewTabProps) {
   // Always render the UI structure, even with empty data
   const isComputing = data?.status === "computing";
   const hasError = data?.error;
@@ -81,25 +85,18 @@ export default function OverviewTab({ data, profileStatus, onOpenPersonalReview,
     };
   }, [profileStatus?.target_games, isSignedIn]); // Only depend on target and sign-in state
   
-  // Load linked accounts from profile overview
+  // Load linked accounts from ProfileDashboard's /profile/overview response (avoid duplicate fetch).
   useEffect(() => {
-    if (!userId || !backendBase || isUnpaid) return;
-    
-    const loadAccounts = async () => {
-      try {
-        const response = await fetch(`${backendBase.replace(/\/$/, "")}/profile/overview?user_id=${userId}`);
-        if (response.ok) {
-          const data = await response.json();
-          const accounts = data.preferences?.accounts || [];
-          setLinkedAccounts(accounts);
-        }
-      } catch (e) {
-        console.warn("[OverviewTab] Failed to load accounts:", e);
-      }
-    };
-    
-    loadAccounts();
-  }, [userId, backendBase, isUnpaid]);
+    if (isUnpaid) return;
+    // Don't clobber user's in-progress edits.
+    if (isEditing) return;
+    const accounts = Array.isArray(preferences?.accounts) ? preferences!.accounts! : [];
+    setLinkedAccounts(accounts);
+    // NOTE: intentionally do not depend on `isEditing` so we don't "snap back" to
+    // stale preferences right after the user finishes editing/saving. We'll
+    // resync when preferences actually change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [preferences?.accounts, isUnpaid]);
   
   // Cache diagnostic insights
   useEffect(() => {
