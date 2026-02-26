@@ -7219,6 +7219,8 @@ async def create_checkout(payload: CheckoutPayload):
             "success_url": f"{return_url}/settings?success=true",
             "cancel_url": f"{return_url}/settings?canceled=true",
             "metadata": {"user_id": payload.user_id},
+            # Ensure the resulting subscription is linkable back to the user even if webhook mapping fails.
+            "subscription_data": {"metadata": {"user_id": payload.user_id}},
             "allow_promotion_codes": bool(payload.allow_promotion_codes) if payload.allow_promotion_codes is not None else True,
         }
 
@@ -7275,6 +7277,7 @@ async def cancel_subscription(payload: CancelSubscriptionPayload):
     stripe_customer_id: Optional[str] = None
     subscription_id: Optional[str] = None
 
+    print(f"[CANCEL_SUBSCRIPTION] Request user_id={payload.user_id} at_period_end={payload.at_period_end} mode={stripe_mode}")
     # If frontend didn't pass email, try to fetch it via Supabase Admin API (best-effort).
     user_email = (payload.user_email or "").strip() or None
     if not user_email:
@@ -7289,6 +7292,8 @@ async def cancel_subscription(payload: CancelSubscriptionPayload):
                     user_email = (r.json() or {}).get("email") or None
         except Exception as e:
             print(f"[CANCEL_SUBSCRIPTION] ⚠️ Failed to fetch email via admin API: {e}")
+    if user_email:
+        print(f"[CANCEL_SUBSCRIPTION] Using email: {user_email}")
     try:
         raw = await asyncio.to_thread(
             lambda: supabase_client.client.table("user_subscriptions")
@@ -7362,6 +7367,23 @@ async def cancel_subscription(payload: CancelSubscriptionPayload):
         except Exception as e:
             print(f"[CANCEL_SUBSCRIPTION] ⚠️ Failed to resolve customer by email: {e}")
 
+    # If email lookup didn't find anything, try searching customers by metadata.user_id.
+    # (This requires Stripe's Search API to be enabled; it's supported in modern Stripe accounts.)
+    if not stripe_customer_id:
+        try:
+            query = f"metadata['user_id']:'{payload.user_id}'"
+            res = stripe.Customer.search(query=query, limit=5)
+            if res.data:
+                stripe_customer_id = res.data[0].id
+                await asyncio.to_thread(
+                    supabase_client.upsert_user_subscription,
+                    user_id=payload.user_id,
+                    stripe_customer_id=stripe_customer_id,
+                )
+                print(f"[CANCEL_SUBSCRIPTION] ✅ Found Stripe customer via metadata search: {stripe_customer_id}")
+        except Exception as e:
+            print(f"[CANCEL_SUBSCRIPTION] ⚠️ Customer.search by metadata failed: {e}")
+
     # Resolve subscription id by listing subscriptions for the customer if needed
     if not subscription_id and stripe_customer_id:
         try:
@@ -7410,7 +7432,11 @@ async def cancel_subscription(payload: CancelSubscriptionPayload):
             print(f"[CANCEL_SUBSCRIPTION] ⚠️ Failed listing subscriptions for customer {stripe_customer_id}: {e}")
 
     if not subscription_id:
-        raise HTTPException(status_code=400, detail="No active Stripe subscription found for this user.")
+        detail = "No active Stripe subscription found for this user."
+        if user_email:
+            detail += f" (email tried: {user_email})"
+        detail += f" (stripe mode: {stripe_mode})"
+        raise HTTPException(status_code=400, detail=detail)
 
     try:
         if payload.at_period_end:
