@@ -7274,6 +7274,21 @@ async def cancel_subscription(payload: CancelSubscriptionPayload):
     # when status is not active/trialing. Cancellation must work even if our local status is stale.
     stripe_customer_id: Optional[str] = None
     subscription_id: Optional[str] = None
+
+    # If frontend didn't pass email, try to fetch it via Supabase Admin API (best-effort).
+    user_email = (payload.user_email or "").strip() or None
+    if not user_email:
+        try:
+            import requests
+            supabase_url = os.getenv("SUPABASE_URL")
+            service_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+            if supabase_url and service_key:
+                headers = {"apikey": service_key, "Authorization": f"Bearer {service_key}"}
+                r = requests.get(f"{supabase_url}/auth/v1/admin/users/{payload.user_id}", headers=headers, timeout=10)
+                if r.status_code == 200:
+                    user_email = (r.json() or {}).get("email") or None
+        except Exception as e:
+            print(f"[CANCEL_SUBSCRIPTION] ⚠️ Failed to fetch email via admin API: {e}")
     try:
         raw = await asyncio.to_thread(
             lambda: supabase_client.client.table("user_subscriptions")
@@ -7323,16 +7338,16 @@ async def cancel_subscription(payload: CancelSubscriptionPayload):
                 print(f"[CANCEL_SUBSCRIPTION] ⚠️ Error validating customer {stripe_customer_id}: {e}")
 
     # If we don't have a valid customer id, attempt to locate by email (best-effort)
-    if not stripe_customer_id and payload.user_email:
+    if not stripe_customer_id and user_email:
         try:
-            customers = stripe.Customer.list(email=payload.user_email, limit=10)
+            customers = stripe.Customer.list(email=user_email, limit=10)
             if customers.data:
                 # Prefer a customer with an active/trialing subscription
                 picked = None
                 for c in customers.data:
                     try:
                         subs = stripe.Subscription.list(customer=c.id, status="all", limit=10)
-                        if any(getattr(s, "status", None) in ("active", "trialing") for s in subs.data):
+                        if any(getattr(s, "status", None) in ("active", "trialing", "past_due", "unpaid", "paused") for s in subs.data):
                             picked = c.id
                             break
                     except Exception:
@@ -7351,11 +7366,33 @@ async def cancel_subscription(payload: CancelSubscriptionPayload):
     if not subscription_id and stripe_customer_id:
         try:
             subs = stripe.Subscription.list(customer=stripe_customer_id, status="all", limit=10)
-            # Prefer active/trialing
+            # Prefer any non-canceled subscription first (active-like)
+            active_like = []
+            canceled = []
             for s in subs.data:
-                if getattr(s, "status", None) in ("active", "trialing"):
+                st = getattr(s, "status", None)
+                if st == "canceled":
+                    canceled.append(s)
+                else:
+                    active_like.append(s)
+
+            # Prefer active/trialing/past_due/etc.
+            for s in subs.data:
+                if getattr(s, "status", None) in ("active", "trialing", "past_due", "unpaid", "paused"):
                     subscription_id = s.id
                     break
+            # If nothing active-like, but there are subscriptions, return "already canceled" rather than 400.
+            if not subscription_id and canceled:
+                most_recent = sorted(canceled, key=lambda x: getattr(x, "created", 0) or 0, reverse=True)[0]
+                cpe = getattr(most_recent, "current_period_end", None)
+                return {
+                    "success": True,
+                    "mode": stripe_mode,
+                    "subscription_id": getattr(most_recent, "id", None),
+                    "already_canceled": True,
+                    "status": "canceled",
+                    "current_period_end": datetime.fromtimestamp(cpe).isoformat() if cpe else None,
+                }
             if not subscription_id and subs.data:
                 subscription_id = subs.data[0].id
             if subscription_id:
@@ -7379,6 +7416,9 @@ async def cancel_subscription(payload: CancelSubscriptionPayload):
         if payload.at_period_end:
             sub = stripe.Subscription.modify(subscription_id, cancel_at_period_end=True)
             print(f"[CANCEL_SUBSCRIPTION] ✅ Scheduled cancellation at period end for sub {subscription_id} (mode={stripe_mode})")
+            if getattr(sub, "cancel_at_period_end", False):
+                # If it was already scheduled, return that explicitly.
+                pass
             # Best-effort: store the time the user requested cancellation (does NOT change tier gating).
             try:
                 if supabase_client and supabase_client.client:
@@ -7395,6 +7435,7 @@ async def cancel_subscription(payload: CancelSubscriptionPayload):
                 "mode": stripe_mode,
                 "subscription_id": subscription_id,
                 "cancel_at_period_end": True,
+                "already_scheduled": bool(getattr(sub, "cancel_at_period_end", False)),
                 "current_period_end": datetime.fromtimestamp(sub.current_period_end).isoformat() if getattr(sub, "current_period_end", None) else None,
                 "status": getattr(sub, "status", None),
             }

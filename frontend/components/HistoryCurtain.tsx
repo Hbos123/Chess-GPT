@@ -1478,6 +1478,7 @@ export default function HistoryCurtain({
     // Determine current tier
     const currentTierId = subscriptionInfo?.tier_id || 'unpaid';
     const isActive = subscriptionInfo?.status === 'active' || subscriptionInfo?.status === 'trialing';
+    const cancelScheduled = !!subscriptionInfo?.canceled_at;
 
     return (
       <div className="curtain-content">
@@ -1531,13 +1532,18 @@ export default function HistoryCurtain({
                     </div>
                     {subscriptionInfo?.current_period_end && (
                       <div>
-                        <span style={{ display: 'block', marginBottom: '2px' }}>Renews</span>
+                        <span style={{ display: 'block', marginBottom: '2px' }}>{cancelScheduled ? "Ends" : "Renews"}</span>
                         <span style={{ color: 'var(--text-primary)', fontWeight: '500' }}>
                           {formatDate(subscriptionInfo.current_period_end)}
                         </span>
                       </div>
                     )}
                   </div>
+                  {cancelScheduled && subscriptionInfo?.current_period_end && (
+                    <div style={{ marginTop: '10px', fontSize: '13px', color: 'var(--text-secondary)' }}>
+                      Cancellation is scheduled. You'll keep access until {formatDate(subscriptionInfo.current_period_end)}.
+                    </div>
+                  )}
                   {isActive && (
                     <div style={{ marginTop: '12px', display: 'flex', gap: '8px' }}>
                       <button 
@@ -1565,31 +1571,33 @@ export default function HistoryCurtain({
                       >
                         Manage subscription
                       </button>
-                      <button 
-                        type="button" 
-                        onClick={handleCancelSubscription}
-                        style={{
-                          padding: '8px 16px',
-                          background: 'transparent',
-                          color: '#ef4444',
-                          border: '1px solid var(--border-color)',
-                          borderRadius: '6px',
-                          cursor: 'pointer',
-                          fontSize: '14px',
-                          fontWeight: '500',
-                          transition: 'all 0.2s',
-                        }}
-                        onMouseEnter={(e) => {
-                          e.currentTarget.style.background = 'rgba(239, 68, 68, 0.1)';
-                          e.currentTarget.style.borderColor = '#ef4444';
-                        }}
-                        onMouseLeave={(e) => {
-                          e.currentTarget.style.background = 'transparent';
-                          e.currentTarget.style.borderColor = 'var(--border-color)';
-                        }}
-                      >
-                        Cancel subscription
-                      </button>
+                      {!cancelScheduled && (
+                        <button 
+                          type="button" 
+                          onClick={handleCancelSubscription}
+                          style={{
+                            padding: '8px 16px',
+                            background: 'transparent',
+                            color: '#ef4444',
+                            border: '1px solid var(--border-color)',
+                            borderRadius: '6px',
+                            cursor: 'pointer',
+                            fontSize: '14px',
+                            fontWeight: '500',
+                            transition: 'all 0.2s',
+                          }}
+                          onMouseEnter={(e) => {
+                            e.currentTarget.style.background = 'rgba(239, 68, 68, 0.1)';
+                            e.currentTarget.style.borderColor = '#ef4444';
+                          }}
+                          onMouseLeave={(e) => {
+                            e.currentTarget.style.background = 'transparent';
+                            e.currentTarget.style.borderColor = 'var(--border-color)';
+                          }}
+                        >
+                          Cancel subscription
+                        </button>
+                      )}
                     </div>
                   )}
                 </div>

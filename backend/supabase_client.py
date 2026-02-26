@@ -159,7 +159,7 @@ class SupabaseClient:
             result = (
                 self.client.table("user_subscriptions")
                 .select(
-                    "tier_id,status,current_period_start,current_period_end,stripe_customer_id,stripe_subscription_id,"
+                    "tier_id,status,current_period_start,current_period_end,canceled_at,stripe_customer_id,stripe_subscription_id,"
                     "subscription_tiers(id,name,daily_messages,daily_tokens,max_games_storage,max_lessons_per_day,max_game_reviews_per_day)"
                 )
                 .eq("user_id", user_id)
@@ -185,6 +185,7 @@ class SupabaseClient:
                     "status": "inactive",
                     "current_period_start": None,
                     "current_period_end": None,
+                    "canceled_at": None,
                     "stripe_customer_id": None,
                     "stripe_subscription_id": None,
                     "tier": tier_row,
@@ -210,6 +211,7 @@ class SupabaseClient:
                     "status": raw_status,
                 "current_period_start": row.get("current_period_start"),
                 "current_period_end": row.get("current_period_end"),
+                    "canceled_at": row.get("canceled_at"),
                     "stripe_customer_id": row.get("stripe_customer_id") if effective_tier_id != "unpaid" else None,
                     "stripe_subscription_id": row.get("stripe_subscription_id") if effective_tier_id != "unpaid" else None,
                     "tier": tier_row,
