@@ -6924,6 +6924,207 @@ class CancelSubscriptionPayload(BaseModel):
     user_email: Optional[str] = None  # Used for fallback lookup if needed
 
 
+class SubscriptionReconcilePayload(BaseModel):
+    user_id: str
+    user_email: Optional[str] = None
+
+
+@app.post("/profile/subscription/reconcile")
+async def reconcile_subscription(payload: SubscriptionReconcilePayload):
+    """
+    Reconcile Supabase's user_subscriptions row with Stripe on login/session hydrate.
+    This prevents stale local tiers (e.g. showing Lite) when Stripe has no subscription.
+    """
+    if not supabase_client:
+        raise HTTPException(status_code=503, detail="Supabase client not initialized")
+
+    stripe_secret = os.getenv("STRIPE_SECRET_KEY")
+    if not stripe_secret:
+        raise HTTPException(status_code=500, detail="STRIPE_SECRET_KEY not set on backend")
+
+    try:
+        import stripe  # type: ignore
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Stripe library not available: {str(e)}")
+
+    stripe.api_key = stripe_secret
+    stripe_mode = "test" if stripe_secret.startswith("sk_test_") else "live"
+
+    user_id = payload.user_id
+    user_email = (payload.user_email or "").strip() or None
+    print(f"[SUB_RECONCILE] user_id={user_id} mode={stripe_mode} email={user_email or '—'}")
+
+    # Read raw row (may not exist)
+    row = None
+    try:
+        raw = await asyncio.to_thread(
+            lambda: supabase_client.client.table("user_subscriptions")
+            .select("tier_id,status,stripe_customer_id,stripe_subscription_id,current_period_start,current_period_end,canceled_at")
+            .eq("user_id", user_id)
+            .limit(1)
+            .execute()
+        )
+        row = (raw.data[0] if getattr(raw, "data", None) else None) or None
+    except Exception as e:
+        print(f"[SUB_RECONCILE] ⚠️ Failed reading user_subscriptions row: {e}")
+
+    stripe_customer_id = (row or {}).get("stripe_customer_id")
+    stripe_subscription_id = (row or {}).get("stripe_subscription_id")
+
+    # Validate stored ids
+    if stripe_customer_id:
+        try:
+            stripe.Customer.retrieve(stripe_customer_id)
+        except Exception:
+            stripe_customer_id = None
+    if stripe_subscription_id:
+        try:
+            stripe.Subscription.retrieve(stripe_subscription_id)
+        except Exception:
+            stripe_subscription_id = None
+
+    # Resolve customer
+    if not stripe_customer_id and user_email:
+        try:
+            customers = stripe.Customer.list(email=user_email, limit=10)
+            if customers.data:
+                stripe_customer_id = customers.data[0].id
+        except Exception as e:
+            print(f"[SUB_RECONCILE] ⚠️ Customer.list by email failed: {e}")
+
+    if not stripe_customer_id:
+        try:
+            q = f"metadata['user_id']:'{user_id}'"
+            res = stripe.Customer.search(query=q, limit=5)
+            if res.data:
+                stripe_customer_id = res.data[0].id
+        except Exception as e:
+            print(f"[SUB_RECONCILE] ⚠️ Customer.search by metadata failed: {e}")
+
+    # Resolve subscription by listing customer subs
+    sub_obj = None
+    if stripe_subscription_id:
+        try:
+            sub_obj = stripe.Subscription.retrieve(stripe_subscription_id)
+        except Exception:
+            sub_obj = None
+            stripe_subscription_id = None
+
+    if not sub_obj and stripe_customer_id:
+        try:
+            subs = stripe.Subscription.list(customer=stripe_customer_id, status="all", limit=10)
+            # Prefer active/trialing/past_due/paused/unpaid, else most recent canceled
+            preferred_status = ("active", "trialing", "past_due", "unpaid", "paused")
+            picked = None
+            canceled = []
+            for s in subs.data:
+                st = getattr(s, "status", None)
+                if st in preferred_status:
+                    picked = s
+                    break
+                if st == "canceled":
+                    canceled.append(s)
+            if not picked and canceled:
+                picked = sorted(canceled, key=lambda x: getattr(x, "created", 0) or 0, reverse=True)[0]
+            sub_obj = picked
+            stripe_subscription_id = getattr(picked, "id", None) if picked else None
+        except Exception as e:
+            print(f"[SUB_RECONCILE] ⚠️ Subscription.list failed: {e}")
+
+    # Determine tier mapping
+    tier_id = "unpaid"
+    status = "canceled"
+    current_period_start = None
+    current_period_end = None
+    canceled_at = (row or {}).get("canceled_at")
+
+    if sub_obj:
+        status = getattr(sub_obj, "status", None) or "active"
+        cpe = getattr(sub_obj, "current_period_end", None)
+        cps = getattr(sub_obj, "current_period_start", None)
+        current_period_end = datetime.fromtimestamp(cpe).isoformat() if cpe else None
+        current_period_start = datetime.fromtimestamp(cps).isoformat() if cps else None
+
+        # Cancel scheduled at period end -> mark canceled_at for UI
+        if getattr(sub_obj, "cancel_at_period_end", False) and not canceled_at:
+            canceled_at = datetime.utcnow().isoformat()
+
+        try:
+            price_id = sub_obj.get("items", {}).get("data", [{}])[0].get("price", {}).get("id")
+            product_id = sub_obj.get("items", {}).get("data", [{}])[0].get("price", {}).get("product")
+        except Exception:
+            price_id = None
+            product_id = None
+
+        # Prefer DB mapping by stripe_price_id
+        if price_id:
+            try:
+                tier_result = (
+                    supabase_client.client.table("subscription_tiers")
+                    .select("id")
+                    .eq("stripe_price_id", price_id)
+                    .limit(1)
+                    .execute()
+                )
+                if tier_result.data and len(tier_result.data) > 0:
+                    tier_id = tier_result.data[0].get("id") or tier_id
+            except Exception:
+                pass
+        # Fallback: hardcoded product mapping (kept in sync with webhook)
+        if tier_id == "unpaid" and product_id:
+            product_to_tier = {
+                "prod_TsQo1zbH6bGfdI": "lite",
+                "prod_TsQoQi21vEIH81": "starter",
+                "prod_TsQphLJLlX0wO1": "full",
+            }
+            tier_id = product_to_tier.get(product_id, tier_id)
+
+        # Only treat paid tiers as active/trialing; otherwise downgrade.
+        if status not in ("active", "trialing"):
+            tier_id = "unpaid"
+
+    # If there is no subscription at all, and we had a stale paid tier, downgrade to unpaid/canceled.
+    # If there's no row, we avoid creating one (unpaid users don't need a record).
+    if not row and tier_id == "unpaid":
+        return {"success": True, "mode": stripe_mode, "reconciled": True, "note": "No subscription row; treated as unpaid."}
+
+    try:
+        await asyncio.to_thread(
+            lambda: supabase_client.client.table("user_subscriptions")
+            .upsert(
+                {
+                    "user_id": user_id,
+                    "tier_id": tier_id,
+                    "status": status if status in ("active", "trialing", "past_due", "canceled") else "canceled",
+                    "stripe_customer_id": stripe_customer_id,
+                    "stripe_subscription_id": stripe_subscription_id,
+                    "current_period_start": current_period_start,
+                    "current_period_end": current_period_end,
+                    "canceled_at": canceled_at,
+                    "updated_at": datetime.utcnow().isoformat(),
+                },
+                on_conflict="user_id",
+            )
+            .execute()
+        )
+        supabase_client.invalidate_subscription_cache(user_id)
+    except Exception as e:
+        print(f"[SUB_RECONCILE] ❌ Failed updating user_subscriptions: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to reconcile subscription: {str(e)}")
+
+    return {
+        "success": True,
+        "mode": stripe_mode,
+        "reconciled": True,
+        "tier_id": tier_id,
+        "status": status,
+        "stripe_customer_id": stripe_customer_id,
+        "stripe_subscription_id": stripe_subscription_id,
+        "current_period_end": current_period_end,
+        "canceled_at": canceled_at,
+    }
+
+
 @app.post("/billing/portal")
 async def billing_portal(payload: BillingPortalPayload):
     """

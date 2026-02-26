@@ -1,8 +1,9 @@
 "use client";
 
-import { createContext, useContext, useEffect, useState } from 'react';
+import { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { clearSupabaseAuthStorage, supabase, getSession, getUser } from '@/lib/supabase';
 import type { User, Session } from '@supabase/supabase-js';
+import { getBackendBase } from "@/lib/backendBase";
 
 interface AuthContextType {
   user: User | null;
@@ -30,6 +31,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
+  const lastReconciledUserIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     let isMounted = true;
@@ -161,6 +163,42 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     };
   }, []);
+
+  // On every login/session hydrate, reconcile subscription state with Stripe.
+  // This prevents stale Supabase tier rows from showing "Lite" when Stripe has no subscription.
+  useEffect(() => {
+    if (!user?.id) return;
+    if (!session) return;
+    if (lastReconciledUserIdRef.current === user.id) return;
+    lastReconciledUserIdRef.current = user.id;
+
+    const backendBase = getBackendBase();
+    const email = (session.user as any)?.email || undefined;
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 2500);
+
+    (async () => {
+      try {
+        await fetch(`${backendBase.replace(/\/$/, "")}/profile/subscription/reconcile`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ user_id: user.id, user_email: email }),
+          signal: controller.signal,
+        });
+      } catch (e) {
+        // Best-effort: never block app load on billing reconciliation
+        console.warn("[AuthContext] Subscription reconcile skipped/failed:", e);
+      } finally {
+        clearTimeout(timeout);
+      }
+    })();
+
+    return () => {
+      clearTimeout(timeout);
+      controller.abort();
+    };
+  }, [user?.id, session]);
 
   const handleSignOut = async () => {
     // Supabase auth-js has been observed to hang in this repo's dev environment.
