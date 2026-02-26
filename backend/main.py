@@ -6930,10 +6930,27 @@ async def billing_portal(payload: BillingPortalPayload):
         raise HTTPException(status_code=500, detail=f"Stripe library not available: {str(e)}")
 
     stripe.api_key = stripe_secret
+    stripe_mode = "test" if stripe_secret.startswith("sk_test_") else "live"
+    print(f"[BILLING_PORTAL] Stripe mode: {stripe_mode}")
 
     # Get existing Stripe customer ID
     stripe_customer_id = await asyncio.to_thread(supabase_client.get_stripe_customer_id, payload.user_id)
     print(f"[BILLING_PORTAL] User {payload.user_id} - Existing customer ID: {stripe_customer_id}")
+
+    # Validate existing customer id (can be stale or from the other Stripe env/account)
+    if stripe_customer_id:
+        try:
+            stripe.Customer.retrieve(stripe_customer_id)
+        except Exception as e:
+            msg = str(e)
+            if "No such customer" in msg or "resource_missing" in msg:
+                print(
+                    f"[BILLING_PORTAL] ⚠️ Stored Stripe customer {stripe_customer_id} not found in this Stripe account ({stripe_mode}); will relink by email."
+                )
+                stripe_customer_id = None
+            else:
+                # Unknown Stripe error: keep id and let Session.create raise a useful error
+                print(f"[BILLING_PORTAL] ⚠️ Error validating Stripe customer {stripe_customer_id}: {e}")
     
     # If no customer ID, try to find by email or create new customer
     if not stripe_customer_id:
@@ -6983,13 +7000,20 @@ async def billing_portal(payload: BillingPortalPayload):
                 print(f"[BILLING_PORTAL] Found {len(customers.data)} Stripe customer(s) with email {user_email}")
                 
                 if customers.data and len(customers.data) > 0:
-                    # Use the first one (most recent)
-                    stripe_customer_id = customers.data[0].id
+                    # Prefer a customer that already has a subscription, otherwise fall back to the first.
+                    picked_customer_id = None
+                    try:
+                        for c in customers.data:
+                            subs = stripe.Subscription.list(customer=c.id, limit=1)
+                            if subs.data:
+                                picked_customer_id = c.id
+                                break
+                    except Exception as pick_err:
+                        print(f"[BILLING_PORTAL] ⚠️ Error selecting best customer by subscriptions: {pick_err}")
+                        picked_customer_id = None
+
+                    stripe_customer_id = picked_customer_id or customers.data[0].id
                     print(f"[BILLING_PORTAL] Using customer: {stripe_customer_id}")
-                    
-                    # Check if this customer has any subscriptions
-                    subscriptions = stripe.Subscription.list(customer=stripe_customer_id, limit=10)
-                    print(f"[BILLING_PORTAL] Customer has {len(subscriptions.data)} subscription(s)")
                     
                     # Link it to the user
                     await asyncio.to_thread(
@@ -7048,6 +7072,24 @@ async def billing_portal(payload: BillingPortalPayload):
         print(f"[BILLING_PORTAL] ✅ Created billing portal session for customer {stripe_customer_id}")
         return {"url": session.url}
     except Exception as e:
+        # If we raced with a deletion or had a stale id that slipped through, attempt one recovery
+        msg = str(e)
+        if ("No such customer" in msg or "resource_missing" in msg) and payload.user_email:
+            print(f"[BILLING_PORTAL] ⚠️ Portal failed due to missing customer; retrying relink by email for user {payload.user_id}")
+            try:
+                customers = stripe.Customer.list(email=payload.user_email, limit=10)
+                if customers.data:
+                    stripe_customer_id = customers.data[0].id
+                    await asyncio.to_thread(
+                        supabase_client.upsert_user_subscription,
+                        user_id=payload.user_id,
+                        stripe_customer_id=stripe_customer_id,
+                    )
+                    session = stripe.billing_portal.Session.create(customer=stripe_customer_id, return_url=return_url)
+                    print(f"[BILLING_PORTAL] ✅ Recovered and created billing portal session for customer {stripe_customer_id}")
+                    return {"url": session.url}
+            except Exception as retry_err:
+                print(f"[BILLING_PORTAL] ❌ Retry recovery failed: {retry_err}")
         print(f"[BILLING_PORTAL] ❌ Failed to create billing portal session: {e}")
         import traceback
         traceback.print_exc()
@@ -7073,6 +7115,8 @@ async def create_checkout(payload: CheckoutPayload):
         raise HTTPException(status_code=500, detail=f"Stripe library not available: {str(e)}")
 
     stripe.api_key = stripe_secret
+    stripe_mode = "test" if stripe_secret.startswith("sk_test_") else "live"
+    print(f"[CHECKOUT] Stripe mode: {stripe_mode}")
 
     # Get the default price for this product
     try:
@@ -7088,6 +7132,20 @@ async def create_checkout(payload: CheckoutPayload):
 
     # Get or create Stripe customer
     stripe_customer_id = await asyncio.to_thread(supabase_client.get_stripe_customer_id, payload.user_id)
+
+    # Validate existing customer id (can be stale or from the other Stripe env/account)
+    if stripe_customer_id:
+        try:
+            stripe.Customer.retrieve(stripe_customer_id)
+        except Exception as e:
+            msg = str(e)
+            if "No such customer" in msg or "resource_missing" in msg:
+                print(
+                    f"[CHECKOUT] ⚠️ Stored Stripe customer {stripe_customer_id} not found in this Stripe account ({stripe_mode}); will recreate/relink by email."
+                )
+                stripe_customer_id = None
+            else:
+                print(f"[CHECKOUT] ⚠️ Error validating Stripe customer {stripe_customer_id}: {e}")
     
     # If no customer, create one
     if not stripe_customer_id:
