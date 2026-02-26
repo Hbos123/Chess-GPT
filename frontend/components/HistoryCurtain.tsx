@@ -300,7 +300,8 @@ export default function HistoryCurtain({
         body: JSON.stringify({
           user_id: userId,
           user_email: userEmail, // Pass email from frontend
-          return_url: typeof window !== "undefined" ? window.location.href : undefined,
+          // Use a stable return URL so Stripe's "Return to ..." always gets the user back to Settings.
+          return_url: typeof window !== "undefined" ? `${window.location.origin}/settings` : undefined,
         }),
       });
       if (!res.ok) {
@@ -317,8 +318,10 @@ export default function HistoryCurtain({
           }
           popup.location.href = data.url;
         } else {
-          // Fallback if popup was blocked
-          window.location.href = data.url;
+          // Popup was blocked — do not hijack the current tab. Let the user choose.
+          const openHere = confirm("Your browser blocked the subscription portal popup. Open it in this tab instead?");
+          if (openHere) window.location.href = data.url;
+          else alert("Please allow popups for Chesster to open the subscription portal in a new tab.");
         }
       }
       else throw new Error("No portal URL returned.");

@@ -6891,7 +6891,8 @@ async def profile_subscription(user_id: str):
     if not supabase_client:
         raise HTTPException(status_code=503, detail="Supabase client not initialized")
     try:
-        data = await asyncio.to_thread(supabase_client.get_subscription_overview, user_id)
+        # Settings UI should be accurate; avoid serving stale in-memory cache here.
+        data = await asyncio.to_thread(supabase_client.get_subscription_overview, user_id, False)
         return data
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to fetch subscription: {str(e)}")
@@ -7081,6 +7082,21 @@ async def billing_portal(payload: BillingPortalPayload):
     )
 
     try:
+        # If there's no subscription at all for this customer, the portal looks like a dead-end.
+        # Return a helpful message instead so the UI can guide the user.
+        try:
+            subs = stripe.Subscription.list(customer=stripe_customer_id, status="all", limit=1)
+            if not subs.data:
+                raise HTTPException(
+                    status_code=400,
+                    detail="No Stripe subscription found for this account yet. If you meant to subscribe, use the plan buttons first.",
+                )
+        except HTTPException:
+            raise
+        except Exception as sub_check_err:
+            # Don't block portal on a transient Stripe error; just log it.
+            print(f"[BILLING_PORTAL] ⚠️ Could not check subscriptions for customer {stripe_customer_id}: {sub_check_err}")
+
         session = stripe.billing_portal.Session.create(customer=stripe_customer_id, return_url=return_url)
         print(f"[BILLING_PORTAL] ✅ Created billing portal session for customer {stripe_customer_id}")
         return {"url": session.url}
