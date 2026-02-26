@@ -6908,6 +6908,19 @@ class CheckoutPayload(BaseModel):
     user_email: Optional[str] = None
     product_id: str  # Stripe Product ID (we'll get the default price)
     return_url: Optional[str] = None
+    # Coupons / promo codes:
+    # - allow_promotion_codes enables the "Add promotion code" box on Stripe Checkout.
+    # - coupon_id applies a specific Stripe coupon (id like "coupon_...") programmatically.
+    # - promo_code can be either a promotion code id ("promo_...") or the human code (e.g. "WELCOME10").
+    allow_promotion_codes: Optional[bool] = True
+    coupon_id: Optional[str] = None
+    promo_code: Optional[str] = None
+
+
+class CancelSubscriptionPayload(BaseModel):
+    user_id: str
+    at_period_end: bool = True
+    user_email: Optional[str] = None  # Used for fallback lookup if needed
 
 
 @app.post("/billing/portal")
@@ -7199,14 +7212,34 @@ async def create_checkout(payload: CheckoutPayload):
     )
 
     try:
-        session = stripe.checkout.Session.create(
-            customer=stripe_customer_id,
-            line_items=[{"price": price_id, "quantity": 1}],
-            mode="subscription",
-            success_url=f"{return_url}/settings?success=true",
-            cancel_url=f"{return_url}/settings?canceled=true",
-            metadata={"user_id": payload.user_id},
-        )
+        session_kwargs: Dict[str, Any] = {
+            "customer": stripe_customer_id,
+            "line_items": [{"price": price_id, "quantity": 1}],
+            "mode": "subscription",
+            "success_url": f"{return_url}/settings?success=true",
+            "cancel_url": f"{return_url}/settings?canceled=true",
+            "metadata": {"user_id": payload.user_id},
+            "allow_promotion_codes": bool(payload.allow_promotion_codes) if payload.allow_promotion_codes is not None else True,
+        }
+
+        # Optional: apply coupon/promo programmatically (still compatible with allow_promotion_codes).
+        if payload.coupon_id:
+            session_kwargs["discounts"] = [{"coupon": payload.coupon_id}]
+        elif payload.promo_code:
+            promo = payload.promo_code.strip()
+            promo_id = promo if promo.startswith("promo_") else None
+            if not promo_id:
+                try:
+                    promos = stripe.PromotionCode.list(code=promo, active=True, limit=1)
+                    if promos.data:
+                        promo_id = promos.data[0].id
+                except Exception as promo_err:
+                    raise HTTPException(status_code=400, detail=f"Invalid promo code: {str(promo_err)}")
+            if not promo_id:
+                raise HTTPException(status_code=400, detail="Invalid promo code.")
+            session_kwargs["discounts"] = [{"promotion_code": promo_id}]
+
+        session = stripe.checkout.Session.create(**session_kwargs)
         print(f"[CHECKOUT] Created checkout session for customer {stripe_customer_id}")
         return {"url": session.url}
     except Exception as e:
@@ -7214,6 +7247,89 @@ async def create_checkout(payload: CheckoutPayload):
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Failed to create checkout session: {str(e)}")
+
+
+@app.post("/billing/cancel-subscription")
+async def cancel_subscription(payload: CancelSubscriptionPayload):
+    """
+    Cancel the user's Stripe subscription.
+    Default behavior is cancel at period end (user keeps access until period end).
+    """
+    if not supabase_client:
+        raise HTTPException(status_code=503, detail="Supabase client not initialized")
+
+    stripe_secret = os.getenv("STRIPE_SECRET_KEY")
+    if not stripe_secret:
+        raise HTTPException(status_code=500, detail="STRIPE_SECRET_KEY not set on backend")
+
+    try:
+        import stripe  # type: ignore
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Stripe library not available: {str(e)}")
+
+    stripe.api_key = stripe_secret
+    stripe_mode = "test" if stripe_secret.startswith("sk_test_") else "live"
+
+    # Try to get subscription id from Supabase first
+    overview = await asyncio.to_thread(supabase_client.get_subscription_overview, payload.user_id, False)
+    stripe_customer_id = overview.get("stripe_customer_id")
+    subscription_id = overview.get("stripe_subscription_id")
+
+    # Fallback: list subscriptions by customer if needed
+    if not subscription_id and stripe_customer_id:
+        try:
+            subs = stripe.Subscription.list(customer=stripe_customer_id, status="all", limit=10)
+            # Prefer active/trialing
+            for s in subs.data:
+                if getattr(s, "status", None) in ("active", "trialing"):
+                    subscription_id = s.id
+                    break
+            if not subscription_id and subs.data:
+                subscription_id = subs.data[0].id
+        except Exception as e:
+            print(f"[CANCEL_SUBSCRIPTION] ⚠️ Failed listing subscriptions for customer {stripe_customer_id}: {e}")
+
+    if not subscription_id:
+        raise HTTPException(status_code=400, detail="No active Stripe subscription found for this user.")
+
+    try:
+        if payload.at_period_end:
+            sub = stripe.Subscription.modify(subscription_id, cancel_at_period_end=True)
+            print(f"[CANCEL_SUBSCRIPTION] ✅ Scheduled cancellation at period end for sub {subscription_id} (mode={stripe_mode})")
+            # Best-effort: store the time the user requested cancellation (does NOT change tier gating).
+            try:
+                if supabase_client and supabase_client.client:
+                    await asyncio.to_thread(
+                        lambda: supabase_client.client.table("user_subscriptions")
+                        .update({"canceled_at": datetime.utcnow().isoformat()})
+                        .eq("user_id", payload.user_id)
+                        .execute()
+                    )
+            except Exception:
+                pass
+            return {
+                "success": True,
+                "mode": stripe_mode,
+                "subscription_id": subscription_id,
+                "cancel_at_period_end": True,
+                "current_period_end": datetime.fromtimestamp(sub.current_period_end).isoformat() if getattr(sub, "current_period_end", None) else None,
+                "status": getattr(sub, "status", None),
+            }
+        else:
+            sub = stripe.Subscription.delete(subscription_id)
+            print(f"[CANCEL_SUBSCRIPTION] ✅ Canceled immediately sub {subscription_id} (mode={stripe_mode})")
+            return {
+                "success": True,
+                "mode": stripe_mode,
+                "subscription_id": subscription_id,
+                "cancel_at_period_end": False,
+                "status": getattr(sub, "status", None),
+            }
+    except Exception as e:
+        print(f"[CANCEL_SUBSCRIPTION] ❌ Failed to cancel subscription: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Failed to cancel subscription: {str(e)}")
 
 
 @app.get("/debug/stripe-customer")

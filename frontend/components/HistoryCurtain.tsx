@@ -278,6 +278,10 @@ export default function HistoryCurtain({
       alert("Sign in to manage your subscription.");
       return;
     }
+
+    // Popup blockers (especially Safari) often block window.open if it happens after an async await.
+    // Open a blank tab synchronously, then navigate it once we have the portal URL.
+    const popup = typeof window !== "undefined" ? window.open("about:blank", "_blank") : null;
     
     // Get user email from Supabase client
     let userEmail: string | undefined;
@@ -304,9 +308,26 @@ export default function HistoryCurtain({
         throw new Error(errorText);
       }
       const data = await res.json();
-      if (data?.url) window.open(data.url, "_blank", "noopener,noreferrer");
+      if (data?.url) {
+        if (popup) {
+          try {
+            popup.opener = null;
+          } catch {
+            // ignore
+          }
+          popup.location.href = data.url;
+        } else {
+          // Fallback if popup was blocked
+          window.location.href = data.url;
+        }
+      }
       else throw new Error("No portal URL returned.");
     } catch (e: any) {
+      try {
+        popup?.close();
+      } catch {
+        // ignore
+      }
       // Try to parse error message
       let errorMsg = e?.message || "Failed to open billing portal.";
       try {
@@ -378,9 +399,47 @@ export default function HistoryCurtain({
     if (!confirm("Are you sure you want to cancel your subscription? You'll continue to have access until the end of your billing period.")) {
       return;
     }
-    
-    // Open billing portal where they can cancel
-    await handleManageSubscription();
+
+    // Prefer API cancellation (no portal required). Fallback to portal if needed.
+    let userEmail: string | undefined;
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      userEmail = user?.email || undefined;
+    } catch {
+      userEmail = undefined;
+    }
+
+    try {
+      const url = `${backendBase.replace(/\/$/, "")}/billing/cancel-subscription`;
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          user_id: userId,
+          at_period_end: true,
+          user_email: userEmail,
+        }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      const data = await res.json();
+      // Refresh subscription display
+      try {
+        const subUrl = `${backendBase.replace(/\/$/, "")}/profile/subscription?user_id=${encodeURIComponent(userId)}`;
+        const subRes = await fetch(subUrl);
+        if (subRes.ok) setSubscriptionInfo(await subRes.json());
+      } catch {
+        // ignore
+      }
+      alert(
+        data?.current_period_end
+          ? `Subscription will cancel at period end (${formatDate(data.current_period_end)}).`
+          : "Subscription cancellation scheduled."
+      );
+    } catch (e: any) {
+      // If API cancel fails, send them to the billing portal (still useful for edge cases)
+      console.warn("Cancel subscription failed; falling back to portal:", e);
+      await handleManageSubscription();
+    }
   };
 
   const linkedAccounts = (profilePreferences?.accounts ?? []).map((account, index) => ({
