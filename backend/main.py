@@ -7270,12 +7270,84 @@ async def cancel_subscription(payload: CancelSubscriptionPayload):
     stripe.api_key = stripe_secret
     stripe_mode = "test" if stripe_secret.startswith("sk_test_") else "live"
 
-    # Try to get subscription id from Supabase first
-    overview = await asyncio.to_thread(supabase_client.get_subscription_overview, payload.user_id, False)
-    stripe_customer_id = overview.get("stripe_customer_id")
-    subscription_id = overview.get("stripe_subscription_id")
+    # IMPORTANT: Do NOT use get_subscription_overview() here because it intentionally strips Stripe IDs
+    # when status is not active/trialing. Cancellation must work even if our local status is stale.
+    stripe_customer_id: Optional[str] = None
+    subscription_id: Optional[str] = None
+    try:
+        raw = await asyncio.to_thread(
+            lambda: supabase_client.client.table("user_subscriptions")
+            .select("stripe_customer_id,stripe_subscription_id,status,tier_id")
+            .eq("user_id", payload.user_id)
+            .limit(1)
+            .execute()
+        )
+        row = (raw.data[0] if getattr(raw, "data", None) else None) or None
+        stripe_customer_id = (row or {}).get("stripe_customer_id")
+        subscription_id = (row or {}).get("stripe_subscription_id")
+        print(f"[CANCEL_SUBSCRIPTION] Raw DB ids for user {payload.user_id}: customer={stripe_customer_id}, subscription={subscription_id}")
+    except Exception as e:
+        print(f"[CANCEL_SUBSCRIPTION] ⚠️ Failed reading raw subscription row: {e}")
 
-    # Fallback: list subscriptions by customer if needed
+    # Validate stored subscription id (can be stale or from another Stripe env/account)
+    if subscription_id:
+        try:
+            sub_obj = stripe.Subscription.retrieve(subscription_id)
+            # If subscription is already canceled, we can return a helpful response
+            if getattr(sub_obj, "status", None) == "canceled":
+                return {
+                    "success": True,
+                    "mode": stripe_mode,
+                    "subscription_id": subscription_id,
+                    "already_canceled": True,
+                    "status": "canceled",
+                }
+        except Exception as e:
+            msg = str(e)
+            if "No such subscription" in msg or "resource_missing" in msg:
+                print(f"[CANCEL_SUBSCRIPTION] ⚠️ Stored subscription {subscription_id} not found in this Stripe account ({stripe_mode}); will re-resolve by customer/email.")
+                subscription_id = None
+            else:
+                print(f"[CANCEL_SUBSCRIPTION] ⚠️ Error validating subscription {subscription_id}: {e}")
+
+    # Validate stored customer id (can be stale or from another Stripe env/account)
+    if stripe_customer_id:
+        try:
+            stripe.Customer.retrieve(stripe_customer_id)
+        except Exception as e:
+            msg = str(e)
+            if "No such customer" in msg or "resource_missing" in msg:
+                print(f"[CANCEL_SUBSCRIPTION] ⚠️ Stored customer {stripe_customer_id} not found in this Stripe account ({stripe_mode}); will re-resolve by email.")
+                stripe_customer_id = None
+            else:
+                print(f"[CANCEL_SUBSCRIPTION] ⚠️ Error validating customer {stripe_customer_id}: {e}")
+
+    # If we don't have a valid customer id, attempt to locate by email (best-effort)
+    if not stripe_customer_id and payload.user_email:
+        try:
+            customers = stripe.Customer.list(email=payload.user_email, limit=10)
+            if customers.data:
+                # Prefer a customer with an active/trialing subscription
+                picked = None
+                for c in customers.data:
+                    try:
+                        subs = stripe.Subscription.list(customer=c.id, status="all", limit=10)
+                        if any(getattr(s, "status", None) in ("active", "trialing") for s in subs.data):
+                            picked = c.id
+                            break
+                    except Exception:
+                        continue
+                stripe_customer_id = picked or customers.data[0].id
+                await asyncio.to_thread(
+                    supabase_client.upsert_user_subscription,
+                    user_id=payload.user_id,
+                    stripe_customer_id=stripe_customer_id,
+                )
+                print(f"[CANCEL_SUBSCRIPTION] ✅ Relinked Stripe customer {stripe_customer_id} to user {payload.user_id} via email")
+        except Exception as e:
+            print(f"[CANCEL_SUBSCRIPTION] ⚠️ Failed to resolve customer by email: {e}")
+
+    # Resolve subscription id by listing subscriptions for the customer if needed
     if not subscription_id and stripe_customer_id:
         try:
             subs = stripe.Subscription.list(customer=stripe_customer_id, status="all", limit=10)
@@ -7286,6 +7358,17 @@ async def cancel_subscription(payload: CancelSubscriptionPayload):
                     break
             if not subscription_id and subs.data:
                 subscription_id = subs.data[0].id
+            if subscription_id:
+                try:
+                    await asyncio.to_thread(
+                        supabase_client.upsert_user_subscription,
+                        user_id=payload.user_id,
+                        stripe_customer_id=stripe_customer_id,
+                        stripe_subscription_id=subscription_id,
+                    )
+                    print(f"[CANCEL_SUBSCRIPTION] ✅ Stored subscription id {subscription_id} for user {payload.user_id}")
+                except Exception:
+                    pass
         except Exception as e:
             print(f"[CANCEL_SUBSCRIPTION] ⚠️ Failed listing subscriptions for customer {stripe_customer_id}: {e}")
 

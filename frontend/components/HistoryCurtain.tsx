@@ -436,9 +436,16 @@ export default function HistoryCurtain({
           : "Subscription cancellation scheduled."
       );
     } catch (e: any) {
-      // If API cancel fails, send them to the billing portal (still useful for edge cases)
-      console.warn("Cancel subscription failed; falling back to portal:", e);
-      await handleManageSubscription();
+      // Do NOT redirect off-site on failure. Show the error and let the user decide.
+      console.warn("Cancel subscription failed:", e);
+      let errorMsg = e?.message || "Failed to cancel subscription.";
+      try {
+        const errorJson = JSON.parse(errorMsg);
+        errorMsg = errorJson.detail || errorMsg;
+      } catch {
+        // Not JSON, use as-is
+      }
+      alert(errorMsg);
     }
   };
 
